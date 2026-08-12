@@ -1,0 +1,66 @@
+---
+description: Fork 发行版部署与上游合并保护（install.sh / Release / 仓库身份）
+alwaysApply: true
+---
+
+# JasonWangJie/sub2api Fork 发行版约定
+
+本仓库是 `Wei-Shaw/sub2api` 的 Fork，目标是可一键安装的软件发行版，不是仅开发环境。
+
+## 固定身份（方案 A：保留项目名 sub2api）
+
+| 项 | 必须值 |
+|---|---|
+| GitHub 仓库 | `JasonWangJie/sub2api` |
+| 安装目录 | `/opt/sub2api` |
+| 配置目录 | `/opt/sub2api/config.yaml`（`DATA_DIR=/opt/sub2api`） |
+| 二进制 / 产物名 | `sub2api` / `sub2api_{version}_{os}_{arch}.tar.gz` |
+| 一键安装 | `curl -sSL https://raw.githubusercontent.com/JasonWangJie/sub2api/main/deploy/install.sh \| sudo bash` |
+| 一键升级 | `curl -sSL https://raw.githubusercontent.com/JasonWangJie/sub2api/main/deploy/upgrade.sh \| sudo bash` |
+| 操作手册 | 根目录 `发行版发布与安装操作手册.md`（版本号规则、打 tag、安装） |
+
+版本号：源码见 `backend/cmd/server/VERSION`；发版以 Git tag `v*` 为准。
+支持三段（跟上游，如 `v0.1.162`）与四段（Fork 中途更新，如 `v0.1.162.1`）。
+合并上游后若对方有版本号则跟对方三段号；中途自研用四段递增。操作见根目录 `发行版发布与安装操作手册.md`。
+
+禁止把上述地址改回 `Wei-Shaw/sub2api`（定价源等上游第三方 URL 除外）。
+
+## 部署设计：保留原结构，只改身份
+
+- 不要删除或重写：`deploy/install.sh`、`sub2api.service`、`config.example.yaml`、Release/GoReleaser 主流程
+- 不要改为要求用户 `git clone` + `go build` + `npm/pnpm install`
+- `upgrade.sh` 必须保留；升级须备份二进制与 `config.yaml` 后替换并 restart systemd
+- systemd 须含 `Environment=DATA_DIR=/opt/sub2api`（配置为 `/opt/sub2api/config.yaml`）
+
+## Release / CI
+
+- `git tag v*` → Actions → GoReleaser **完整发布**（禁止默认 SIMPLE_RELEASE）
+- 产物至少含：`sub2api_*_linux_amd64.tar.gz`、`sub2api_*_linux_arm64.tar.gz`、`checksums.txt`
+- 忽略会破坏 `install.sh` 的 `vars.SIMPLE_RELEASE`；仅手动 workflow_dispatch 显式勾选才允许简化发布
+- DockerHub / Telegram 无 secret 时跳过即可
+
+## 上游合并冲突（强制）
+
+合并 `upstream`（`Wei-Shaw/sub2api`）时，下列 **Fork 身份不得被上游覆盖**：
+
+- `deploy/install.sh`（`GITHUB_REPO`、`DATA_DIR`、`backup_config`、文档 URL）
+- `deploy/upgrade.sh`（整文件，上游没有则保留）
+- `deploy/sub2api.service`
+- `deploy/docker-deploy.sh`、`deploy/README.md` 中的 raw/clone URL
+- `.github/workflows/release.yml`（完整 Release 默认、资产校验）
+- `.goreleaser.yaml` / `.goreleaser.simple.yaml` 中的 Fork 说明与 install/upgrade footer
+- `Dockerfile.goreleaser`、`deploy/Dockerfile` 的 `image.source`
+- 本规则文件与 `AGENTS.md` 中的 Fork 发行版章节
+
+冲突处理：
+
+1. 先合入上游功能/修复
+2. 再检查并恢复上表 Fork 身份（搜 `Wei-Shaw/sub2api` 在 deploy/CI 中的误回退）
+3. 不得用 `git checkout --theirs` 整文件丢弃 Fork 定制
+4. 合并后跑：`grep -R "Wei-Shaw/sub2api" deploy .github .goreleaser* Dockerfile.goreleaser`，除注明的上游依赖外应为 0
+
+## 配置方向
+
+- 二进制发行路径：运行配置以 `/opt/sub2api/config.yaml` 为准（`DATA_DIR=/opt/sub2api`）
+- Docker 路径可继续用 `.env`（与原作者一致）；不要为了统一配置而拆掉 Docker 部署
+- 逐步弱化 env 覆盖，但保持兼容，禁止一次性重写配置系统

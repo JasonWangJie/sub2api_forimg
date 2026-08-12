@@ -1,0 +1,228 @@
+/* Shared markdown documentation page styles (CustomPage + Guide Docs) */
+
+.markdown-page-content {
+  line-height: 1.75;
+  color: #1f2937;
+}
+
+html.dark .markdown-page-content {
+  color: #e5e7eb;
+}
+
+.markdown-page-content > :first-child {
+  margin-top: 0;
+}
+
+.markdown-page-content h1 {
+  @apply text-3xl font-bold mt-8 mb-4 pb-2 border-b;
+  color: #030712;
+  border-color: #e5e7eb;
+}
+
+html.dark .markdown-page-content h1 {
+  color: #ffffff;
+  border-color: #374151;
+}
+
+.markdown-page-content h2 {
+  @apply text-2xl font-bold mt-8 mb-3;
+  color: #030712;
+}
+
+html.dark .markdown-page-content h2 {
+  color: #ffffff;
+}
+
+.markdown-page-content h3 {
+  @apply text-xl font-semibold mt-5 mb-2;
+  color: #111827;
+}
+
+html.dark .markdown-page-content h3 {
+  color: #ffffff;
+}
+
+.markdown-page-content h4 {
+  @apply text-lg font-semibold mt-4 mb-2;
+  color: #111827;
+}
+
+html.dark .markdown-page-content h4 {
+  color: #ffffff;
+}
+
+.markdown-page-content p {
+  @apply mb-4;
+  color: #374151;
+}
+
+html.dark .markdown-page-content p {
+  color: #d1d5db;
+}
+
+.markdown-page-content ul {
+  @apply list-disc pl-6 mb-4;
+  color: #374151;
+}
+
+html.dark .markdown-page-content ul {
+  color: #d1d5db;
+}
+
+.markdown-page-content ol {
+  @apply list-decimal pl-6 mb-4;
+  color: #374151;
+}
+
+html.dark .markdown-page-content ol {
+  color: #d1d5db;
+}
+
+.markdown-page-content li {
+  @apply mb-1.5;
+}
+
+.markdown-page-content li::marker {
+  color: #6b7280;
+}
+
+html.dark .markdown-page-content li::marker {
+  color: #9ca3af;
+}
+
+.markdown-page-content strong {
+  @apply font-semibold;
+  color: #111827;
+}
+
+html.dark .markdown-page-content strong {
+  color: #ffffff;
+}
+
+.markdown-page-content a {
+  @apply underline underline-offset-2;
+  color: #0d9488;
+}
+
+.markdown-page-content a:hover {
+  color: #0f766e;
+}
+
+html.dark .markdown-page-content a {
+  color: #2dd4bf;
+}
+
+html.dark .markdown-page-content a:hover {
+  color: #5eead4;
+}
+
+.markdown-page-content blockquote {
+  @apply border-l-4 pl-4 italic my-4;
+  border-color: #5eead4;
+  color: #4b5563;
+}
+
+html.dark .markdown-page-content blockquote {
+  border-color: #0f766e;
+  color: #9ca3af;
+}
+
+.markdown-page-content img {
+  @apply max-w-full h-auto rounded-lg my-4;
+}
+
+.markdown-page-content table {
+  @apply w-full border-collapse my-4;
+}
+
+.markdown-page-content th,
+.markdown-page-content td {
+  @apply px-3 py-2 border;
+  border-color: #d1d5db;
+}
+
+html.dark .markdown-page-content th,
+html.dark .markdown-page-content td {
+  border-color: #4b5563;
+}
+
+.markdown-page-content th {
+  @apply font-semibold text-left;
+  background: #f9fafb;
+}
+
+html.dark .markdown-page-content th {
+  background: #374151;
+  color: #f3f4f6;
+}
+
+.markdown-page-content code {
+  @apply px-1.5 py-0.5 rounded text-[0.875em] font-mono;
+  background: #f3f4f6;
+  color: #1f2937;
+}
+
+html.dark .markdown-page-content code {
+  background: #374151;
+  color: #f3f4f6;
+}
+
+.markdown-page-content pre {
+  @apply p-4 pr-16 rounded-xl overflow-x-auto my-4 relative border;
+  background: #111827;
+  color: #f3f4f6;
+  border-color: rgba(31, 41, 55, 0.6);
+}
+
+html.dark .markdown-page-content pre {
+  background: #030712;
+  border-color: #374151;
+}
+
+.markdown-page-content pre code {
+  @apply bg-transparent p-0 text-sm leading-relaxed;
+  color: inherit;
+  background: transparent;
+}
+
+html.dark .markdown-page-content pre code {
+  background: transparent;
+  color: inherit;
+}
+
+.markdown-page-content hr {
+  @apply my-8 border-0 border-t;
+  border-color: #e5e7eb;
+}
+
+html.dark .markdown-page-content hr {
+  border-color: #374151;
+}
+
+.markdown-page-content .copy-btn,
+.copy-btn {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  padding: 4px 10px;
+  font-size: 12px;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.12);
+  color: #e2e8f0;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.2s, background 0.2s;
+  font-family: inherit;
+  line-height: 1.4;
+}
+
+.markdown-page-content .copy-btn:hover,
+.copy-btn:hover {
+  background: rgba(255, 255, 255, 0.22);
+}
+
+.markdown-page-content pre:hover .copy-btn,
+pre:hover .copy-btn {
+  opacity: 1;
+}

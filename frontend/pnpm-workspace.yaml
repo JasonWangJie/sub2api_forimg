@@ -1,0 +1,8 @@
+# Single-package workspace: required by pnpm 9 when this file exists.
+# allowBuilds is used by pnpm 10+ for dependency build script approval.
+packages:
+  - '.'
+
+allowBuilds:
+  esbuild: true
+  vue-demi: true
