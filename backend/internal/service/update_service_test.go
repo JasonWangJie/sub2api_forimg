@@ -218,10 +218,10 @@ func TestUpdateServiceCheckUpdateDualSource(t *testing.T) {
 				forkGithubRepo: {
 					TagName: "v0.1.162.1",
 					Name:    "fork",
-					HTMLURL: "https://github.com/JasonWangJie/sub2api/releases/tag/v0.1.162.1",
+					HTMLURL: "https://github.com/JasonWangJie/sub2api_forimg/releases/tag/v0.1.162.1",
 					Assets: []GitHubAsset{{
 						Name:               "sub2api_0.1.162.1_linux_amd64.tar.gz",
-						BrowserDownloadURL: "https://github.com/JasonWangJie/sub2api/releases/download/v0.1.162.1/a.tar.gz",
+						BrowserDownloadURL: "https://github.com/JasonWangJie/sub2api_forimg/releases/download/v0.1.162.1/a.tar.gz",
 					}},
 				},
 				upstreamGithubRepo: {

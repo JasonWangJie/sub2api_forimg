@@ -290,7 +290,7 @@
                   </div>
                 </template>
 
-                <!-- Fork update available (release build) — apply from JasonWangJie/sub2api -->
+                <!-- Fork update available (release build) — apply from JasonWangJie/sub2api_forimg -->
                 <template v-else-if="hasForkUpdate && isReleaseBuild">
                   <div
                     class="flex items-center gap-3 rounded-lg border border-amber-200 bg-amber-50 p-3 dark:border-amber-800/50 dark:bg-amber-900/20"
@@ -695,9 +695,9 @@ import {
 import { useClipboard } from '@/composables/useClipboard'
 import Icon from '@/components/icons/Icon.vue'
 
-const GITHUB_REPO = 'JasonWangJie/sub2api'
-// Docker Hub image from CI when DOCKERHUB_USERNAME is set (tags without "v")
-const DOCKER_IMAGE = 'weishaw/sub2api'
+const GITHUB_REPO = 'JasonWangJie/sub2api_forimg'
+// Fork image published by the Release workflow (tags omit the leading "v")
+const DOCKER_IMAGE = 'ghcr.io/jasonwangjie/sub2api_forimg'
 
 const { t } = useI18n()
 

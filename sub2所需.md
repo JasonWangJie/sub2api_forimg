@@ -13,7 +13,7 @@ rsync -avzP /opt/sub2api/data/image_durable root@64.32.27.60:/opt/sub2api/data
 rsync -avzP /www/sub2-api-monitoring/cursor版/data root@64.32.27.60:/www/sub2-api-monitoring/cursor版/
 
 
-curl -sSL https://raw.githubusercontent.com/Wei-Shaw/sub2api/main/deploy/install.sh | sudo bash
+curl -sSL https://raw.githubusercontent.com/JasonWangJie/sub2api_forimg/main/deploy/install.sh | sudo bash
 # 1. 启动服务
 sudo systemctl start sub2api
 sudo systemctl stop sub2api
@@ -35,7 +35,7 @@ sudo journalctl -u sub2api -f
 sudo systemctl restart sub2api
 
 # 卸载
-curl -sSL https://raw.githubusercontent.com/Wei-Shaw/sub2api/main/deploy/install.sh | sudo bash -s -- uninstall -y
+curl -sSL https://raw.githubusercontent.com/JasonWangJie/sub2api_forimg/main/deploy/install.sh | sudo bash -s -- uninstall -y
 
 
 

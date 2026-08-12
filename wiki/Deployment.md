@@ -21,7 +21,7 @@
 
 ```bash
 mkdir -p sub2api-deploy && cd sub2api-deploy
-curl -sSL https://raw.githubusercontent.com/Wei-Shaw/sub2api/main/deploy/docker-deploy.sh | bash
+curl -sSL https://raw.githubusercontent.com/JasonWangJie/sub2api_forimg/main/deploy/docker-deploy.sh | bash
 docker compose up -d
 docker compose logs -f sub2api
 ```
@@ -70,7 +70,7 @@ tar czf sub2api-complete.tar.gz sub2api-deploy/
 ## 方式 B：二进制安装
 
 ```bash
-curl -sSL https://raw.githubusercontent.com/Wei-Shaw/sub2api/main/deploy/install.sh | sudo bash
+curl -sSL https://raw.githubusercontent.com/JasonWangJie/sub2api_forimg/main/deploy/install.sh | sudo bash
 sudo systemctl enable --now sub2api
 ```
 
@@ -83,7 +83,7 @@ sudo systemctl status sub2api
 sudo journalctl -u sub2api -f
 sudo systemctl restart sub2api
 # 卸载
-curl -sSL https://raw.githubusercontent.com/Wei-Shaw/sub2api/main/deploy/install.sh | sudo bash -s -- uninstall -y
+curl -sSL https://raw.githubusercontent.com/JasonWangJie/sub2api_forimg/main/deploy/install.sh | sudo bash -s -- uninstall -y
 ```
 
 管理后台左上角支持「检测更新」在线升级（二进制场景）。
@@ -93,8 +93,8 @@ curl -sSL https://raw.githubusercontent.com/Wei-Shaw/sub2api/main/deploy/install
 ## 方式 C：源码编译
 
 ```bash
-git clone https://github.com/Wei-Shaw/sub2api.git
-cd sub2api
+git clone https://github.com/JasonWangJie/sub2api_forimg.git
+cd sub2api_forimg
 
 cd frontend && pnpm install && pnpm run build && cd ..
 

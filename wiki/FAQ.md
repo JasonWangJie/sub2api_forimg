@@ -89,6 +89,6 @@ A: `go generate ./ent` 与 `go generate ./cmd/server`。
 
 ## 还有问题？
 
-- 搜索 GitHub Issues：https://github.com/Wei-Shaw/sub2api/issues  
+- 搜索 GitHub Issues：https://github.com/JasonWangJie/sub2api_forimg/issues
 - 对照 [运维与排障](Operations.md) 检查清单  
 - 阅读官方 [README_CN.md](../README_CN.md)

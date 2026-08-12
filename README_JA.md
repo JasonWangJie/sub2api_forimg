@@ -10,13 +10,15 @@
 [![Redis](https://img.shields.io/badge/Redis-7+-DC382D.svg)](https://redis.io/)
 [![Docker](https://img.shields.io/badge/Docker-Ready-2496ED.svg)](https://www.docker.com/)
 
-<a href="https://trendshift.io/repositories/21823" target="_blank"><img src="https://trendshift.io/api/badge/repositories/21823" alt="Wei-Shaw%2Fsub2api | Trendshift" width="250" height="55"/></a>
+[![Release](https://img.shields.io/github/v/release/JasonWangJie/sub2api_forimg?display_name=tag)](https://github.com/JasonWangJie/sub2api_forimg/releases)
 
 **サブスクリプションクォータ配分のための AI API ゲートウェイプラットフォーム**
 
 [English](README.md) | [中文](README_CN.md) | 日本語
 
 </div>
+
+> このディストリビューションは [`JasonWangJie/sub2api_forimg`](https://github.com/JasonWangJie/sub2api_forimg) で管理されています。以下のインストール、アップグレード、Docker イメージ、Release はすべてこの Fork を使用します。
 
 ## ⚠️ 重要なお知らせ
 
@@ -232,7 +234,7 @@ GitHub Releases からビルド済みバイナリをダウンロードするワ�
 #### インストール手順
 
 ```bash
-curl -sSL https://raw.githubusercontent.com/Wei-Shaw/sub2api/main/deploy/install.sh | sudo bash
+curl -sSL https://raw.githubusercontent.com/JasonWangJie/sub2api_forimg/main/deploy/install.sh | sudo bash
 ```
 
 スクリプトは以下を実行します:
@@ -282,7 +284,7 @@ sudo journalctl -u sub2api -f
 sudo systemctl restart sub2api
 
 # アンインストール
-curl -sSL https://raw.githubusercontent.com/Wei-Shaw/sub2api/main/deploy/install.sh | sudo bash -s -- uninstall -y
+curl -sSL https://raw.githubusercontent.com/JasonWangJie/sub2api_forimg/main/deploy/install.sh | sudo bash -s -- uninstall -y
 ```
 
 ---
@@ -305,7 +307,7 @@ PostgreSQL と Redis のコンテナを含む Docker Compose でデプロイし�
 mkdir -p sub2api-deploy && cd sub2api-deploy
 
 # デプロイ準備スクリプトをダウンロードして実行
-curl -sSL https://raw.githubusercontent.com/Wei-Shaw/sub2api/main/deploy/docker-deploy.sh | bash
+curl -sSL https://raw.githubusercontent.com/JasonWangJie/sub2api_forimg/main/deploy/docker-deploy.sh | bash
 
 # サービスを起動
 docker compose up -d
@@ -327,7 +329,7 @@ docker compose logs -f sub2api
 
 ```bash
 # 1. リポジトリをクローン
-git clone https://github.com/Wei-Shaw/sub2api.git
+git clone https://github.com/JasonWangJie/sub2api_forimg.git
 cd sub2api/deploy
 
 # 2. 環境設定ファイルをコピー
@@ -457,7 +459,7 @@ rm -rf data/ postgres_data/ redis_data/
 Apple シリコン搭載 Mac と macOS 26 では、Apple `container` 1.1.0 以降を使用して Sub2API、PostgreSQL、Redis の完全なスタックを実行できます:
 
 ```bash
-git clone https://github.com/Wei-Shaw/sub2api.git
+git clone https://github.com/JasonWangJie/sub2api_forimg.git
 cd sub2api/deploy
 ./apple-container.sh init
 ./apple-container.sh up
@@ -483,7 +485,7 @@ cd sub2api/deploy
 
 ```bash
 # 1. リポジトリをクローン
-git clone https://github.com/Wei-Shaw/sub2api.git
+git clone https://github.com/JasonWangJie/sub2api_forimg.git
 cd sub2api
 
 # 2. pnpm をインストール（未インストールの場合）
@@ -722,11 +724,11 @@ sub2api/
 
 ## スター履歴
 
-<a href="https://star-history.com/#Wei-Shaw/sub2api&Date">
+<a href="https://star-history.com/#JasonWangJie/sub2api_forimg&Date">
  <picture>
-   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=Wei-Shaw/sub2api&type=Date&theme=dark" />
-   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/svg?repos=Wei-Shaw/sub2api&type=Date" />
-   <img alt="Star History Chart" src="https://api.star-history.com/svg?repos=Wei-Shaw/sub2api&type=Date" />
+   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=JasonWangJie/sub2api_forimg&type=Date&theme=dark" />
+   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/svg?repos=JasonWangJie/sub2api_forimg&type=Date" />
+   <img alt="Star History Chart" src="https://api.star-history.com/svg?repos=JasonWangJie/sub2api_forimg&type=Date" />
  </picture>
 </a>
 

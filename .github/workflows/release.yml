@@ -1,6 +1,6 @@
 name: Release
 
-# FORK_IDENTITY: JasonWangJie/sub2api
+# FORK_IDENTITY: JasonWangJie/sub2api_forimg
 # 默认完整二进制 Release（install.sh 依赖）。合并 upstream 时保留本约定，勿恢复为可被 SIMPLE_RELEASE 变量静默跳过二进制的行为。
 
 on:
@@ -296,7 +296,8 @@ jobs:
           if [ -n "$DOCKERHUB_USERNAME" ]; then
             MESSAGE+="• [Docker Hub](https://hub.docker.com/r/${DOCKER_IMAGE})"$'\n'
           fi
-          MESSAGE+="• [GitHub Packages](https://github.com/${REPO}/pkgs/container/sub2api)"$'\n'$'\n'
+          PACKAGE_NAME="${REPO#*/}"
+          MESSAGE+="• [GitHub Packages](https://github.com/${REPO}/pkgs/container/${PACKAGE_NAME})"$'\n'$'\n'
           MESSAGE+="#Sub2API #Release #${TAG_NAME//./_}"
 
           # 发送消息

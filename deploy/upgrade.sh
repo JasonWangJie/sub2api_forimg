@@ -2,8 +2,8 @@
 #
 # Sub2API Upgrade Script
 # Sub2API 升级脚本
-# FORK_IDENTITY: JasonWangJie/sub2api — 合并 upstream 时禁止删除本文件或改回 Wei-Shaw
-# Usage: curl -sSL https://raw.githubusercontent.com/JasonWangJie/sub2api/main/deploy/upgrade.sh | sudo bash
+# FORK_IDENTITY: JasonWangJie/sub2api_forimg — 合并 upstream 时禁止删除本文件或改回 Wei-Shaw
+# Usage: curl -sSL https://raw.githubusercontent.com/JasonWangJie/sub2api_forimg/main/deploy/upgrade.sh | sudo bash
 #
 # Thin wrapper around install.sh upgrade: downloads the latest release binary,
 # backs up the binary and config.yaml, replaces the program, and restarts systemd.
@@ -11,7 +11,7 @@
 
 set -e
 
-GITHUB_REPO="${SUB2API_GITHUB_REPO:-JasonWangJie/sub2api}"
+GITHUB_REPO="${SUB2API_GITHUB_REPO:-JasonWangJie/sub2api_forimg}"
 BRANCH="${SUB2API_BRANCH:-main}"
 INSTALL_SCRIPT_URL="https://raw.githubusercontent.com/${GITHUB_REPO}/${BRANCH}/deploy/install.sh"
 

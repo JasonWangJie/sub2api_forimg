@@ -14,7 +14,7 @@ Example: `017_add_gemini_tier_id.sql`
 
 ### Fork 自研迁移标记
 
-原作者迁移继续保持 `NNN_description.sql`。`JasonWangJie/sub2api` Fork 自行开发的新迁移统一使用 `NNN_ZJ_description.sql`，例如 `189_ZJ_async_image_result_upload_intents.sql`，避免后续同步原作者代码时混淆归属或发生同名冲突。
+原作者迁移继续保持 `NNN_description.sql`。`JasonWangJie/sub2api_forimg` Fork 自行开发的新迁移统一使用 `NNN_ZJ_description.sql`，例如 `189_ZJ_async_image_result_upload_intents.sql`，避免后续同步原作者代码时混淆归属或发生同名冲突。
 
 已经发布的 `182_add_image_plaza.sql` 和 `185` 至 `189` 曾使用无标记文件名。迁移器仅为这六个文件保留严格的旧名兼容：旧记录 checksum 与当前 `_ZJ` 文件完全一致时，只登记新文件名别名而不重复执行 SQL；checksum 不一致时拒绝启动。不得为普通重命名随意扩展该白名单。
 

@@ -1,6 +1,6 @@
 # Sub2API Fork 二次开发总览
 
-> 本文件只记录 `JasonWangJie/sub2api` Fork 的二次开发与交接信息，不替代、覆盖或改写原作者的 `README*.md`、`docs/` 或 `wiki/`。原项目安装和基础使用说明仍以原作者文档为准。
+> 本文件只记录 `JasonWangJie/sub2api_forimg` Fork 的二次开发与交接信息。安装、升级、在线更新和 Release 以当前仓库文档为准；原作者文档仅作为上游参考。
 
 ## 从这里开始
 
@@ -34,7 +34,7 @@
 | 功能代码主线合并提交 | `a9d23973d352c9923eccdaf789ffd2598d9d0ffe` |
 | 合并提交描述 | `v0.1.162-52-ga9d23973d` |
 | 功能分支推送 | `origin/feat/image-workflow-library-moderation` 已推送 |
-| Fork CI | `BLOCKED`：Actions 页面显示 `Enable Actions`，仓库历史运行数为 0 |
+| Fork CI | 旧仓库在 `2026-07-22` 为 `BLOCKED`；新仓库需在首次发版时核对 `sub2api_forimg/actions` 实际结果 |
 | 合并并推送 `origin/main` | `COMPLETED`：按用户明确指示绕过原 CI 等待顺序，非强制合并并推送 |
 
 本轮不主动修改 `0.1.162` 发布版本号。最终交付必须同时报告 `VERSION`、完整 SHA、`git describe`、推送分支和 CI 链接/结果。
@@ -163,14 +163,14 @@
 - 历史本机 Chrome Playwright 10 个场景曾覆盖 `360/768/1280/1440/1920`、中英文和深浅主题；横向溢出、控件裁剪及 console error 均为 0，键盘焦点、工作台 `aria-live`、广场 dialog 焦点进入/关闭恢复均通过。该证据早于最后一批 SC/后台配置和上游合并，只作为历史基线。
 - 首页 WebP 为 `79,374` 字节，已成功随页面加载。
 
-这些本地结果覆盖迁移 `187`、最后一批 SC 上传代码和本轮上游合并；`188` 与延期投稿相关改动已有定向 Go/Vitest 通过，但尚未作为独立提交合入 `origin/main`。`main` 已交付，但 GitHub Actions 仍必须在 Fork 启用后实际运行，浏览器复验仍需在连接器可用的环境补做。
+这些本地结果覆盖迁移 `187`、最后一批 SC 上传代码和本轮上游合并；`188` 与延期投稿相关改动已有定向 Go/Vitest 通过，但尚未作为独立提交合入 `origin/main`。旧仓库的 GitHub Actions 证据不代表新仓库；新仓库首次发版必须在 `https://github.com/JasonWangJie/sub2api_forimg/actions` 核对实际运行，浏览器复验仍需在连接器可用的环境补做。
 
 以下交付项仍是 `PENDING`，不能写成已完成：
 
 - 真实 PostgreSQL/testcontainers 下的两阶段 admission、多 Worker、租约恢复、Outbox 重放、intent/OSS 部分失败、对象引用和 `185/186/187/188` 迁移验证。
 - 合并后的桌面/移动端浏览器视觉复验；当前内置浏览器连接器被环境元数据阻断。
 - 七牛、阿里、腾讯真实凭证，以及真实 Gemini/OpenAI/Grok 生成和逐笔计费联调。
-- Fork Actions 尚未启用：公开 Actions 页面显示 `Enable Actions`，API 对功能分支和全仓均返回 0 个历史运行。本次根据用户明确指示已先合并并推送 `main`；启用 Actions 后历史 push 不会自动回放，需要在 `main` 创建一个明确的空 CI 触发提交并推送，再核对 CI/Security Scan。
+- 新仓库 Actions 状态尚未写入本地验收证据：首次发版前确认工作流已启用；推送新 tag 后在 `sub2api_forimg/actions` 核对 Release、CI 与 Security Scan 的实际结果。
 
 最新状态与已经执行过的测试证据只看 [wiki-new/当前状态与完成度.md](wiki-new/当前状态与完成度.md) 和 [wiki-new/测试与验收记录.md](wiki-new/测试与验收记录.md)，不要根据早期聊天记录推断“已经通过”。
 
@@ -196,7 +196,7 @@
 
 | 远程 | 用途 |
 |---|---|
-| `origin` | 用户 Fork：`JasonWangJie/sub2api`；后续默认直接推送 `main` |
+| `origin` | 用户 Fork：`JasonWangJie/sub2api_forimg`；后续默认直接推送 `main` |
 | `upstream` | 原作者：`Wei-Shaw/sub2api`，只用于获取和合并原作者更新 |
 
 不得推送到 `upstream`，不得对共享 `main` 强制推送，也不得为了同步上游使用 `git reset --hard` 覆盖本地定制。
@@ -204,13 +204,13 @@
 ## 下一位 AI 的一句话上下文
 
 ```text
-这是 JasonWangJie/sub2api Fork，VERSION 保持 0.1.162，当前及后续默认在 main 开发和推送。先读 wiki-new/文档索引.md、当前状态与完成度.md、测试与验收记录.md、智能助手交接清单.md，以及 deploy/FORK_RELEASE.md 与 .cursor/rules/fork-release-deploy.mdc（发行版一键安装身份；合并 upstream 不得改回 Wei-Shaw）。Fork 自研 SQL 使用 NNN_ZJ_description.sql；182_ZJ 是初版图片广场，185_ZJ 是持久异步任务，186_ZJ 是统一图片对象/个人图库/审核广场，187_ZJ 是 SC 上传 PostgreSQL admission/幂等/恢复，188_ZJ 是本机延期投稿（审核通过后再同步 OSS），189_ZJ 是异步结果上传意图；上游 182_prompt、183、184 保持原名。工作台实时结果默认本机；投稿只交元数据；模式只能由 Key 当前分组决定；默认私有，公开需审核；计费必须复用现有链路。OSS key 按年月日分区。upstream/main 5a8d6c4e4 已合并，功能代码以 a9d23973d 非强制合并进 main；合并后 Go 强制全仓、前端 frozen/lint/typecheck/189 files 1277 tests/build 已通过。Fork Actions 仍未启用且运行数为 0；浏览器连接器、真实 PostgreSQL/testcontainers、三家 OSS 和真实上游计费仍待验证。
+这是 JasonWangJie/sub2api_forimg Fork，当前及后续默认在 main 开发和推送。先读 wiki-new/文档索引.md、当前状态与完成度.md、测试与验收记录.md、智能助手交接清单.md，以及 deploy/FORK_RELEASE.md 与 .cursor/rules/fork-release-deploy.mdc（发行版一键安装身份；合并 upstream 不得改回 Wei-Shaw）。Fork 自研 SQL 使用 NNN_ZJ_description.sql；182_ZJ 是初版图片广场，185_ZJ 是持久异步任务，186_ZJ 是统一图片对象/个人图库/审核广场，187_ZJ 是 SC 上传 PostgreSQL admission/幂等/恢复，188_ZJ 是本机延期投稿（审核通过后再同步 OSS），189_ZJ 是异步结果上传意图；上游 182_prompt、183、184 保持原名。工作台实时结果默认本机；投稿只交元数据；模式只能由 Key 当前分组决定；默认私有，公开需审核；计费必须复用现有链路。OSS key 按年月日分区。发布、安装、升级、在线更新和 GHCR 镜像必须使用 JasonWangJie/sub2api_forimg；上游检查继续使用 Wei-Shaw/sub2api。
 ```
 
 
 ### 启动方式：
 # 终端 1 — 后端（启动时自动跑 185/186/187；端口占用会先杀再启）
-cd d:\个人项目\Git仓库\sub2api\backend
+cd d:\个人项目\Git仓库\sub2api_forimg\backend
 .\run-server.cmd
 # 或：powershell -File .\scripts\run-server.ps1
 
@@ -219,7 +219,7 @@ cd backend
 
 # 默认 http://localhost:8080
 # 终端 2 — 前端
-cd d:\个人项目\Git仓库\sub2api\frontend
+cd d:\个人项目\Git仓库\sub2api_forimg\frontend
 pnpm install
 pnpm run dev
 

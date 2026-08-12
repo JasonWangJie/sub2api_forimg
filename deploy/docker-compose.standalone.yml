@@ -12,7 +12,7 @@
 
 services:
   sub2api:
-    image: weishaw/sub2api:latest
+    image: ghcr.io/jasonwangjie/sub2api_forimg:latest
     container_name: sub2api
     restart: unless-stopped
     security_opt:

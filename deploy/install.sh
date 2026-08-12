@@ -2,8 +2,8 @@
 #
 # Sub2API Installation Script
 # Sub2API 安装脚本
-# FORK_IDENTITY: JasonWangJie/sub2api — 合并 upstream 时禁止改回 Wei-Shaw/sub2api
-# Usage: curl -sSL https://raw.githubusercontent.com/JasonWangJie/sub2api/main/deploy/install.sh | bash
+# FORK_IDENTITY: JasonWangJie/sub2api_forimg — 合并 upstream 时禁止改回 Wei-Shaw/sub2api
+# Usage: curl -sSL https://raw.githubusercontent.com/JasonWangJie/sub2api_forimg/main/deploy/install.sh | bash
 #
 
 set -e
@@ -32,7 +32,7 @@ CYAN='\033[0;36m'
 NC='\033[0m' # No Color
 
 # Configuration
-GITHUB_REPO="JasonWangJie/sub2api"
+GITHUB_REPO="JasonWangJie/sub2api_forimg"
 INSTALL_DIR="/opt/sub2api"
 SERVICE_NAME="sub2api"
 SERVICE_USER="sub2api"
@@ -724,7 +724,7 @@ install_service() {
     cat > /etc/systemd/system/sub2api.service << EOF
 [Unit]
 Description=Sub2API - AI API Gateway Platform
-Documentation=https://github.com/JasonWangJie/sub2api
+Documentation=https://github.com/JasonWangJie/sub2api_forimg
 After=network.target postgresql.service redis.service
 Wants=postgresql.service redis.service
 

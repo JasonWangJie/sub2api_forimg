@@ -32,7 +32,7 @@ const (
 	updateCacheTTL = 1200 // 20 minutes
 
 	// Fork release source (install / in-app update / rollback)
-	forkGithubRepo = "JasonWangJie/sub2api"
+	forkGithubRepo = "JasonWangJie/sub2api_forimg"
 	// Upstream author — notify only; never download/apply from here
 	upstreamGithubRepo = "Wei-Shaw/sub2api"
 

@@ -3,7 +3,7 @@ description: Fork 发行版部署与上游合并保护（install.sh / Release / 
 alwaysApply: true
 ---
 
-# JasonWangJie/sub2api Fork 发行版约定
+# JasonWangJie/sub2api_forimg Fork 发行版约定
 
 本仓库是 `Wei-Shaw/sub2api` 的 Fork，目标是可一键安装的软件发行版，不是仅开发环境。
 
@@ -11,12 +11,12 @@ alwaysApply: true
 
 | 项 | 必须值 |
 |---|---|
-| GitHub 仓库 | `JasonWangJie/sub2api` |
+| GitHub 仓库 | `JasonWangJie/sub2api_forimg` |
 | 安装目录 | `/opt/sub2api` |
 | 配置目录 | `/opt/sub2api/config.yaml`（`DATA_DIR=/opt/sub2api`） |
 | 二进制 / 产物名 | `sub2api` / `sub2api_{version}_{os}_{arch}.tar.gz` |
-| 一键安装 | `curl -sSL https://raw.githubusercontent.com/JasonWangJie/sub2api/main/deploy/install.sh \| sudo bash` |
-| 一键升级 | `curl -sSL https://raw.githubusercontent.com/JasonWangJie/sub2api/main/deploy/upgrade.sh \| sudo bash` |
+| 一键安装 | `curl -sSL https://raw.githubusercontent.com/JasonWangJie/sub2api_forimg/main/deploy/install.sh \| sudo bash` |
+| 一键升级 | `curl -sSL https://raw.githubusercontent.com/JasonWangJie/sub2api_forimg/main/deploy/upgrade.sh \| sudo bash` |
 | 操作手册 | 根目录 `发行版发布与安装操作手册.md`（版本号规则、打 tag、安装） |
 
 版本号：源码见 `backend/cmd/server/VERSION`；发版以 Git tag `v*` 为准。

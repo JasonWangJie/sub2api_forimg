@@ -11,7 +11,7 @@ When Cursor auto-generates a Git commit message for this repository:
   - chore: 构建/工具
 - Keep the subject line concise; add a body only when needed
 
-# Fork 发行版（JasonWangJie/sub2api）
+# Fork 发行版（JasonWangJie/sub2api_forimg）
 
 本仓库是可一键安装的软件发行版 Fork。完整强制约定：
 
@@ -20,7 +20,7 @@ When Cursor auto-generates a Git commit message for this repository:
 
 摘要：
 
-- 仓库身份恒为 `JasonWangJie/sub2api`，不要改回 `Wei-Shaw/sub2api`
+- 仓库身份恒为 `JasonWangJie/sub2api_forimg`，不要改回 `Wei-Shaw/sub2api`
 - 保留原 `deploy/install.sh`、systemd、GoReleaser 结构；用户只 `curl | bash`
 - 必须保留 `deploy/upgrade.sh`；配置目录 `/etc/sub2api`（`DATA_DIR`）
 - tag Release 默认完整二进制；禁止静默 SIMPLE_RELEASE

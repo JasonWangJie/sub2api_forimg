@@ -10,7 +10,7 @@ SERVICE_FILE="/etc/systemd/system/sub2api.service"
 NGINX_SITE="/etc/nginx/sites-available/sub2api"
 NGINX_ENABLED="/etc/nginx/sites-enabled/sub2api"
 NGINX_MAP="/etc/nginx/conf.d/sub2api-websocket-map.conf"
-DEFAULT_REPO="https://github.com/JasonWangJie/sub2api.git"
+DEFAULT_REPO="https://github.com/JasonWangJie/sub2api_forimg.git"
 DEFAULT_BRANCH="main"
 PNPM_VERSION="10.34.5"
 PNPM_HOME="/usr/local/share/pnpm"
@@ -38,7 +38,7 @@ Usage:
 Options:
   --domain DOMAIN         Domain used by the Nginx site (required unless --skip-nginx)
   --repo URL              Git repository to clone
-                          (default: https://github.com/JasonWangJie/sub2api.git)
+                          (default: https://github.com/JasonWangJie/sub2api_forimg.git)
   --branch NAME           Branch or tag to deploy (default: main)
   --source-dir PATH       Build an existing source tree instead of cloning the repository
   --config PATH           Install an existing production config.yaml (mode 0600)
@@ -347,7 +347,7 @@ render_systemd_unit() {
   cat > "${WORK_DIR}/sub2api.service" <<'EOF'
 [Unit]
 Description=Sub2API API Gateway
-Documentation=https://github.com/JasonWangJie/sub2api
+Documentation=https://github.com/JasonWangJie/sub2api_forimg
 After=network-online.target
 Wants=network-online.target
 StartLimitIntervalSec=0

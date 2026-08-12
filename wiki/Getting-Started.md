@@ -20,7 +20,7 @@
 
 ```bash
 mkdir -p sub2api-deploy && cd sub2api-deploy
-curl -sSL https://raw.githubusercontent.com/Wei-Shaw/sub2api/main/deploy/docker-deploy.sh | bash
+curl -sSL https://raw.githubusercontent.com/JasonWangJie/sub2api_forimg/main/deploy/docker-deploy.sh | bash
 docker compose up -d
 ```
 

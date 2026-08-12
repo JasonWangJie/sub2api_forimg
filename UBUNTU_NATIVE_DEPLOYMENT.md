@@ -65,12 +65,12 @@ bash deploy/ubuntu-native-deploy.sh --help
 sudo apt update
 sudo apt install -y curl ca-certificates
 curl -fsSL \
-  https://raw.githubusercontent.com/JasonWangJie/sub2api/main/deploy/ubuntu-native-deploy.sh \
+  https://raw.githubusercontent.com/JasonWangJie/sub2api_forimg/main/deploy/ubuntu-native-deploy.sh \
   -o /tmp/sub2api-deploy.sh
 less /tmp/sub2api-deploy.sh
 ```
 
-建议先通过 `less` 检查将以 root 权限执行的内容，再运行。脚本默认拉取 `https://github.com/JasonWangJie/sub2api.git` 的 `main` 分支，也可以显式填写 `--repo` 和 `--branch`。
+建议先通过 `less` 检查将以 root 权限执行的内容，再运行。脚本默认拉取 `https://github.com/JasonWangJie/sub2api_forimg.git` 的 `main` 分支，也可以显式填写 `--repo` 和 `--branch`。
 
 如果是私有仓库，不要把 Git Token 拼进 `--repo`。应先用部署密钥或凭据助手把仓库克隆到服务器，再按照 0.5 节通过 `--source-dir` 部署。
 
@@ -92,7 +92,7 @@ less /tmp/sub2api-deploy.sh
 ```bash
 sudo bash /tmp/sub2api-deploy.sh \
   --domain api.example.com \
-  --repo https://github.com/JasonWangJie/sub2api.git \
+  --repo https://github.com/JasonWangJie/sub2api_forimg.git \
   --branch main
 ```
 
@@ -119,7 +119,7 @@ scp F:\secure\sub2api-config.yaml ubuntu@SERVER_IP:/home/ubuntu/sub2api-config.y
 ```bash
 sudo bash /tmp/sub2api-deploy.sh \
   --domain api.example.com \
-  --repo https://github.com/JasonWangJie/sub2api.git \
+  --repo https://github.com/JasonWangJie/sub2api_forimg.git \
   --branch main \
   --config /home/ubuntu/sub2api-config.yaml
 ```
@@ -165,7 +165,7 @@ sudo bash /tmp/sub2api-deploy.sh \
 ```bash
 sudo bash /tmp/sub2api-deploy.sh \
   --domain api.example.com \
-  --repo https://github.com/JasonWangJie/sub2api.git \
+  --repo https://github.com/JasonWangJie/sub2api_forimg.git \
   --branch main
 ```
 
@@ -295,7 +295,7 @@ git status
 Ubuntu 执行：
 
 ```bash
-git clone --branch main https://github.com/JasonWangJie/sub2api.git "$HOME/sub2api-src"
+git clone --branch main https://github.com/JasonWangJie/sub2api_forimg.git "$HOME/sub2api-src"
 export SOURCE_DIR="$HOME/sub2api-src"
 cd "$SOURCE_DIR"
 git rev-parse --short HEAD
@@ -494,7 +494,7 @@ readlink -f /opt/sub2api/current
 ```ini
 [Unit]
 Description=Sub2API API Gateway
-Documentation=https://github.com/Wei-Shaw/sub2api
+Documentation=https://github.com/JasonWangJie/sub2api_forimg
 After=network-online.target
 Wants=network-online.target
 StartLimitIntervalSec=0

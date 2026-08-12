@@ -1,4 +1,4 @@
-# Fork 发行版约定（JasonWangJie/sub2api）
+# Fork 发行版约定（JasonWangJie/sub2api_forimg）
 
 > 本文件是 Fork 身份的人类可读副本。AI 与合并上游时以 `.cursor/rules/fork-release-deploy.mdc` 与 `.cursorrules` 为准。  
 > **合并 upstream 时禁止删除或改回本文件；冲突时保留 Fork 侧。**  
@@ -7,15 +7,15 @@
 ## 一键安装 / 升级
 
 ```bash
-curl -sSL https://raw.githubusercontent.com/JasonWangJie/sub2api/main/deploy/install.sh | sudo bash
-curl -sSL https://raw.githubusercontent.com/JasonWangJie/sub2api/main/deploy/upgrade.sh | sudo bash
+curl -sSL https://raw.githubusercontent.com/JasonWangJie/sub2api_forimg/main/deploy/install.sh | sudo bash
+curl -sSL https://raw.githubusercontent.com/JasonWangJie/sub2api_forimg/main/deploy/upgrade.sh | sudo bash
 ```
 
 ## 身份常量
 
 | 项 | 值 |
 |---|---|
-| 仓库 | `JasonWangJie/sub2api` |
+| 仓库 | `JasonWangJie/sub2api_forimg` |
 | 安装目录 | `/opt/sub2api` |
 | 配置 | `/opt/sub2api/config.yaml`（systemd `DATA_DIR=/opt/sub2api`） |
 | Release 资产 | `sub2api_{version}_linux_{amd64\|arm64}.tar.gz` + `checksums.txt` |
@@ -27,6 +27,7 @@ curl -sSL https://raw.githubusercontent.com/JasonWangJie/sub2api/main/deploy/upg
 2. 用户环境只允许 `curl | bash`，禁止要求源码构建。
 3. tag `v*` 必须走完整 Release；默认禁止 SIMPLE_RELEASE（会跳过二进制，导致 install 失败）。
 4. 升级须备份二进制与 `config.yaml`，再替换程序并 restart systemd。
+5. `curl | bash` 依赖匿名读取 raw 文件和 Release 资产，仓库必须保持 Public；首次发布 GHCR 后，还要把 `sub2api_forimg` Package visibility 设为 Public，匿名 Docker 部署才能拉取。
 
 ## 上游合并检查清单
 
@@ -37,7 +38,7 @@ curl -sSL https://raw.githubusercontent.com/JasonWangJie/sub2api/main/deploy/upg
 rg "Wei-Shaw/sub2api" deploy .github .goreleaser.yaml .goreleaser.simple.yaml Dockerfile.goreleaser AGENTS.md
 
 # 关键文件必须仍指向本 Fork
-rg "JasonWangJie/sub2api" deploy/install.sh deploy/upgrade.sh deploy/sub2api.service
+rg "JasonWangJie/sub2api_forimg" deploy/install.sh deploy/upgrade.sh deploy/sub2api.service
 test -f deploy/upgrade.sh
 rg "DATA_DIR" deploy/install.sh deploy/sub2api.service
 rg "Verify install.sh release assets" .github/workflows/release.yml
