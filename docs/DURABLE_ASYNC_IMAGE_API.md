@@ -63,20 +63,20 @@ Content-Type: application/json
 
 ### 3.2 查询地址
 
-BB 提交响应的 `query_url` 以及所有提交响应的 `Location` 头由 `async_image.public_base_url` 加固定查询路径生成。例如配置：
+BB 提交响应的 `query_url` 以及所有提交响应的 `Location` 头由对外站点公开地址加固定查询路径生成。优先使用管理端「任务查询链接的站点公开地址」（空则用同表单「站点/API 公开地址」）；仅当管理端从未保存过图片存储时，才回落 `config.yaml` 的 `async_image.public_base_url`。例如：
 
 ```yaml
 async_image:
-  public_base_url: "https://api.example.com"
+  public_base_url: "https://apiimg.example.com"
 ```
 
 则 BB 查询地址形如：
 
 ```text
-https://api.example.com/v1/images/tasks_async/asyncimg_0123456789abcdef
+https://apiimg.example.com/v1/images/tasks_async/asyncimg_0123456789abcdef
 ```
 
-`public_base_url` 留空时返回 `/v1/...` 相对路径。它是 Sub2API 的外部访问根地址，不是 OSS/CDN 地址；图片 CDN 根地址配置在 `image_storage.public_base_url`。
+`public_base_url` 留空时返回 `/v1/...` 相对路径。它是 Sub2API 的外部访问根地址，不是 OSS/CDN 地址；本机专用静态图床根地址配置在 `image_storage.local.local_url`。
 
 提交响应还包含：
 

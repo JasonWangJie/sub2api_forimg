@@ -197,6 +197,7 @@
             <div class="md:col-span-2 lg:col-span-3">
               <label class="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">{{ t('admin.backup.imageStorage.asyncPublicBaseUrl') }}</label>
               <input v-model="imageStorageForm.async_image.public_base_url" type="url" class="input w-full" placeholder="https://api.example.com" />
+              <p class="mt-1 text-xs text-gray-400">{{ t('admin.backup.imageStorage.asyncPublicBaseUrlHint') }}</p>
             </div>
             <div>
               <label class="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">{{ t('admin.backup.imageStorage.workerConcurrency') }}</label>

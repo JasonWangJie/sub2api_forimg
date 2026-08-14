@@ -500,6 +500,74 @@ func TestLocalImageStorageConfigUsesPublicBaseURLAsSignServeNotStaticCDN(t *test
 	require.NotContains(t, access.URL, "https://www.example.com/images/results/a.png?")
 }
 
+func TestLocalImageStorageSignServePrefersPublicBaseOverAsyncPublic(t *testing.T) {
+	svc, _, _ := newImageStorageFixture(t, config.ImageStorageConfig{})
+	svc.WithLocalDefaults(t.TempDir(), []byte("sign-key"))
+
+	cfg, err := svc.toImageStorageConfig(context.Background(), &ImageStorageSettings{
+		Enabled:       true,
+		Backend:       ImageStorageBackendLocal,
+		PublicBaseURL: "https://apiimg.example.com",
+		Local:         ImageStorageLocalSettings{DataDir: t.TempDir()},
+		AsyncImage:    AsyncImageRuntimeConfig{PublicBaseURL: "https://api.example.com"},
+	})
+	require.NoError(t, err)
+	require.Equal(t, "https://apiimg.example.com", cfg.SignServeBaseURL)
+}
+
+func TestLocalImageStorageSignServeIgnoresConfigAsyncWhenAdminSettingsProvided(t *testing.T) {
+	repo := newStubSettingRepo()
+	svc := NewImageStorageSettingService(
+		repo,
+		reversibleEncryptor{},
+		nil,
+		nil,
+		config.ImageStorageConfig{},
+		config.AsyncImageConfig{PublicBaseURL: "https://api.from-config.example"},
+	)
+	svc.WithLocalDefaults(t.TempDir(), []byte("sign-key"))
+
+	cfg, err := svc.toImageStorageConfig(context.Background(), &ImageStorageSettings{
+		Enabled:       true,
+		Backend:       ImageStorageBackendLocal,
+		PublicBaseURL: "https://apiimg.example.com",
+		Local:         ImageStorageLocalSettings{DataDir: t.TempDir()},
+	})
+	require.NoError(t, err)
+	require.Equal(t, "https://apiimg.example.com", cfg.SignServeBaseURL)
+
+	cfgEmpty, err := svc.toImageStorageConfig(context.Background(), &ImageStorageSettings{
+		Enabled: true,
+		Backend: ImageStorageBackendLocal,
+		Local:   ImageStorageLocalSettings{DataDir: t.TempDir()},
+	})
+	require.NoError(t, err)
+	require.Empty(t, cfgEmpty.SignServeBaseURL, "admin-saved empty URLs must not pull config.yaml async_image")
+}
+
+func TestImageStorageRuntimeConfigPrefersUIPublicBaseURL(t *testing.T) {
+	ctx := context.Background()
+	repo := newStubSettingRepo()
+	svc := NewImageStorageSettingService(
+		repo, reversibleEncryptor{}, nil, nil,
+		config.ImageStorageConfig{},
+		config.AsyncImageConfig{PublicBaseURL: "https://api.from-config.example"},
+	)
+	payload, err := json.Marshal(ImageStorageSettings{
+		Enabled:       true,
+		Backend:       ImageStorageBackendLocal,
+		PublicBaseURL: "https://apiimg.example.com",
+		Local:         ImageStorageLocalSettings{DataDir: t.TempDir()},
+		AsyncImage:    AsyncImageRuntimeConfig{WorkerConcurrency: 2},
+	})
+	require.NoError(t, err)
+	require.NoError(t, repo.Set(ctx, settingKeyImageStorageConfig, string(payload)))
+
+	runtime, err := svc.RuntimeConfig(ctx)
+	require.NoError(t, err)
+	require.Equal(t, "https://apiimg.example.com", runtime.PublicBaseURL)
+}
+
 func TestWrapImageStorageSaveErrorSurfacesLocalDirectoryFailure(t *testing.T) {
 	err := wrapImageStorageSaveError(fmt.Errorf("test image storage connection before save: create local image storage root: permission denied"))
 	require.True(t, apperrors.IsBadRequest(err))

@@ -1400,8 +1400,9 @@ image_storage:
   # MinIO / 需要路径风格（path-style）访问的桶设为 true
   force_path_style: false
   # 图片公开桶或 CDN 根地址；填写后按 public_base_url/object_key 返回公开直链，
-  # 留空时：oss 返回 presigned；local 则使用 async_image.public_base_url 生成站内签名下载。
-  # 此项不是 API 服务地址。
+  # 留空时：oss 返回 presigned；local 则用管理端「站点/API 公开地址」生成站内签名下载
+  # （管理端已保存时以界面为准；从未保存过时才回落 async_image.public_base_url）。
+  # 此项在 local 模式下应填反代到本服务的站点域名，不是未映射 data_dir 的假 CDN。
   public_base_url: ""
   # public_base_url 为空时的存储层默认签名时长（小时）；新持久化异步接口优先使用
   # async_image.signed_url_expiry_seconds，旧异步接口继续使用本值。
@@ -1432,7 +1433,7 @@ image_storage:
     # 专用图片域名根地址（可选）。填写后异步查询优先返回 local_url/object_key，
     # 例如 https://status.apiimg.example/images/results/.../000.png
     # 要求 Nginx/宝塔「网站目录」等于上方 data_dir；未映射真实静态站时请留空，
-    # 改填 public_base_url / async_image.public_base_url 走 /v1/images/local 签名下载。
+    # 改填管理端「站点/API 公开地址」（及任务查询公开地址）走 /v1/images/local 签名下载。
     # 填写后新写入对象使用 0755/0644，便于 Web 用户读取。
     local_url: ""
 
@@ -1502,8 +1503,9 @@ image_durable_storage:
 # 后台保存的异步生图设置优先于本段；所有字段也可用 ASYNC_IMAGE_* 环境变量覆盖。
 # 设为 0 或负数会回退到括号中的安全默认值。
 async_image:
-  # 对外 API 根地址，例如 https://api.example.com；可含部署前缀，不要以 / 结尾。
+  # 对外 API 根地址，例如 https://apiimg.example.com；可含部署前缀，不要以 / 结尾。
   # 用于生成 BB query_url 与 Location；留空时返回 /v1/... 相对路径。
+  # 管理端「备份/图片存储」保存过后，以管理端界面的公开地址为准；本项仅在从未保存过时回落。
   public_base_url: ""
   # 单实例同时执行的异步生图 Worker 数（默认 4，最大 64）。多实例部署时总并发为各实例之和；
   # Worker 数在进程启动时确定，修改后需重启服务。
