@@ -26,6 +26,8 @@ Asynchronous image tasks are **disabled by default** and gated on object storage
 
 Because the async image storage and the database backup share one S3 client, the form defaults to **reusing the backup S3 configuration**: it borrows the endpoint, region and credentials already configured above and keeps only its own bucket and prefix, so backups stay under `backups/` while images go to `images/`. Leave the bucket empty to use the backup bucket as well. Untick the box to point images at a completely separate account.
 
+**Local disk (`backend=local`)** is also supported for async results and SC reference uploads. Leave `local.data_dir` empty to auto-resolve under `{DATA_DIR}/data/image_storage` when `DATA_DIR` is set (common install default: `/opt/sub2api/data/image_storage`). Provide at least one public base: `local.local_url`, `image_storage.public_base_url`, or `async_image.public_base_url`. Saving with `enabled=true` runs an upload/HEAD/read/delete probe on that directory; failures return HTTP 400 with a readable message instead of a generic `internal error`.
+
 Saving requires step-up 2FA when that gate is enabled, for the same reason the backup S3 form does: changing the target redirects generated content to another account.
 
 Turning the switch off stops new submissions but keeps already-accepted tasks pollable, so nothing in flight is stranded.

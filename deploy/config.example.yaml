@@ -1423,8 +1423,11 @@ image_storage:
 
   # --- backend=local ---
   local:
-    # 本机根目录。留空则使用 {pricing.data_dir}/image_storage。
-    # 多实例部署请挂载共享盘或改用 oss/superbed。
+    # 本机根目录。留空则自动解析：
+    # - DATA_DIR 已设置且 pricing.data_dir 为空/为 "./data" → {DATA_DIR}/data/image_storage
+    # - 否则 → {pricing.data_dir}/image_storage
+    # 二进制发行版常见默认：/opt/sub2api/data/image_storage
+    # 多实例部署请挂载共享盘或改用 oss/superbed；systemd 下目录宜在 ReadWritePaths 内。
     data_dir: ""
     # 对外访问根地址。异步查询返回 local_url/object_key；优先于上方 public_base_url。
     local_url: ""

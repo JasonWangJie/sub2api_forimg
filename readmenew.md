@@ -16,7 +16,7 @@
 
 ## 当前版本快照
 
-记录日期：`2026-08-14`（续更：1 Key 异步生图双平台分组映射；存储后端可随时切换；管理端清理覆盖异步任务结果与「清理全部」；固定 `TOTP_ENCRYPTION_KEY` 才能保存 OSS Secret）。
+记录日期：`2026-08-14`（续更：1 Key 异步生图双平台分组映射；存储后端可随时切换；管理端清理覆盖异步任务结果与「清理全部」；固定 `TOTP_ENCRYPTION_KEY` 才能保存 OSS Secret；本机目录 `DATA_DIR` 回落与保存错误可读化）。
 
 | 项目 | 当前记录 |
 |---|---|
@@ -124,6 +124,8 @@
 | `expired` / `deleted` / `user` | 仅个人图库资产（原有范围） |
 
 本机目录的 `local_url`、对象 CDN、`async_image.public_base_url` 等公开访问地址不属于存储定位身份，可单独修改。
+
+**本机目录 `data_dir` 留空时**：优先 `{DATA_DIR}/data/image_storage`（发行版 `DATA_DIR=/opt/sub2api` 时即 `/opt/sub2api/data/image_storage`）；保存前会做本机读写探测，失败返回可读错误而非 `internal error`。自定义路径须在 systemd `ReadWritePaths` 可写范围内。
 
 | 配置 | 默认值 |
 |---|---:|
