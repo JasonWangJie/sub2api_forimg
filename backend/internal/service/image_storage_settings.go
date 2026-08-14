@@ -134,7 +134,10 @@ func describeImageStorageSaveError(err error) string {
 		return "本机存储目录未配置，请填写目录或确保 DATA_DIR / pricing.data_dir 可用"
 	case strings.Contains(msg, "create local image storage root"),
 		strings.Contains(msg, "secure local image storage root"),
-		strings.Contains(msg, "resolve local image storage root"):
+		strings.Contains(msg, "resolve local image storage root"),
+		strings.Contains(msg, "create local object directory"),
+		strings.Contains(msg, "write local object"),
+		strings.Contains(msg, "chmod"):
 		return "无法创建或写入本机存储目录，请确认路径存在且运行用户可写（systemd 部署时目录通常需在 ReadWritePaths 内，例如 /opt/sub2api/...）"
 	case strings.Contains(msg, "image storage probe"):
 		return msg

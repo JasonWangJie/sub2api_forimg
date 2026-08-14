@@ -84,9 +84,10 @@ func NewLocalImageStorageWithURLOptions(rootDir, localURL, publicBaseURL, signSe
 	if err := os.MkdirAll(abs, 0o700); err != nil {
 		return nil, fmt.Errorf("create local image storage root: %w", err)
 	}
-	if err := os.Chmod(abs, 0o700); err != nil {
-		return nil, fmt.Errorf("secure local image storage root: %w", err)
-	}
+	// Best-effort: installs under /opt/sub2api often leave dirs owned by root or
+	// group-writable; chmod can return EPERM under systemd NoNewPrivileges even
+	// when the service user can create files. MkdirAll already requested 0700.
+	_ = os.Chmod(abs, 0o700)
 	return &LocalImageStorage{
 		rootDir:          abs,
 		localURL:         strings.TrimRight(strings.TrimSpace(localURL), "/"),
@@ -130,19 +131,14 @@ func (s *LocalImageStorage) SaveObject(ctx context.Context, key, contentType str
 	if err := os.MkdirAll(directory, 0o700); err != nil {
 		return ObjectRef{}, fmt.Errorf("create local object directory: %w", err)
 	}
-	if err := os.Chmod(directory, 0o700); err != nil {
-		return ObjectRef{}, fmt.Errorf("secure local object directory: %w", err)
-	}
+	_ = os.Chmod(directory, 0o700)
 	tmp := fullPath + ".tmp"
 	file, err := os.OpenFile(tmp, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600)
 	if err != nil {
 		return ObjectRef{}, fmt.Errorf("write local object: %w", err)
 	}
-	if err := file.Chmod(0o600); err != nil {
-		_ = file.Close()
-		_ = os.Remove(tmp)
-		return ObjectRef{}, fmt.Errorf("secure local object: %w", err)
-	}
+	// Mode was requested at OpenFile; chmod may fail for the same reasons as dirs.
+	_ = file.Chmod(0o600)
 	if _, err := file.Write(data); err != nil {
 		_ = file.Close()
 		_ = os.Remove(tmp)
