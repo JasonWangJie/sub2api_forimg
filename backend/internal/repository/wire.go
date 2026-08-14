@@ -201,8 +201,8 @@ func ProvideImageStorageFactory() service.ImageStorageFactory {
 		case config.ImageStorageBackendSuperbed:
 			return NewSuperbedImageStorage(cfg)
 		case config.ImageStorageBackendLocal:
-			dataDir := strings.TrimSpace(cfg.Local.DataDir)
-			if dataDir == "" {
+			dataDir := service.ResolveLocalImageStorageDataDir(cfg.RuntimePricingDataDir, cfg.Local.DataDir)
+			if strings.TrimSpace(dataDir) == "" {
 				return nil, errors.New("image_storage.local.data_dir is required")
 			}
 			return service.NewLocalImageStorageWithURLOptions(

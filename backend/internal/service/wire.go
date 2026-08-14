@@ -610,7 +610,7 @@ func ProvideImageStorageSettingService(
 	}
 	svc := NewImageStorageSettingService(settingRepo, encryptor, backup, factory, cfg.ImageStorage, cfg.AsyncImage)
 	svc.identityGuard = identityGuard
-	svc.WithLocalDefaults(cfg.Pricing.DataDir, []byte(cfg.JWT.Secret))
+	svc.WithLocalDefaults(EffectivePricingDataDir(cfg.Pricing.DataDir), []byte(cfg.JWT.Secret))
 	return svc
 }
 

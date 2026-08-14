@@ -7,13 +7,16 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
+	apperrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
 	"github.com/stretchr/testify/require"
 )
 
@@ -368,4 +371,106 @@ func TestImageStorageSettingsAllowLocalURLChangeWithActiveObjects(t *testing.T) 
 	require.Equal(t, "https://new.example.test", updated.Local.LocalURL)
 	require.Equal(t, "https://api.new.example.test", updated.AsyncImage.PublicBaseURL)
 	require.Empty(t, updated.Region)
+}
+
+func TestImageStorageSettingsSwitchOSSToLocalWithProbe(t *testing.T) {
+	repo := newStubSettingRepo()
+	ctx := context.Background()
+	seedBackupS3(t, repo, BackupS3Config{
+		Endpoint: "https://s3.example.test", Region: "auto", Bucket: "images-bucket",
+		AccessKeyID: "ak", SecretAccessKey: "sk", Prefix: "backups/",
+	})
+	require.NoError(t, repo.Set(ctx, settingKeyImageStorageConfig, `{
+		"enabled":true,
+		"backend":"oss",
+		"reuse_backup_s3":true,
+		"provider":"custom_s3",
+		"bucket":"images-bucket",
+		"prefix":"images/",
+		"async_image":{"public_base_url":"https://api.example.test"}
+	}`))
+
+	root := t.TempDir()
+	factory := func(_ context.Context, cfg *config.ImageStorageConfig) (ImageStorage, error) {
+		if cfg.NormalizedBackend() != config.ImageStorageBackendLocal {
+			return &recordingStorage{}, nil
+		}
+		dataDir := strings.TrimSpace(cfg.Local.DataDir)
+		if dataDir == "" {
+			return nil, errors.New("image_storage.local.data_dir is required")
+		}
+		return NewLocalImageStorageWithURLOptions(
+			dataDir,
+			cfg.Local.LocalURL,
+			cfg.PublicBaseURL,
+			cfg.SignServeBaseURL,
+			cfg.SignKey,
+		)
+	}
+	svc := NewImageStorageSettingService(
+		repo, reversibleEncryptor{}, NewBackupService(repo, &config.Config{
+			Totp: config.TotpConfig{EncryptionKeyConfigured: true},
+		}, reversibleEncryptor{}, nil, nil), factory, config.ImageStorageConfig{},
+	)
+	svc.WithLocalDefaults(root, []byte("sign-key"))
+
+	updated, err := svc.Update(ctx, ImageStorageSettings{
+		Enabled: true,
+		Backend: ImageStorageBackendLocal,
+		Prefix:  "images/",
+		Local: ImageStorageLocalSettings{
+			LocalURL: "https://cdn.example.test",
+		},
+		AsyncImage: AsyncImageRuntimeConfig{PublicBaseURL: "https://api.example.test"},
+	})
+	require.NoError(t, err)
+	require.Equal(t, ImageStorageBackendLocal, updated.Backend)
+	require.Equal(t, ImageStorageProviderLocal, updated.Provider)
+	require.False(t, updated.ReuseBackupS3)
+	require.Empty(t, updated.Bucket)
+	require.Equal(t, "https://cdn.example.test", updated.Local.LocalURL)
+
+	raw, loadErr := repo.GetValue(ctx, settingKeyImageStorageConfig)
+	require.NoError(t, loadErr)
+	require.Contains(t, raw, `"backend":"local"`)
+	require.Contains(t, raw, `"provider":"local"`)
+}
+
+func TestImageStorageSettingsSwitchOSSToLocalPersistsResolvedDataDir(t *testing.T) {
+	repo := newStubSettingRepo()
+	ctx := context.Background()
+	root := t.TempDir()
+	t.Setenv("DATA_DIR", root)
+
+	factory := func(_ context.Context, cfg *config.ImageStorageConfig) (ImageStorage, error) {
+		if cfg.NormalizedBackend() != config.ImageStorageBackendLocal {
+			return &recordingStorage{}, nil
+		}
+		dataDir := ResolveLocalImageStorageDataDir(cfg.RuntimePricingDataDir, cfg.Local.DataDir)
+		return NewLocalImageStorageWithURLOptions(dataDir, cfg.Local.LocalURL, cfg.PublicBaseURL, cfg.SignServeBaseURL, cfg.SignKey)
+	}
+	svc := NewImageStorageSettingService(
+		repo, reversibleEncryptor{}, NewBackupService(repo, &config.Config{
+			Totp: config.TotpConfig{EncryptionKeyConfigured: true},
+		}, reversibleEncryptor{}, nil, nil), factory, config.ImageStorageConfig{},
+	)
+	svc.WithLocalDefaults("./data", []byte("sign-key"))
+
+	updated, err := svc.Update(ctx, ImageStorageSettings{
+		Enabled: true,
+		Backend: ImageStorageBackendLocal,
+		Prefix:  "images/",
+		Local: ImageStorageLocalSettings{
+			LocalURL: "https://cdn.example.test",
+		},
+		AsyncImage: AsyncImageRuntimeConfig{PublicBaseURL: "https://api.example.test"},
+	})
+	require.NoError(t, err)
+	require.Equal(t, filepath.Join(root, "data", "image_storage"), updated.Local.DataDir)
+}
+
+func TestWrapImageStorageSaveErrorSurfacesLocalDirectoryFailure(t *testing.T) {
+	err := wrapImageStorageSaveError(fmt.Errorf("test image storage connection before save: create local image storage root: permission denied"))
+	require.True(t, apperrors.IsBadRequest(err))
+	require.Contains(t, apperrors.Message(err), "无法创建或写入本机存储目录")
 }

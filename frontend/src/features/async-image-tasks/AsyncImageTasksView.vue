@@ -189,26 +189,11 @@
           </template>
 
           <template #cell-results="{ row }">
-            <div class="flex min-w-[150px] items-center gap-2.5 whitespace-nowrap">
-              <button
-                v-if="taskPreviewUrl(row)"
-                type="button"
-                class="block h-10 w-10 flex-none overflow-hidden rounded border border-gray-200 bg-gray-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-500 dark:border-dark-700 dark:bg-dark-800"
-                @click.stop="openTaskResult(row)"
-              >
-                <img
-                  :src="taskThumbUrl(row)"
-                  :alt="t('asyncImageTasks.detail.resultAlt', { index: 1 })"
-                  class="h-full w-full object-cover"
-                  loading="lazy"
-                />
-              </button>
-              <div>
-                <div class="text-sm font-medium text-gray-800 dark:text-gray-200">
-                  {{ resultCount(row) }} / {{ row.image_count ?? resultCount(row) }}
-                </div>
-                <div class="mt-0.5 text-xs text-gray-400">{{ providerLabel(row.storage_provider) }}</div>
+            <div class="min-w-[120px] whitespace-nowrap">
+              <div class="text-sm font-medium text-gray-800 dark:text-gray-200">
+                {{ resultCount(row) }} / {{ row.image_count ?? resultCount(row) }}
               </div>
+              <div class="mt-0.5 text-xs text-gray-400">{{ providerLabel(row.storage_provider) }}</div>
             </div>
           </template>
 
@@ -682,17 +667,6 @@ function safeResultUrl(value?: string | null): string {
   return sanitizeUrl(value || '', { allowRelative: true })
 }
 
-function taskPreviewUrl(task: AsyncImageTask): string {
-  return safeResultUrl(task.preview_url)
-}
-
-function taskThumbUrl(task: AsyncImageTask): string {
-  return buildOssThumbnailUrl(taskPreviewUrl(task), {
-    width: 160,
-    provider: task.storage_provider,
-  })
-}
-
 function resultPreviewUrl(result: AsyncImageTaskResult): string {
   return safeResultUrl(result.preview_url)
 }
@@ -733,10 +707,6 @@ async function openResolvedImage(viewUrl?: string | null, previewUrl?: string | 
     }
     appStore.showError(extractApiErrorMessage(error, t('asyncImageTasks.errors.openResult')))
   }
-}
-
-function openTaskResult(task: AsyncImageTask): void {
-  void openResolvedImage(task.view_url, task.preview_url)
 }
 
 function openResultImage(result: AsyncImageTaskResult): void {

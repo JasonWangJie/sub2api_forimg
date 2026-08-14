@@ -261,6 +261,9 @@ type ImageStorageConfig struct {
 	// 用于生成站内 HMAC 签名下载地址。不写入 config.yaml。
 	SignServeBaseURL string `mapstructure:"-"`
 	SignKey          []byte `mapstructure:"-"`
+	// RuntimePricingDataDir 由 ImageStorageSettingService 在解析 local 后端时填充，
+	// 供对象存储工厂在 data_dir 留空时回落目录。不写入 config.yaml。
+	RuntimePricingDataDir string `mapstructure:"-"`
 }
 
 // ImageStorageSuperbedConfig 聚合图床（Superbed）上传凭证。

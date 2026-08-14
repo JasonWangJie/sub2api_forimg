@@ -10,7 +10,6 @@ import (
 	"fmt"
 	"io"
 	"net/url"
-	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -107,6 +106,42 @@ var ErrImageStorageIdentityInUse = apperrors.Conflict(
 	"IMAGE_STORAGE_IDENTITY_IN_USE",
 	"image storage backend/identity cannot change while active image objects exist; migrate or clean up the existing objects first",
 )
+
+func wrapImageStorageSaveError(err error) error {
+	if err == nil {
+		return nil
+	}
+	if ae := apperrors.FromError(err); ae != nil && ae.Message != apperrors.UnknownMessage {
+		return err
+	}
+	return apperrors.BadRequest("IMAGE_STORAGE_SAVE_FAILED", describeImageStorageSaveError(err)).WithCause(err)
+}
+
+func describeImageStorageSaveError(err error) string {
+	if err == nil {
+		return ""
+	}
+	if errors.Is(err, ErrImageStorageIncomplete) {
+		return "异步生图对象存储已启用，但当前后端的必填项尚未配置完整"
+	}
+	msg := strings.TrimSpace(err.Error())
+	const probePrefix = "test image storage connection before save: "
+	if strings.HasPrefix(msg, probePrefix) {
+		msg = strings.TrimSpace(strings.TrimPrefix(msg, probePrefix))
+	}
+	switch {
+	case strings.Contains(msg, "image_storage.local.data_dir is required"):
+		return "本机存储目录未配置，请填写目录或确保 DATA_DIR / pricing.data_dir 可用"
+	case strings.Contains(msg, "create local image storage root"),
+		strings.Contains(msg, "secure local image storage root"),
+		strings.Contains(msg, "resolve local image storage root"):
+		return "无法创建或写入本机存储目录，请确认路径存在且运行用户可写（systemd 部署时目录通常需在 ReadWritePaths 内，例如 /opt/sub2api/...）"
+	case strings.Contains(msg, "image storage probe"):
+		return msg
+	default:
+		return msg
+	}
+}
 
 // ImageStorageIdentityGuard prevents a runtime settings update from stranding
 // durable references that can only be opened through the currently configured
@@ -441,6 +476,7 @@ func (s *ImageStorageSettingService) Update(ctx context.Context, in ImageStorage
 		}
 	case ImageStorageBackendLocal:
 		in.ReuseBackupS3 = false
+		in.Local.DataDir = ResolveLocalImageStorageDataDir(s.pricingDataDir, in.Local.DataDir)
 	default:
 		if in.ReuseBackupS3 {
 			// 复用备份凭证时不落自己的密钥，避免同一份密钥在库里存两份。
@@ -472,7 +508,7 @@ func (s *ImageStorageSettingService) Update(ctx context.Context, in ImageStorage
 		// credentials. Probe the exact value that will be persisted so failed
 		// upload/read/delete permissions never strand accepted async tasks.
 		if err := s.TestConnection(ctx, in); err != nil {
-			return nil, fmt.Errorf("test image storage connection before save: %w", err)
+			return nil, wrapImageStorageSaveError(fmt.Errorf("test image storage connection before save: %w", err))
 		}
 	}
 
@@ -710,13 +746,9 @@ func (s *ImageStorageSettingService) toImageStorageConfig(ctx context.Context, i
 		cfg.Provider = ImageStorageProviderSuperbed
 	case ImageStorageBackendLocal:
 		cfg.Provider = ImageStorageProviderLocal
-		if strings.TrimSpace(cfg.Local.DataDir) == "" {
-			base := strings.TrimSpace(s.pricingDataDir)
-			if base == "" {
-				base = "./data"
-			}
-			cfg.Local.DataDir = filepath.Join(base, "image_storage")
-		}
+		pricingBase := EffectivePricingDataDir(s.pricingDataDir)
+		cfg.RuntimePricingDataDir = pricingBase
+		cfg.Local.DataDir = ResolveLocalImageStorageDataDir(s.pricingDataDir, cfg.Local.DataDir)
 		cfg.SignServeBaseURL = strings.TrimSpace(in.AsyncImage.PublicBaseURL)
 		if cfg.SignServeBaseURL == "" {
 			cfg.SignServeBaseURL = strings.TrimSpace(s.asyncFallback.PublicBaseURL)

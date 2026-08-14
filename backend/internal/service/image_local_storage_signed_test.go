@@ -95,3 +95,16 @@ func TestVerifyLocalImageURLSignatureExpired(t *testing.T) {
 	err := VerifyLocalImageURLSignature("a.png", strconv.FormatInt(exp, 10), sig, key, time.Now())
 	require.Error(t, err)
 }
+
+func TestEffectivePricingDataDirPrefersDataDirEnv(t *testing.T) {
+	t.Setenv("DATA_DIR", "/opt/sub2api")
+	require.Equal(t, filepath.Join("/opt/sub2api", "data"), EffectivePricingDataDir("./data"))
+	require.Equal(t, filepath.Join("/opt/sub2api", "data"), EffectivePricingDataDir(""))
+	require.Equal(t, "/custom/cache", EffectivePricingDataDir("/custom/cache"))
+}
+
+func TestResolveLocalImageStorageDataDirFallback(t *testing.T) {
+	t.Setenv("DATA_DIR", "/opt/sub2api")
+	require.Equal(t, filepath.Join("/opt/sub2api", "data", "image_storage"), ResolveLocalImageStorageDataDir("./data", ""))
+	require.Equal(t, "/srv/images", ResolveLocalImageStorageDataDir("./data", "/srv/images"))
+}

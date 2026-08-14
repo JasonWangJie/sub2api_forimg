@@ -19,8 +19,35 @@ import (
 
 const localObjectURLPrefix = "local:"
 
+const defaultLocalImageStorageSubdir = "image_storage"
+
 // LocalImageServePathPrefix is the public HTTP path for HMAC-signed local objects.
 const LocalImageServePathPrefix = "/v1/images/local/"
+
+// EffectivePricingDataDir returns the pricing cache root used for local storage fallbacks.
+// When DATA_DIR is set (binary installs commonly use /opt/sub2api), prefer DATA_DIR/data
+// over the generic "./data" default so paths stay inside the service-writable tree.
+func EffectivePricingDataDir(configured string) string {
+	configured = strings.TrimSpace(configured)
+	if env := strings.TrimSpace(os.Getenv("DATA_DIR")); env != "" {
+		if configured == "" || configured == "./data" {
+			return filepath.Join(env, "data")
+		}
+	}
+	if configured == "" {
+		return "./data"
+	}
+	return configured
+}
+
+// ResolveLocalImageStorageDataDir picks the async image_storage local root.
+// An empty configured value falls back to {pricing.data_dir}/image_storage.
+func ResolveLocalImageStorageDataDir(pricingDataDir, configured string) string {
+	if dir := strings.TrimSpace(configured); dir != "" {
+		return dir
+	}
+	return filepath.Join(EffectivePricingDataDir(pricingDataDir), defaultLocalImageStorageSubdir)
+}
 
 // LocalImageStorage stores durable library/plaza (or async) bytes on disk.
 type LocalImageStorage struct {

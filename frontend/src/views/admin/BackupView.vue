@@ -630,6 +630,7 @@ import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { adminAPI } from '@/api'
 import { useAppStore } from '@/stores'
+import { extractApiErrorMessage } from '@/utils/apiError'
 import type {
   BackupS3Config,
   BackupScheduleConfig,
@@ -1060,7 +1061,7 @@ async function saveImageStorageConfig() {
       savingImageStorage.value = false
       return
     }
-    appStore.showError((error as { message?: string })?.message || t('errors.networkError'))
+    appStore.showError(extractApiErrorMessage(error, t('errors.networkError')))
   } finally {
     savingImageStorage.value = false
   }
@@ -1077,7 +1078,7 @@ async function testImageStorage() {
       appStore.showError(result.message || t('admin.backup.s3.testFailed'))
     }
   } catch (error) {
-    appStore.showError((error as { message?: string })?.message || t('errors.networkError'))
+    appStore.showError(extractApiErrorMessage(error, t('errors.networkError')))
   } finally {
     testingImageStorage.value = false
   }
