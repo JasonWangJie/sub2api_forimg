@@ -78,6 +78,26 @@ func TestLocalImageStorageLocalURLTakesPrecedence(t *testing.T) {
 	require.Equal(t, "https://img.local/a/b.png", access.URL)
 }
 
+func TestLocalImageStorageSignedServeBeatsStaleLocalURL(t *testing.T) {
+	root := t.TempDir()
+	signKey := []byte("test-sign-key")
+	storage, err := NewLocalImageStorageWithURLOptions(
+		root,
+		"https://static.apiimg.example/cdn",
+		"",
+		"https://api.example.com",
+		signKey,
+	)
+	require.NoError(t, err)
+	ref, err := storage.SaveObject(context.Background(), "images/results/a.png", "image/png", []byte("x"))
+	require.NoError(t, err)
+	access, err := storage.SignURL(context.Background(), ref, time.Hour)
+	require.NoError(t, err)
+	require.Contains(t, access.URL, "https://api.example.com/v1/images/local/images/results/a.png")
+	require.Contains(t, access.URL, "sig=")
+	require.NotContains(t, access.URL, "static.apiimg.example")
+}
+
 func TestJoinLocalObjectURL(t *testing.T) {
 	got, err := JoinLocalObjectURL("https://img.example.com/", "images/results/a.png")
 	require.NoError(t, err)

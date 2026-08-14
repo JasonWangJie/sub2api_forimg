@@ -54,8 +54,8 @@ type LocalImageStorage struct {
 	rootDir string
 
 	// Optional URL resolution for async image_storage.backend=local:
-	// - localURL / publicBaseURL: static/CDN root → base/object_key
-	// - signServeBaseURL + signKey: HMAC signed download under LocalImageServePathPrefix
+	// - signServeBaseURL + signKey: HMAC signed download under LocalImageServePathPrefix (preferred)
+	// - localURL / publicBaseURL: static/CDN root → base/object_key (only when signed serve is unset)
 	// When neither is set, SignURL returns local:object_key (plaza/library internal use).
 	localURL         string
 	publicBaseURL    string
@@ -71,7 +71,8 @@ func NewLocalImageStorage(rootDir string) (*LocalImageStorage, error) {
 }
 
 // NewLocalImageStorageWithURLOptions constructs local storage with optional HTTP URL signing.
-// localURL takes precedence over publicBaseURL when forming client-facing links.
+// When signServeBaseURL and signKey are set, SignURL prefers HMAC links over static localURL.
+// Otherwise localURL takes precedence over publicBaseURL for static CDN joins.
 func NewLocalImageStorageWithURLOptions(rootDir, localURL, publicBaseURL, signServeBaseURL string, signKey []byte) (*LocalImageStorage, error) {
 	rootDir = strings.TrimSpace(rootDir)
 	if rootDir == "" {
@@ -185,17 +186,8 @@ func (s *LocalImageStorage) SignURL(_ context.Context, ref ObjectRef, expiry tim
 	if err := s.validateRef(ref); err != nil {
 		return ObjectAccess{}, err
 	}
-	base := s.localURL
-	if base == "" {
-		base = s.publicBaseURL
-	}
-	if base != "" {
-		joined, err := JoinLocalObjectURL(base, ref.ObjectKey)
-		if err != nil {
-			return ObjectAccess{}, err
-		}
-		return ObjectAccess{URL: joined}, nil
-	}
+	// Prefer signed serve whenever configured. Leftover local_url (e.g. an old
+	// OSS/CDN host that no longer maps data_dir) must not win over /v1/images/local.
 	if len(s.signKey) > 0 && s.signServeBaseURL != "" {
 		if expiry <= 0 {
 			expiry = time.Hour
@@ -206,6 +198,17 @@ func (s *LocalImageStorage) SignURL(_ context.Context, ref ObjectRef, expiry tim
 			return ObjectAccess{}, err
 		}
 		return ObjectAccess{URL: signed, ExpiresAt: expiresAt}, nil
+	}
+	base := s.localURL
+	if base == "" {
+		base = s.publicBaseURL
+	}
+	if base != "" {
+		joined, err := JoinLocalObjectURL(base, ref.ObjectKey)
+		if err != nil {
+			return ObjectAccess{}, err
+		}
+		return ObjectAccess{URL: joined}, nil
 	}
 	return ObjectAccess{URL: localObjectURLPrefix + ref.ObjectKey}, nil
 }

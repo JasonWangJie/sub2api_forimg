@@ -172,18 +172,18 @@
               <p class="mt-1 text-xs text-gray-400">{{ t('admin.backup.imageStorage.local.dataDirHint') }}</p>
             </div>
             <div class="md:col-span-2">
-              <label class="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">{{ t('admin.backup.imageStorage.localUrl') }}</label>
-              <input v-model="imageStorageForm.local.local_url" class="input w-full" :placeholder="t('admin.backup.imageStorage.localUrlPlaceholder')" />
-              <p class="mt-1 text-xs text-gray-400">{{ t('admin.backup.imageStorage.localUrlHint') }}</p>
+              <label class="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">{{ t('admin.backup.imageStorage.local.sitePublicBaseUrl') }}</label>
+              <input v-model="imageStorageForm.public_base_url" class="input w-full" :placeholder="t('admin.backup.imageStorage.local.publicBaseUrlPlaceholder')" />
+              <p class="mt-1 text-xs text-gray-400">{{ t('admin.backup.imageStorage.local.sitePublicBaseUrlHint') }}</p>
             </div>
             <div>
               <label class="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">{{ t('admin.backup.imageStorage.prefix') }}</label>
               <input v-model="imageStorageForm.prefix" class="input w-full" placeholder="images/" />
             </div>
             <div class="md:col-span-2">
-              <label class="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">{{ t('admin.backup.imageStorage.local.sitePublicBaseUrl') }}</label>
-              <input v-model="imageStorageForm.public_base_url" class="input w-full" :placeholder="t('admin.backup.imageStorage.local.publicBaseUrlPlaceholder')" />
-              <p class="mt-1 text-xs text-gray-400">{{ t('admin.backup.imageStorage.local.sitePublicBaseUrlHint') }}</p>
+              <label class="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">{{ t('admin.backup.imageStorage.localUrl') }}</label>
+              <input v-model="imageStorageForm.local.local_url" class="input w-full" :placeholder="t('admin.backup.imageStorage.localUrlPlaceholder')" />
+              <p class="mt-1 text-xs text-gray-400">{{ t('admin.backup.imageStorage.localUrlHint') }}</p>
             </div>
           </template>
         </div>
