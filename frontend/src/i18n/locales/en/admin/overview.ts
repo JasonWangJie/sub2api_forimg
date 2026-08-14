@@ -103,9 +103,15 @@ export default {
         saved: 'S3 configuration saved'
       },
       imageStorage: {
-        title: 'Async image object storage',
-        description: 'Store generated images and reference uploads outside the application database. Provider and worker settings take effect after saving.',
+        title: 'Async image storage',
+        description: 'Upload generated images and reference files to object storage, Superbed, or a local directory. Provider and worker settings take effect after saving.',
         enabled: 'Enable async image tasks',
+        backend: 'Storage backend',
+        backends: {
+          oss: 'Object storage (S3-compatible)',
+          superbed: 'Superbed image host',
+          local: 'Local directory'
+        },
         provider: 'Storage provider',
         providers: {
           qiniu: 'Qiniu Cloud',
@@ -124,6 +130,25 @@ export default {
         endpointHint: 'A non-empty endpoint overrides the selected provider preset.',
         regionPlaceholder: 'Required, for example cn-hangzhou',
         regionRequired: 'Region is required for Qiniu Cloud, Alibaba Cloud OSS, and Tencent Cloud COS.',
+        superbed: {
+          token: 'Superbed token',
+          tokenRequired: 'Superbed token is required',
+          categories: 'Album name (optional)',
+          categoriesPlaceholder: 'Leave empty for the default album',
+          uploadUrl: 'Upload API URL',
+          help: 'Docs: https://www.superbed.cn/help ; default https://api.superbed.cn/upload'
+        },
+        localUrl: 'Public access base URL (local_url)',
+        localUrlPlaceholder: 'e.g. https://img.example.com',
+        localUrlHint: 'Async image results return local_url + object path. Ensure that host can serve the files.',
+        localUrlRequired: 'local_url is required',
+        local: {
+          dataDir: 'Local data directory',
+          dataDirPlaceholder: 'Leave empty to use {data_dir}/image_storage',
+          dataDirHint: 'Ensure the process user can write here and include it in backups. Multi-instance setups need a shared path or OSS/Superbed.',
+          publicBaseUrlPlaceholder: 'Optional fallback CDN; local_url above takes precedence',
+          serveUrlRequired: 'Local storage requires local_url, or the object CDN / site public base URL'
+        },
         runtimeTitle: 'Async task runtime',
         runtimeDescription: 'Queue recovery, reference download limits, URL signing, and retention controls.',
         asyncPublicBaseUrl: 'Public site base URL for task query links',
@@ -163,7 +188,7 @@ export default {
         librarySignedUrlExpiry: 'Library signed URL TTL (seconds)',
         libraryImportRate: 'Imports per minute',
         libraryPublishRate: 'Submissions per minute',
-        saved: 'Async image object storage saved'
+        saved: 'Async image storage saved'
       },
       schedule: {
         title: 'Scheduled Backup',

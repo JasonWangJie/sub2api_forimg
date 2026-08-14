@@ -234,11 +234,14 @@ type BatchImageConfig struct {
 	VertexGCSBaseURL             string `mapstructure:"vertex_gcs_base_url"`
 }
 
-// ImageStorageConfig 配置异步图片任务结果上传的 S3 兼容对象存储。
+// ImageStorageConfig 配置异步图片任务结果上传后端。
 // Enabled 同时作为异步图片任务功能的总开关：未启用或未配置完整凭证时，
 // 异步生图接口整体禁用，避免把上游返回的大 base64 结果塞进 Redis。
+//
+// Backend 决定实际上传目标：oss（S3 兼容对象存储）、superbed（聚合图床）、local（本机目录）。
 type ImageStorageConfig struct {
 	Enabled         bool   `mapstructure:"enabled"`
+	Backend         string `mapstructure:"backend"`  // oss | superbed | local（空则按 oss）
 	Provider        string `mapstructure:"provider"` // custom_s3 (legacy default), qiniu, aliyun, tencent
 	Endpoint        string `mapstructure:"endpoint"` // e.g. https://<account_id>.r2.cloudflarestorage.com
 	Region          string `mapstructure:"region"`   // R2 用 "auto"
@@ -247,18 +250,61 @@ type ImageStorageConfig struct {
 	SecretAccessKey string `mapstructure:"secret_access_key"`
 	Prefix          string `mapstructure:"prefix"`               // S3 key 前缀，如 "images/"
 	ForcePathStyle  bool   `mapstructure:"force_path_style"`     // MinIO/路径风格桶
-	PublicBaseURL   string `mapstructure:"public_base_url"`      // 配了则返回 public_base_url/key 直链；否则 presigned
+	PublicBaseURL   string `mapstructure:"public_base_url"`      // 配了则返回 public_base_url/key 直链；否则 presigned / 签名下载
 	PresignExpiry   int    `mapstructure:"presign_expiry_hours"` // public_base_url 为空时的 presigned 过期时长(小时)
 	MaxDownloadByte int64  `mapstructure:"max_download_bytes"`   // 下载上游 url 图片的字节上限
+
+	Superbed ImageStorageSuperbedConfig `mapstructure:"superbed"`
+	Local    ImageStorageLocalConfig    `mapstructure:"local"`
+
+	// SignServeBaseURL / SignKey 仅运行时填充：backend=local 且未配 public_base_url 时，
+	// 用于生成站内 HMAC 签名下载地址。不写入 config.yaml。
+	SignServeBaseURL string `mapstructure:"-"`
+	SignKey          []byte `mapstructure:"-"`
+}
+
+// ImageStorageSuperbedConfig 聚合图床（Superbed）上传凭证。
+type ImageStorageSuperbedConfig struct {
+	Token      string `mapstructure:"token"`
+	Categories string `mapstructure:"categories"`
+	UploadURL  string `mapstructure:"upload_url"`
+	// LocalURL 对外访问根地址；填写后异步查询返回 local_url/object_key，
+	// 而不直接返回图床原始 CDN 链接。
+	LocalURL string `mapstructure:"local_url"`
+}
+
+// ImageStorageLocalConfig 异步结果本机目录。
+type ImageStorageLocalConfig struct {
+	// DataDir 本地根目录。空则使用 {pricing.data_dir}/image_storage。
+	DataDir string `mapstructure:"data_dir"`
+	// LocalURL 对外访问根地址；填写后异步查询返回 local_url/object_key。
+	LocalURL string `mapstructure:"local_url"`
 }
 
 const (
+	ImageStorageBackendOSS      = "oss"
+	ImageStorageBackendSuperbed = "superbed"
+	ImageStorageBackendLocal    = "local"
+
 	ImageStorageProviderCustomS3 = "custom_s3"
 	ImageStorageProviderQiniu    = "qiniu"
 	ImageStorageProviderAliyun   = "aliyun"
 	ImageStorageProviderTencent  = "tencent"
 	ImageStorageProviderLocal    = "local"
+	ImageStorageProviderSuperbed = "superbed"
 )
+
+// NormalizedBackend returns oss when backend is empty for backward compatibility.
+func (c *ImageStorageConfig) NormalizedBackend() string {
+	if c == nil {
+		return ImageStorageBackendOSS
+	}
+	backend := strings.ToLower(strings.TrimSpace(c.Backend))
+	if backend == "" {
+		return ImageStorageBackendOSS
+	}
+	return backend
+}
 
 // ImageDurableStorageConfig controls where plaza/library durable bytes live
 // after a deferred submission sync (or ImportBytes). It is intentionally
@@ -322,9 +368,20 @@ type AsyncImageConfig struct {
 	PromptPreviewMaxChars   int      `mapstructure:"prompt_preview_max_chars"`
 }
 
-// IsConfigured 检查对象存储必要字段是否已配置
+// IsConfigured 检查当前 backend 所需字段是否已配置。
 func (c *ImageStorageConfig) IsConfigured() bool {
-	return c.Bucket != "" && c.AccessKeyID != "" && c.SecretAccessKey != ""
+	if c == nil {
+		return false
+	}
+	switch c.NormalizedBackend() {
+	case ImageStorageBackendSuperbed:
+		return strings.TrimSpace(c.Superbed.Token) != ""
+	case ImageStorageBackendLocal:
+		// DataDir 可在工厂侧回落到 pricing.data_dir/image_storage；此处只要 backend 正确即可。
+		return true
+	default:
+		return c.Bucket != "" && c.AccessKeyID != "" && c.SecretAccessKey != ""
+	}
 }
 
 // Active 返回异步图片任务是否可用：开关打开且凭证齐全
@@ -335,15 +392,27 @@ func (c *ImageStorageConfig) Active() bool {
 // MissingCredentialKeys 返回 IsConfigured 所缺的配置键名。
 // 用于启动日志：只说"凭证不完整"会让运维以为自己漏填了，而实际可能是值填了却没被读到。
 func (c *ImageStorageConfig) MissingCredentialKeys() []string {
+	if c == nil {
+		return []string{"image_storage"}
+	}
 	var missing []string
-	if c.Bucket == "" {
-		missing = append(missing, "image_storage.bucket")
-	}
-	if c.AccessKeyID == "" {
-		missing = append(missing, "image_storage.access_key_id")
-	}
-	if c.SecretAccessKey == "" {
-		missing = append(missing, "image_storage.secret_access_key")
+	switch c.NormalizedBackend() {
+	case ImageStorageBackendSuperbed:
+		if strings.TrimSpace(c.Superbed.Token) == "" {
+			missing = append(missing, "image_storage.superbed.token")
+		}
+	case ImageStorageBackendLocal:
+		// local 无强制凭证；目录在运行时创建。
+	default:
+		if c.Bucket == "" {
+			missing = append(missing, "image_storage.bucket")
+		}
+		if c.AccessKeyID == "" {
+			missing = append(missing, "image_storage.access_key_id")
+		}
+		if c.SecretAccessKey == "" {
+			missing = append(missing, "image_storage.secret_access_key")
+		}
 	}
 	return missing
 }
@@ -2223,6 +2292,7 @@ func setDefaults() {
 
 	// Image storage (async image task result offload to S3-compatible object storage)
 	viper.SetDefault("image_storage.enabled", false)
+	viper.SetDefault("image_storage.backend", ImageStorageBackendOSS)
 	viper.SetDefault("image_storage.provider", ImageStorageProviderCustomS3)
 	viper.SetDefault("image_storage.region", "auto")
 	viper.SetDefault("image_storage.prefix", "images/")
@@ -2238,6 +2308,12 @@ func setDefaults() {
 	viper.SetDefault("image_storage.access_key_id", "")
 	viper.SetDefault("image_storage.secret_access_key", "")
 	viper.SetDefault("image_storage.public_base_url", "")
+	viper.SetDefault("image_storage.superbed.token", "")
+	viper.SetDefault("image_storage.superbed.categories", "")
+	viper.SetDefault("image_storage.superbed.upload_url", "https://api.superbed.cn/upload")
+	viper.SetDefault("image_storage.superbed.local_url", "")
+	viper.SetDefault("image_storage.local.data_dir", "")
+	viper.SetDefault("image_storage.local.local_url", "")
 
 	// Durable plaza/library storage (separate from ephemeral async image_storage).
 	viper.SetDefault("image_durable_storage.backend", "local")

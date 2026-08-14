@@ -1366,15 +1366,19 @@ update:
   proxy_url: ""
 
 # =============================================================================
-# Image Storage (异步图片任务输入与结果对象存储)
+# Image Storage (异步图片任务输入与结果存储)
 # =============================================================================
 # 持久化异步生图接口先返回 task_id，再由客户端轮询任务状态；任务事实保存在 PostgreSQL，
-# Redis 仅承载可靠队列，生成结果和 SC 上传的参考图保存在对象存储。
+# Redis 仅承载可靠队列，生成结果和 SC 上传的参考图保存在下方选择的存储后端。
 #
 # 后台“备份 / 异步生图存储”保存过设置后，数据库设置优先于此处配置并可即时生效；
 # 此处作为首次部署和环境变量部署的回退配置。enabled=false 或凭证不完整时不接受新任务。
 image_storage:
   enabled: false
+  # 存储后端：oss（S3 兼容对象存储）| superbed（聚合图床）| local（本机目录）。
+  # 缺省 oss，兼容旧配置。
+  backend: "oss"
+  # --- backend=oss ---
   # 存储厂商：custom_s3 / qiniu / aliyun / tencent。
   # custom_s3 兼容 AWS S3、Cloudflare R2、MinIO 及其他 S3 兼容服务。
   provider: "custom_s3"
@@ -1396,13 +1400,34 @@ image_storage:
   # MinIO / 需要路径风格（path-style）访问的桶设为 true
   force_path_style: false
   # 图片公开桶或 CDN 根地址；填写后按 public_base_url/object_key 返回公开直链，
-  # 留空时查询接口动态生成 presigned 临时链接。此项不是 API 服务地址。
+  # 留空时：oss 返回 presigned；local 则使用 async_image.public_base_url 生成站内签名下载。
+  # 此项不是 API 服务地址。
   public_base_url: ""
   # public_base_url 为空时的存储层默认签名时长（小时）；新持久化异步接口优先使用
   # async_image.signed_url_expiry_seconds，旧异步接口继续使用本值。
   presign_expiry_hours: 24
   # 旧异步接口转存上游 URL 图片时的单图字节上限（默认 32 MiB）。
   max_download_bytes: 33554432
+
+  # --- backend=superbed（聚合图床，文档 https://www.superbed.cn/help）---
+  superbed:
+    # 用户中心 Token；也可用 IMAGE_STORAGE_SUPERBED_TOKEN 注入。
+    token: ""
+    # 可选相册名。
+    categories: ""
+    # 上传地址，默认官方 API。
+    upload_url: "https://api.superbed.cn/upload"
+    # 对外访问根地址。填写后异步查询返回的 data[].url 为 local_url/object_key，
+    # 例如 https://img.example.com/images/results/.../000.png
+    local_url: ""
+
+  # --- backend=local ---
+  local:
+    # 本机根目录。留空则使用 {pricing.data_dir}/image_storage。
+    # 多实例部署请挂载共享盘或改用 oss/superbed。
+    data_dir: ""
+    # 对外访问根地址。异步查询返回 local_url/object_key；优先于上方 public_base_url。
+    local_url: ""
 
 # =============================================================================
 # Durable Plaza / Library Storage (投稿与广场持久化，与异步桶分离)

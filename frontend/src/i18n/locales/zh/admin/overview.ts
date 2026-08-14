@@ -104,8 +104,14 @@ export default {
       },
       imageStorage: {
         title: '异步生图对象存储',
-        description: '将生成图片和参考图上传到外部对象存储，厂商与 Worker 配置保存后生效。',
+        description: '将生成图片和参考图上传到对象存储、聚合图床或本机目录；厂商与 Worker 配置保存后生效。',
         enabled: '启用异步生图',
+        backend: '存储后端',
+        backends: {
+          oss: '对象存储（S3 兼容）',
+          superbed: '聚合图床 Superbed',
+          local: '本机目录'
+        },
         provider: '存储厂商',
         providers: {
           qiniu: '七牛云',
@@ -124,6 +130,25 @@ export default {
         endpointHint: '显式填写后会覆盖当前厂商预设。',
         regionPlaceholder: '必填，例如 cn-hangzhou',
         regionRequired: '七牛云、阿里云 OSS 和腾讯云 COS 必须填写区域。',
+        superbed: {
+          token: 'Superbed Token',
+          tokenRequired: '请填写 Superbed Token',
+          categories: '相册名称（可选）',
+          categoriesPlaceholder: '留空则使用默认相册',
+          uploadUrl: '上传接口地址',
+          help: '文档：https://www.superbed.cn/help ；默认 https://api.superbed.cn/upload'
+        },
+        localUrl: '对外访问地址（local_url）',
+        localUrlPlaceholder: '例如 https://img.example.com',
+        localUrlHint: '异步生图结果将返回 local_url + 对象路径；请确保该域名可访问对应文件。',
+        localUrlRequired: '请填写对外访问地址 local_url',
+        local: {
+          dataDir: '本机存储目录',
+          dataDirPlaceholder: '留空则使用 {data_dir}/image_storage',
+          dataDirHint: '请确保运行用户可写，并纳入备份策略。多实例需共享同一目录或改用对象存储/图床。',
+          publicBaseUrlPlaceholder: '可选兜底 CDN；优先使用上方 local_url',
+          serveUrlRequired: '本机存储需填写 local_url，或对象 CDN / 站点公开地址之一'
+        },
         runtimeTitle: '异步任务运行参数',
         runtimeDescription: '配置队列恢复、参考图下载限制、链接签名和保留时间。',
         asyncPublicBaseUrl: '任务查询链接的站点公开地址',
@@ -163,7 +188,7 @@ export default {
         librarySignedUrlExpiry: '图库签名链接有效期（秒）',
         libraryImportRate: '每分钟导入上限',
         libraryPublishRate: '每分钟投稿上限',
-        saved: '异步生图对象存储配置已保存'
+        saved: '异步生图存储配置已保存'
       },
       schedule: {
         title: '定时备份',

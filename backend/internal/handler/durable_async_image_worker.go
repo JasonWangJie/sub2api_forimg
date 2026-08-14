@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/ctxkey"
 	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
@@ -1046,7 +1047,7 @@ func (h *DurableAsyncImageHandler) uploadAsyncImageStaging(ctx context.Context, 
 		if saveErr != nil {
 			return saveErr
 		}
-		if !sameAsyncImageObjectRef(intents[index].ObjectRef, ref) {
+		if !compatibleAsyncImageObjectRef(intents[index].ObjectRef, ref) {
 			return errors.New("stored asynchronous image identity did not match its upload intent")
 		}
 		results = append(results, service.AsyncImageResult{
@@ -1063,6 +1064,24 @@ func sameAsyncImageObjectRef(expected, actual service.ObjectRef) bool {
 	return expected.Provider == actual.Provider && expected.Bucket == actual.Bucket &&
 		expected.ObjectKey == actual.ObjectKey && expected.ContentType == actual.ContentType &&
 		expected.SizeBytes == actual.SizeBytes && strings.EqualFold(expected.ChecksumSHA256, actual.ChecksumSHA256)
+}
+
+// compatibleAsyncImageObjectRef allows Superbed to finalize ObjectKey to the
+// permanent public URL returned by the upload API while keeping other identity fields.
+func compatibleAsyncImageObjectRef(expected, actual service.ObjectRef) bool {
+	if sameAsyncImageObjectRef(expected, actual) {
+		return true
+	}
+	if !strings.EqualFold(expected.Provider, config.ImageStorageProviderSuperbed) ||
+		!strings.EqualFold(actual.Provider, config.ImageStorageProviderSuperbed) {
+		return false
+	}
+	if expected.Bucket != actual.Bucket || expected.ContentType != actual.ContentType ||
+		expected.SizeBytes != actual.SizeBytes ||
+		!strings.EqualFold(expected.ChecksumSHA256, actual.ChecksumSHA256) {
+		return false
+	}
+	return strings.HasPrefix(actual.ObjectKey, "https://") || strings.HasPrefix(actual.ObjectKey, "http://")
 }
 
 func (h *DurableAsyncImageHandler) applyAsyncImageBilling(ctx context.Context, task *service.AsyncImageTask, prepared *service.PreparedUsageBilling) error {

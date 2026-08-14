@@ -604,11 +604,13 @@ func ProvideImageStorageSettingService(
 	if cfg.ImageStorage.Enabled && !cfg.ImageStorage.Active() {
 		// 列出具体缺失的键。若这些键其实已在环境变量里设过，说明它们没被读进来，
 		// 请确认 setDefaults 中已为其注册默认值（见 config.setEnvReachableDefaults）。
-		logger.L().Warn("image_storage.enabled is true in config but object storage is not fully configured; configure it in the admin UI or complete the config file",
+		logger.L().Warn("image_storage.enabled is true in config but storage backend is not fully configured; configure it in the admin UI or complete the config file",
+			zap.String("backend", cfg.ImageStorage.NormalizedBackend()),
 			zap.Strings("missing_keys", cfg.ImageStorage.MissingCredentialKeys()))
 	}
 	svc := NewImageStorageSettingService(settingRepo, encryptor, backup, factory, cfg.ImageStorage, cfg.AsyncImage)
 	svc.identityGuard = identityGuard
+	svc.WithLocalDefaults(cfg.Pricing.DataDir, []byte(cfg.JWT.Secret))
 	return svc
 }
 

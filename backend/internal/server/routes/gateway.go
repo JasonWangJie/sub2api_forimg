@@ -172,6 +172,9 @@ func RegisterGatewayRoutes(
 		}
 	}
 
+	// HMAC-signed local async image downloads (no API key).
+	r.GET("/v1/images/local/*object_key", h.DurableAsyncImage.ServeLocalObject)
+
 	// API网关（Claude API兼容）
 	gateway := r.Group("/v1")
 	gateway.Use(bodyLimit)

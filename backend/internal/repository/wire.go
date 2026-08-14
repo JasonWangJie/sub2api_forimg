@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"strings"
 
 	entsql "entgo.io/ent/dialect/sql"
 	"github.com/Wei-Shaw/sub2api/ent"
@@ -192,7 +193,27 @@ func ProvideEnt(cfg *config.Config) (*ent.Client, error) {
 // 设置保存后重建，而不是在启动时定死一份。
 func ProvideImageStorageFactory() service.ImageStorageFactory {
 	return func(ctx context.Context, cfg *config.ImageStorageConfig) (service.ImageStorage, error) {
-		return NewS3ImageStorage(ctx, cfg)
+		if cfg == nil {
+			return nil, errors.New("image storage config is nil")
+		}
+		switch cfg.NormalizedBackend() {
+		case config.ImageStorageBackendSuperbed:
+			return NewSuperbedImageStorage(cfg)
+		case config.ImageStorageBackendLocal:
+			dataDir := strings.TrimSpace(cfg.Local.DataDir)
+			if dataDir == "" {
+				return nil, errors.New("image_storage.local.data_dir is required")
+			}
+			return service.NewLocalImageStorageWithURLOptions(
+				dataDir,
+				cfg.Local.LocalURL,
+				cfg.PublicBaseURL,
+				cfg.SignServeBaseURL,
+				cfg.SignKey,
+			)
+		default:
+			return NewS3ImageStorage(ctx, cfg)
+		}
 	}
 }
 

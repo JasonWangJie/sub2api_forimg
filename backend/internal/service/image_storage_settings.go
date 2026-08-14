@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"net/url"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -27,14 +28,25 @@ const (
 	ImageStorageProviderQiniu    = config.ImageStorageProviderQiniu
 	ImageStorageProviderAliyun   = config.ImageStorageProviderAliyun
 	ImageStorageProviderTencent  = config.ImageStorageProviderTencent
+	ImageStorageProviderLocal    = config.ImageStorageProviderLocal
+	ImageStorageProviderSuperbed = config.ImageStorageProviderSuperbed
+
+	ImageStorageBackendOSS      = config.ImageStorageBackendOSS
+	ImageStorageBackendSuperbed = config.ImageStorageBackendSuperbed
+	ImageStorageBackendLocal    = config.ImageStorageBackendLocal
 )
 
 // ResolveImageStorageProvider applies vendor endpoint presets while preserving
 // an explicit endpoint override. Empty providers retain the legacy custom_s3
 // behavior so existing stored settings need no migration.
+// Only applies when backend is oss (or empty).
 func ResolveImageStorageProvider(cfg *config.ImageStorageConfig) error {
 	if cfg == nil {
 		return errors.New("image storage config is nil")
+	}
+	cfg.Backend = cfg.NormalizedBackend()
+	if cfg.Backend != ImageStorageBackendOSS {
+		return nil
 	}
 	cfg.Provider = strings.ToLower(strings.TrimSpace(cfg.Provider))
 	if cfg.Provider == "" || cfg.Provider == "s3" {
@@ -89,11 +101,11 @@ func validImageStorageRegion(region string) bool {
 }
 
 // ErrImageStorageIncomplete 表示开关已打开但凭证不全，无法启用异步生图。
-var ErrImageStorageIncomplete = errors.New("image storage is enabled but bucket/access_key_id/secret_access_key are incomplete")
+var ErrImageStorageIncomplete = errors.New("image storage is enabled but required credentials for the selected backend are incomplete")
 
 var ErrImageStorageIdentityInUse = apperrors.Conflict(
 	"IMAGE_STORAGE_IDENTITY_IN_USE",
-	"image storage provider, bucket, endpoint, region, or addressing mode cannot change while active image objects exist; migrate or clean up the existing objects first",
+	"image storage backend/identity cannot change while active image objects exist; migrate or clean up the existing objects first",
 )
 
 // ImageStorageIdentityGuard prevents a runtime settings update from stranding
@@ -113,6 +125,7 @@ type ImageStorageFactory func(ctx context.Context, cfg *config.ImageStorageConfi
 // 只用自己的 Bucket/Prefix 区分对象；这样"数据走 backups/、图片走 images/"无需重复配置。
 type ImageStorageSettings struct {
 	Enabled       bool   `json:"enabled"`
+	Backend       string `json:"backend"` // oss | superbed | local
 	ReuseBackupS3 bool   `json:"reuse_backup_s3"`
 	Provider      string `json:"provider"`
 
@@ -122,15 +135,32 @@ type ImageStorageSettings struct {
 	PresignExpiry    int    `json:"presign_expiry_hours"`
 	MaxDownloadBytes int64  `json:"max_download_bytes"`
 
-	// 以下仅在 ReuseBackupS3 为假时使用
+	// 以下仅在 ReuseBackupS3 为假且 backend=oss 时使用
 	Endpoint        string `json:"endpoint"`
 	Region          string `json:"region"`
 	AccessKeyID     string `json:"access_key_id"`
 	SecretAccessKey string `json:"secret_access_key,omitempty"` //nolint:revive // field name follows AWS convention
 	ForcePathStyle  bool   `json:"force_path_style"`
 
+	Superbed ImageStorageSuperbedSettings `json:"superbed"`
+	Local    ImageStorageLocalSettings    `json:"local"`
+
 	AsyncImage AsyncImageRuntimeConfig   `json:"async_image"`
 	Library    ImageLibraryRuntimeConfig `json:"image_library"`
+}
+
+// ImageStorageSuperbedSettings is the admin-editable Superbed credential block.
+type ImageStorageSuperbedSettings struct {
+	Token      string `json:"token,omitempty"`
+	Categories string `json:"categories"`
+	UploadURL  string `json:"upload_url"`
+	LocalURL   string `json:"local_url"`
+}
+
+// ImageStorageLocalSettings is the admin-editable local directory block.
+type ImageStorageLocalSettings struct {
+	DataDir  string `json:"data_dir"`
+	LocalURL string `json:"local_url"`
 }
 
 // ImageLibraryRuntimeConfig controls server-side library retention and abuse
@@ -190,8 +220,10 @@ type ImageStorageSettingService struct {
 
 	// fallback 是 config.yaml 里的配置。后台从未保存过设置时沿用它，
 	// 保证升级前已用配置文件开启该功能的部署不被打断。
-	fallback      config.ImageStorageConfig
-	asyncFallback config.AsyncImageConfig
+	fallback       config.ImageStorageConfig
+	asyncFallback  config.AsyncImageConfig
+	pricingDataDir string
+	signKey        []byte
 
 	mu         sync.Mutex
 	resolved   bool
@@ -221,6 +253,16 @@ func NewImageStorageSettingService(
 		fallback:      fallback,
 		asyncFallback: asyncCfg,
 	}
+}
+
+// WithLocalDefaults injects pricing data_dir and HMAC sign material for backend=local.
+func (s *ImageStorageSettingService) WithLocalDefaults(pricingDataDir string, signKey []byte) *ImageStorageSettingService {
+	if s == nil {
+		return nil
+	}
+	s.pricingDataDir = strings.TrimSpace(pricingDataDir)
+	s.signKey = append([]byte(nil), signKey...)
+	return s
 }
 
 // Resolver 返回可注入 ImageTaskService 的解析函数。
@@ -308,7 +350,7 @@ func (s *ImageStorageSettingService) Invalidate() {
 	s.mu.Unlock()
 }
 
-// Get 返回后台设置（SecretAccessKey 已脱敏）。从未保存过时返回 config.yaml 的等价值。
+// Get 返回后台设置（SecretAccessKey / Superbed.Token 已脱敏）。从未保存过时返回 config.yaml 的等价值。
 func (s *ImageStorageSettingService) Get(ctx context.Context) (*ImageStorageSettings, error) {
 	settings, err := s.load(ctx)
 	if err != nil {
@@ -319,6 +361,7 @@ func (s *ImageStorageSettingService) Get(ctx context.Context) (*ImageStorageSett
 	}
 	normalizeImageStorageSettings(settings)
 	settings.SecretAccessKey = ""
+	settings.Superbed.Token = ""
 	return settings, nil
 }
 
@@ -343,11 +386,21 @@ func (s *ImageStorageSettingService) RuntimeConfig(ctx context.Context) (AsyncIm
 	return out, nil
 }
 
-// SecretConfigured 供前端展示"已配置"占位符。
+// SecretConfigured 供前端展示"已配置"占位符（OSS secret 或 Superbed token）。
 func (s *ImageStorageSettingService) SecretConfigured(ctx context.Context) bool {
 	settings, err := s.load(ctx)
 	if err != nil || settings == nil {
+		if s.fallback.NormalizedBackend() == ImageStorageBackendSuperbed {
+			return strings.TrimSpace(s.fallback.Superbed.Token) != ""
+		}
 		return s.fallback.SecretAccessKey != ""
+	}
+	backend := strings.ToLower(strings.TrimSpace(settings.Backend))
+	if backend == "" {
+		backend = ImageStorageBackendOSS
+	}
+	if backend == ImageStorageBackendSuperbed {
+		return settings.Superbed.Token != ""
 	}
 	if settings.ReuseBackupS3 {
 		cfg, err := s.backupCredentials(ctx)
@@ -356,30 +409,60 @@ func (s *ImageStorageSettingService) SecretConfigured(ctx context.Context) bool 
 	return settings.SecretAccessKey != ""
 }
 
-// Update 保存设置并立即生效。SecretAccessKey 留空表示沿用已保存的值。
+// SuperbedTokenConfigured reports whether a Superbed token is stored.
+func (s *ImageStorageSettingService) SuperbedTokenConfigured(ctx context.Context) bool {
+	settings, err := s.load(ctx)
+	if err != nil || settings == nil {
+		return strings.TrimSpace(s.fallback.Superbed.Token) != ""
+	}
+	return settings.Superbed.Token != ""
+}
+
+// Update 保存设置并立即生效。SecretAccessKey / Superbed.Token 留空表示沿用已保存的值。
 func (s *ImageStorageSettingService) Update(ctx context.Context, in ImageStorageSettings) (*ImageStorageSettings, error) {
 	normalizeImageStorageSettings(&in)
 
-	if in.ReuseBackupS3 {
-		// 复用备份凭证时不落自己的密钥，避免同一份密钥在库里存两份。
-		in.Endpoint, in.Region, in.AccessKeyID, in.SecretAccessKey = "", "", "", ""
-		in.ForcePathStyle = false
-		in.Provider = ImageStorageProviderCustomS3
-	} else if in.SecretAccessKey == "" {
-		if old, err := s.load(ctx); err == nil && old != nil {
-			in.SecretAccessKey = old.SecretAccessKey
+	switch in.Backend {
+	case ImageStorageBackendSuperbed:
+		in.ReuseBackupS3 = false
+		if in.Superbed.Token == "" {
+			if old, err := s.load(ctx); err == nil && old != nil {
+				in.Superbed.Token = old.Superbed.Token
+			}
+		} else {
+			if s.backup == nil || !s.backup.EncryptionKeyConfigured() {
+				return nil, ErrSecretEncryptionKeyNotConfigured
+			}
+			encrypted, err := s.encryptor.Encrypt(in.Superbed.Token)
+			if err != nil {
+				return nil, fmt.Errorf("encrypt superbed token: %w", err)
+			}
+			in.Superbed.Token = encrypted
 		}
-	} else {
-		// 拒绝用自动生成的临时密钥加密：重启后密文无法解密（#4524）。
-		// 与备份 S3 配置共用同一把密钥，故复用其配置状态判断。
-		if s.backup == nil || !s.backup.EncryptionKeyConfigured() {
-			return nil, ErrSecretEncryptionKeyNotConfigured
+	case ImageStorageBackendLocal:
+		in.ReuseBackupS3 = false
+	default:
+		if in.ReuseBackupS3 {
+			// 复用备份凭证时不落自己的密钥，避免同一份密钥在库里存两份。
+			in.Endpoint, in.Region, in.AccessKeyID, in.SecretAccessKey = "", "", "", ""
+			in.ForcePathStyle = false
+			in.Provider = ImageStorageProviderCustomS3
+		} else if in.SecretAccessKey == "" {
+			if old, err := s.load(ctx); err == nil && old != nil {
+				in.SecretAccessKey = old.SecretAccessKey
+			}
+		} else {
+			// 拒绝用自动生成的临时密钥加密：重启后密文无法解密（#4524）。
+			// 与备份 S3 配置共用同一把密钥，故复用其配置状态判断。
+			if s.backup == nil || !s.backup.EncryptionKeyConfigured() {
+				return nil, ErrSecretEncryptionKeyNotConfigured
+			}
+			encrypted, err := s.encryptor.Encrypt(in.SecretAccessKey)
+			if err != nil {
+				return nil, fmt.Errorf("encrypt secret: %w", err)
+			}
+			in.SecretAccessKey = encrypted
 		}
-		encrypted, err := s.encryptor.Encrypt(in.SecretAccessKey)
-		if err != nil {
-			return nil, fmt.Errorf("encrypt secret: %w", err)
-		}
-		in.SecretAccessKey = encrypted
 	}
 	if err := s.preventStorageIdentityChange(ctx, &in); err != nil {
 		return nil, err
@@ -403,15 +486,20 @@ func (s *ImageStorageSettingService) Update(ctx context.Context, in ImageStorage
 	s.Invalidate()
 
 	in.SecretAccessKey = ""
+	in.Superbed.Token = ""
 	return &in, nil
 }
 
 type imageStorageIdentity struct {
+	Backend        string
 	Provider       string
 	Bucket         string
 	Endpoint       string
 	Region         string
 	ForcePathStyle bool
+	LocalDataDir   string
+	SuperbedCat    string
+	SuperbedURL    string
 }
 
 func (s *ImageStorageSettingService) preventStorageIdentityChange(ctx context.Context, next *ImageStorageSettings) error {
@@ -452,24 +540,38 @@ func (s *ImageStorageSettingService) storageIdentity(ctx context.Context, settin
 		return imageStorageIdentity{}, err
 	}
 	return imageStorageIdentity{
+		Backend:        cfg.NormalizedBackend(),
 		Provider:       cfg.Provider,
 		Bucket:         cfg.Bucket,
 		Endpoint:       cfg.Endpoint,
 		Region:         cfg.Region,
 		ForcePathStyle: cfg.ForcePathStyle,
+		LocalDataDir:   cfg.Local.DataDir,
+		SuperbedCat:    cfg.Superbed.Categories,
+		SuperbedURL:    cfg.Superbed.UploadURL,
 	}, nil
 }
 
 // TestConnection performs a complete object-store probe: upload, HEAD, read,
 // and delete. Merely constructing an SDK client cannot verify credentials,
 // bucket permissions, endpoint routing, or cleanup permission.
-// 与 Update 一样支持留空 SecretAccessKey 表示沿用已保存的值。
+// 与 Update 一样支持留空 SecretAccessKey / Superbed.Token 表示沿用已保存的值。
 func (s *ImageStorageSettingService) TestConnection(ctx context.Context, in ImageStorageSettings) error {
 	normalizeImageStorageSettings(&in)
-	if !in.ReuseBackupS3 && in.SecretAccessKey == "" {
-		old, err := s.load(ctx)
-		if err == nil && old != nil {
-			in.SecretAccessKey = old.SecretAccessKey
+	backend := in.Backend
+	if backend == ImageStorageBackendSuperbed {
+		if in.Superbed.Token == "" {
+			old, err := s.load(ctx)
+			if err == nil && old != nil {
+				in.Superbed.Token = old.Superbed.Token
+			}
+		}
+	} else if backend == ImageStorageBackendOSS || backend == "" {
+		if !in.ReuseBackupS3 && in.SecretAccessKey == "" {
+			old, err := s.load(ctx)
+			if err == nil && old != nil {
+				in.SecretAccessKey = old.SecretAccessKey
+			}
 		}
 	}
 	cfg, err := s.toImageStorageConfig(ctx, &in)
@@ -507,11 +609,12 @@ func (s *ImageStorageSettingService) TestConnection(ctx context.Context, in Imag
 		}
 	}()
 
+	// Superbed ObjectKey becomes a public URL after upload; Head/Read against that URL.
 	metadata, err := durable.Head(ctx, ref)
 	if err != nil {
 		return fmt.Errorf("image storage probe head: %w", err)
 	}
-	if metadata.SizeBytes != int64(len(payload)) {
+	if metadata.SizeBytes != int64(len(payload)) && cfg.NormalizedBackend() != ImageStorageBackendSuperbed {
 		return fmt.Errorf("image storage probe head returned size %d, expected %d", metadata.SizeBytes, len(payload))
 	}
 	body, err := durable.Read(ctx, ref)
@@ -536,6 +639,15 @@ func (s *ImageStorageSettingService) TestConnection(ctx context.Context, in Imag
 	return nil
 }
 
+// EffectiveRuntimeStorageConfig returns the resolved image_storage config used by
+// the current durable backend (including local SignKey / DataDir enrichment).
+func (s *ImageStorageSettingService) EffectiveRuntimeStorageConfig(ctx context.Context) (*config.ImageStorageConfig, error) {
+	if s == nil {
+		return nil, errors.New("image storage settings service is nil")
+	}
+	return s.effectiveConfig(ctx)
+}
+
 // effectiveConfig 把后台设置（或 config.yaml 回落）解析成运行时配置。
 func (s *ImageStorageSettingService) effectiveConfig(ctx context.Context) (*config.ImageStorageConfig, error) {
 	settings, err := s.load(ctx)
@@ -543,8 +655,8 @@ func (s *ImageStorageSettingService) effectiveConfig(ctx context.Context) (*conf
 		return nil, err
 	}
 	if settings == nil {
-		fallback := s.fallback
-		return &fallback, nil
+		normalized := settingsFromConfig(s.fallback, s.asyncFallback)
+		return s.toImageStorageConfig(ctx, normalized)
 	}
 	return s.toImageStorageConfig(ctx, settings)
 }
@@ -552,6 +664,7 @@ func (s *ImageStorageSettingService) effectiveConfig(ctx context.Context) (*conf
 func (s *ImageStorageSettingService) toImageStorageConfig(ctx context.Context, in *ImageStorageSettings) (*config.ImageStorageConfig, error) {
 	cfg := &config.ImageStorageConfig{
 		Enabled:         in.Enabled,
+		Backend:         in.Backend,
 		Provider:        in.Provider,
 		Bucket:          in.Bucket,
 		Prefix:          in.Prefix,
@@ -563,36 +676,73 @@ func (s *ImageStorageSettingService) toImageStorageConfig(ctx context.Context, i
 		AccessKeyID:     in.AccessKeyID,
 		SecretAccessKey: in.SecretAccessKey,
 		ForcePathStyle:  in.ForcePathStyle,
+		Superbed: config.ImageStorageSuperbedConfig{
+			Token:      in.Superbed.Token,
+			Categories: in.Superbed.Categories,
+			UploadURL:  in.Superbed.UploadURL,
+			LocalURL:   in.Superbed.LocalURL,
+		},
+		Local: config.ImageStorageLocalConfig{
+			DataDir:  in.Local.DataDir,
+			LocalURL: in.Local.LocalURL,
+		},
 	}
 
-	if in.ReuseBackupS3 {
-		backupCfg, err := s.backupCredentials(ctx)
-		if err != nil {
+	switch cfg.NormalizedBackend() {
+	case ImageStorageBackendSuperbed:
+		if cfg.Superbed.Token != "" && s.encryptor != nil {
+			decrypted, err := s.encryptor.Decrypt(cfg.Superbed.Token)
+			if err != nil {
+				logger.L().Warn("image_storage superbed token decrypt failed; treating the stored value as plaintext", zap.Error(err))
+			} else {
+				cfg.Superbed.Token = decrypted
+			}
+		}
+		cfg.Provider = ImageStorageProviderSuperbed
+	case ImageStorageBackendLocal:
+		cfg.Provider = ImageStorageProviderLocal
+		if strings.TrimSpace(cfg.Local.DataDir) == "" {
+			base := strings.TrimSpace(s.pricingDataDir)
+			if base == "" {
+				base = "./data"
+			}
+			cfg.Local.DataDir = filepath.Join(base, "image_storage")
+		}
+		cfg.SignServeBaseURL = strings.TrimSpace(in.AsyncImage.PublicBaseURL)
+		if cfg.SignServeBaseURL == "" {
+			cfg.SignServeBaseURL = strings.TrimSpace(s.asyncFallback.PublicBaseURL)
+		}
+		cfg.SignKey = append([]byte(nil), s.signKey...)
+	default:
+		if in.ReuseBackupS3 {
+			backupCfg, err := s.backupCredentials(ctx)
+			if err != nil {
+				return nil, err
+			}
+			if backupCfg == nil {
+				return nil, errors.New("image storage is set to reuse the backup S3 configuration, but no backup S3 configuration exists")
+			}
+			cfg.Endpoint = backupCfg.Endpoint
+			cfg.Provider = ImageStorageProviderCustomS3
+			cfg.Region = backupCfg.Region
+			cfg.AccessKeyID = backupCfg.AccessKeyID
+			cfg.SecretAccessKey = backupCfg.SecretAccessKey
+			cfg.ForcePathStyle = backupCfg.ForcePathStyle
+			if cfg.Bucket == "" {
+				cfg.Bucket = backupCfg.Bucket
+			}
+		} else if cfg.SecretAccessKey != "" && s.encryptor != nil {
+			decrypted, err := s.encryptor.Decrypt(cfg.SecretAccessKey)
+			if err != nil {
+				// 兼容未加密的旧数据，与备份配置的处理保持一致。
+				logger.L().Warn("image_storage secret decrypt failed; treating the stored value as plaintext", zap.Error(err))
+			} else {
+				cfg.SecretAccessKey = decrypted
+			}
+		}
+		if err := ResolveImageStorageProvider(cfg); err != nil {
 			return nil, err
 		}
-		if backupCfg == nil {
-			return nil, errors.New("image storage is set to reuse the backup S3 configuration, but no backup S3 configuration exists")
-		}
-		cfg.Endpoint = backupCfg.Endpoint
-		cfg.Provider = ImageStorageProviderCustomS3
-		cfg.Region = backupCfg.Region
-		cfg.AccessKeyID = backupCfg.AccessKeyID
-		cfg.SecretAccessKey = backupCfg.SecretAccessKey
-		cfg.ForcePathStyle = backupCfg.ForcePathStyle
-		if cfg.Bucket == "" {
-			cfg.Bucket = backupCfg.Bucket
-		}
-	} else if cfg.SecretAccessKey != "" {
-		decrypted, err := s.encryptor.Decrypt(cfg.SecretAccessKey)
-		if err != nil {
-			// 兼容未加密的旧数据，与备份配置的处理保持一致。
-			logger.L().Warn("image_storage secret decrypt failed; treating the stored value as plaintext", zap.Error(err))
-		} else {
-			cfg.SecretAccessKey = decrypted
-		}
-	}
-	if err := ResolveImageStorageProvider(cfg); err != nil {
-		return nil, err
 	}
 	return cfg, nil
 }
@@ -624,6 +774,7 @@ func (s *ImageStorageSettingService) load(ctx context.Context) (*ImageStorageSet
 func settingsFromConfig(cfg config.ImageStorageConfig, asyncFallback ...config.AsyncImageConfig) *ImageStorageSettings {
 	settings := &ImageStorageSettings{
 		Enabled:          cfg.Enabled,
+		Backend:          cfg.Backend,
 		Provider:         cfg.Provider,
 		Bucket:           cfg.Bucket,
 		Prefix:           cfg.Prefix,
@@ -635,6 +786,16 @@ func settingsFromConfig(cfg config.ImageStorageConfig, asyncFallback ...config.A
 		AccessKeyID:      cfg.AccessKeyID,
 		SecretAccessKey:  cfg.SecretAccessKey,
 		ForcePathStyle:   cfg.ForcePathStyle,
+		Superbed: ImageStorageSuperbedSettings{
+			Token:      cfg.Superbed.Token,
+			Categories: cfg.Superbed.Categories,
+			UploadURL:  cfg.Superbed.UploadURL,
+			LocalURL:   cfg.Superbed.LocalURL,
+		},
+		Local: ImageStorageLocalSettings{
+			DataDir:  cfg.Local.DataDir,
+			LocalURL: cfg.Local.LocalURL,
+		},
 	}
 	if len(asyncFallback) > 0 {
 		settings.AsyncImage = asyncRuntimeFromConfig(asyncFallback[0])
@@ -644,6 +805,15 @@ func settingsFromConfig(cfg config.ImageStorageConfig, asyncFallback ...config.A
 }
 
 func normalizeImageStorageSettings(in *ImageStorageSettings) {
+	in.Backend = strings.ToLower(strings.TrimSpace(in.Backend))
+	switch in.Backend {
+	case ImageStorageBackendOSS, ImageStorageBackendSuperbed, ImageStorageBackendLocal:
+	case "":
+		in.Backend = ImageStorageBackendOSS
+	default:
+		in.Backend = ImageStorageBackendOSS
+	}
+
 	in.Provider = strings.ToLower(strings.TrimSpace(in.Provider))
 	if in.Provider == "" || in.Provider == "s3" {
 		in.Provider = ImageStorageProviderCustomS3
@@ -671,6 +841,26 @@ func normalizeImageStorageSettings(in *ImageStorageSettings) {
 	if in.MaxDownloadBytes <= 0 {
 		in.MaxDownloadBytes = defaultImageMaxDownloadBytes
 	}
+
+	in.Superbed.Token = strings.TrimSpace(in.Superbed.Token)
+	in.Superbed.Categories = strings.TrimSpace(in.Superbed.Categories)
+	in.Superbed.UploadURL = strings.TrimSpace(strings.TrimRight(in.Superbed.UploadURL, "/"))
+	if in.Superbed.UploadURL == "" {
+		in.Superbed.UploadURL = "https://api.superbed.cn/upload"
+	}
+	in.Superbed.LocalURL = strings.TrimSpace(strings.TrimRight(in.Superbed.LocalURL, "/"))
+	in.Local.DataDir = strings.TrimSpace(in.Local.DataDir)
+	in.Local.LocalURL = strings.TrimSpace(strings.TrimRight(in.Local.LocalURL, "/"))
+
+	if in.Backend == ImageStorageBackendLocal {
+		in.Provider = ImageStorageProviderLocal
+		in.ReuseBackupS3 = false
+	}
+	if in.Backend == ImageStorageBackendSuperbed {
+		in.Provider = ImageStorageProviderSuperbed
+		in.ReuseBackupS3 = false
+	}
+
 	normalizeAsyncImageRuntimeConfig(&in.AsyncImage)
 	normalizeImageLibraryRuntimeConfig(&in.Library)
 }

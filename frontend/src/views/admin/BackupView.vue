@@ -73,6 +73,14 @@
 
         <div class="grid grid-cols-1 gap-3 md:grid-cols-2">
           <div>
+            <label class="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">{{ t('admin.backup.imageStorage.backend') }}</label>
+            <select v-model="imageStorageForm.backend" class="input w-full">
+              <option value="oss">{{ t('admin.backup.imageStorage.backends.oss') }}</option>
+              <option value="superbed">{{ t('admin.backup.imageStorage.backends.superbed') }}</option>
+              <option value="local">{{ t('admin.backup.imageStorage.backends.local') }}</option>
+            </select>
+          </div>
+          <div v-if="imageStorageForm.backend === 'oss'">
             <label class="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">{{ t('admin.backup.imageStorage.provider') }}</label>
             <select v-model="imageStorageForm.provider" class="input w-full">
               <option value="qiniu">{{ t('admin.backup.imageStorage.providers.qiniu') }}</option>
@@ -81,53 +89,102 @@
               <option value="custom_s3">{{ t('admin.backup.imageStorage.providers.custom_s3') }}</option>
             </select>
           </div>
-          <div v-if="imageStorageForm.provider === 'custom_s3'" class="flex items-end pb-2">
+          <div v-if="imageStorageForm.backend === 'oss' && imageStorageForm.provider === 'custom_s3'" class="flex items-end pb-2">
             <label class="inline-flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300">
               <input v-model="imageStorageForm.reuse_backup_s3" type="checkbox" />
               <span>{{ t('admin.backup.imageStorage.reuseBackupS3') }}</span>
             </label>
           </div>
-          <div>
-            <label class="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">{{ t('admin.backup.imageStorage.bucket') }}</label>
-            <input v-model="imageStorageForm.bucket" class="input w-full" :placeholder="imageStorageForm.reuse_backup_s3 ? t('admin.backup.imageStorage.bucketInherited') : ''" />
-          </div>
-          <div>
-            <label class="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">{{ t('admin.backup.imageStorage.prefix') }}</label>
-            <input v-model="imageStorageForm.prefix" class="input w-full" placeholder="images/" />
-          </div>
 
-          <template v-if="!imageStorageForm.reuse_backup_s3">
+          <template v-if="imageStorageForm.backend === 'oss'">
             <div>
-              <label class="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">{{ t('admin.backup.s3.endpoint') }}</label>
-              <input v-model="imageStorageForm.endpoint" class="input w-full" :placeholder="t('admin.backup.imageStorage.endpointPlaceholder')" />
-              <p class="mt-1 text-xs text-gray-400">{{ t('admin.backup.imageStorage.endpointHint') }}</p>
+              <label class="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">{{ t('admin.backup.imageStorage.bucket') }}</label>
+              <input v-model="imageStorageForm.bucket" class="input w-full" :placeholder="imageStorageForm.reuse_backup_s3 ? t('admin.backup.imageStorage.bucketInherited') : ''" />
             </div>
             <div>
-              <label class="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">{{ t('admin.backup.s3.region') }}</label>
-              <input v-model="imageStorageForm.region" class="input w-full" :placeholder="imageStorageForm.provider === 'custom_s3' ? 'auto' : t('admin.backup.imageStorage.regionPlaceholder')" />
+              <label class="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">{{ t('admin.backup.imageStorage.prefix') }}</label>
+              <input v-model="imageStorageForm.prefix" class="input w-full" placeholder="images/" />
+            </div>
+
+            <template v-if="!imageStorageForm.reuse_backup_s3">
+              <div>
+                <label class="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">{{ t('admin.backup.s3.endpoint') }}</label>
+                <input v-model="imageStorageForm.endpoint" class="input w-full" :placeholder="t('admin.backup.imageStorage.endpointPlaceholder')" />
+                <p class="mt-1 text-xs text-gray-400">{{ t('admin.backup.imageStorage.endpointHint') }}</p>
+              </div>
+              <div>
+                <label class="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">{{ t('admin.backup.s3.region') }}</label>
+                <input v-model="imageStorageForm.region" class="input w-full" :placeholder="imageStorageForm.provider === 'custom_s3' ? 'auto' : t('admin.backup.imageStorage.regionPlaceholder')" />
+              </div>
+              <div>
+                <label class="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">{{ t('admin.backup.s3.accessKeyId') }}</label>
+                <input v-model="imageStorageForm.access_key_id" class="input w-full" />
+              </div>
+              <div>
+                <label class="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">{{ t('admin.backup.s3.secretAccessKey') }}</label>
+                <input v-model="imageStorageForm.secret_access_key" type="password" class="input w-full" :placeholder="imageStorageSecretConfigured ? t('admin.backup.s3.secretConfigured') : ''" />
+              </div>
+              <label class="inline-flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300 md:col-span-2">
+                <input v-model="imageStorageForm.force_path_style" type="checkbox" />
+                <span>{{ t('admin.backup.s3.forcePathStyle') }}</span>
+              </label>
+            </template>
+
+            <div>
+              <label class="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">{{ t('admin.backup.imageStorage.objectPublicBaseUrl') }}</label>
+              <input v-model="imageStorageForm.public_base_url" class="input w-full" :placeholder="t('admin.backup.imageStorage.publicBaseUrlPlaceholder')" />
             </div>
             <div>
-              <label class="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">{{ t('admin.backup.s3.accessKeyId') }}</label>
-              <input v-model="imageStorageForm.access_key_id" class="input w-full" />
+              <label class="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">{{ t('admin.backup.imageStorage.presignExpiryHours') }}</label>
+              <input v-model.number="imageStorageForm.presign_expiry_hours" type="number" min="1" class="input w-full" />
             </div>
-            <div>
-              <label class="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">{{ t('admin.backup.s3.secretAccessKey') }}</label>
-              <input v-model="imageStorageForm.secret_access_key" type="password" class="input w-full" :placeholder="imageStorageSecretConfigured ? t('admin.backup.s3.secretConfigured') : ''" />
-            </div>
-            <label class="inline-flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300 md:col-span-2">
-              <input v-model="imageStorageForm.force_path_style" type="checkbox" />
-              <span>{{ t('admin.backup.s3.forcePathStyle') }}</span>
-            </label>
           </template>
 
-          <div>
-            <label class="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">{{ t('admin.backup.imageStorage.objectPublicBaseUrl') }}</label>
-            <input v-model="imageStorageForm.public_base_url" class="input w-full" :placeholder="t('admin.backup.imageStorage.publicBaseUrlPlaceholder')" />
-          </div>
-          <div>
-            <label class="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">{{ t('admin.backup.imageStorage.presignExpiryHours') }}</label>
-            <input v-model.number="imageStorageForm.presign_expiry_hours" type="number" min="1" class="input w-full" />
-          </div>
+          <template v-else-if="imageStorageForm.backend === 'superbed'">
+            <div>
+              <label class="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">{{ t('admin.backup.imageStorage.superbed.token') }}</label>
+              <input v-model="imageStorageForm.superbed.token" type="password" class="input w-full" :placeholder="imageStorageSuperbedTokenConfigured ? t('admin.backup.s3.secretConfigured') : ''" />
+            </div>
+            <div>
+              <label class="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">{{ t('admin.backup.imageStorage.superbed.categories') }}</label>
+              <input v-model="imageStorageForm.superbed.categories" class="input w-full" :placeholder="t('admin.backup.imageStorage.superbed.categoriesPlaceholder')" />
+            </div>
+            <div class="md:col-span-2">
+              <label class="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">{{ t('admin.backup.imageStorage.superbed.uploadUrl') }}</label>
+              <input v-model="imageStorageForm.superbed.upload_url" class="input w-full" placeholder="https://api.superbed.cn/upload" />
+              <p class="mt-1 text-xs text-gray-400">{{ t('admin.backup.imageStorage.superbed.help') }}</p>
+            </div>
+            <div class="md:col-span-2">
+              <label class="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">{{ t('admin.backup.imageStorage.localUrl') }}</label>
+              <input v-model="imageStorageForm.superbed.local_url" class="input w-full" :placeholder="t('admin.backup.imageStorage.localUrlPlaceholder')" />
+              <p class="mt-1 text-xs text-gray-400">{{ t('admin.backup.imageStorage.localUrlHint') }}</p>
+            </div>
+            <div>
+              <label class="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">{{ t('admin.backup.imageStorage.prefix') }}</label>
+              <input v-model="imageStorageForm.prefix" class="input w-full" placeholder="images/" />
+            </div>
+          </template>
+
+          <template v-else-if="imageStorageForm.backend === 'local'">
+            <div class="md:col-span-2">
+              <label class="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">{{ t('admin.backup.imageStorage.local.dataDir') }}</label>
+              <input v-model="imageStorageForm.local.data_dir" class="input w-full" :placeholder="t('admin.backup.imageStorage.local.dataDirPlaceholder')" />
+              <p class="mt-1 text-xs text-gray-400">{{ t('admin.backup.imageStorage.local.dataDirHint') }}</p>
+            </div>
+            <div class="md:col-span-2">
+              <label class="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">{{ t('admin.backup.imageStorage.localUrl') }}</label>
+              <input v-model="imageStorageForm.local.local_url" class="input w-full" :placeholder="t('admin.backup.imageStorage.localUrlPlaceholder')" />
+              <p class="mt-1 text-xs text-gray-400">{{ t('admin.backup.imageStorage.localUrlHint') }}</p>
+            </div>
+            <div>
+              <label class="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">{{ t('admin.backup.imageStorage.prefix') }}</label>
+              <input v-model="imageStorageForm.prefix" class="input w-full" placeholder="images/" />
+            </div>
+            <div>
+              <label class="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">{{ t('admin.backup.imageStorage.objectPublicBaseUrl') }}</label>
+              <input v-model="imageStorageForm.public_base_url" class="input w-full" :placeholder="t('admin.backup.imageStorage.local.publicBaseUrlPlaceholder')" />
+            </div>
+          </template>
         </div>
 
         <div class="mt-6 border-t border-gray-200 pt-5 dark:border-dark-700">
@@ -616,6 +673,7 @@ const testingS3 = ref(false)
 // to reuse the credentials configured above and only differ by prefix.
 const imageStorageForm = ref<ImageStorageConfig>({
   enabled: false,
+  backend: 'oss',
   provider: 'custom_s3',
   reuse_backup_s3: true,
   bucket: '',
@@ -628,6 +686,16 @@ const imageStorageForm = ref<ImageStorageConfig>({
   access_key_id: '',
   secret_access_key: '',
   force_path_style: false,
+  superbed: {
+    token: '',
+    categories: '',
+    upload_url: 'https://api.superbed.cn/upload',
+    local_url: '',
+  },
+  local: {
+    data_dir: '',
+    local_url: '',
+  },
   async_image: {
     public_base_url: '',
     worker_concurrency: 4,
@@ -705,6 +773,7 @@ const libraryMaxImageMP = computed({
   },
 })
 const imageStorageSecretConfigured = ref(false)
+const imageStorageSuperbedTokenConfigured = ref(false)
 const savingImageStorage = ref(false)
 const testingImageStorage = ref(false)
 
@@ -880,14 +949,25 @@ async function saveS3Config() {
 
 async function loadImageStorageConfig() {
   try {
-    const { config, secret_configured } = await adminAPI.backup.getImageStorageConfig()
+    const { config, secret_configured, superbed_token_configured } = await adminAPI.backup.getImageStorageConfig()
     imageStorageForm.value = {
       ...imageStorageForm.value,
       ...config,
+      backend: config.backend || 'oss',
       provider: config.provider || 'custom_s3',
       prefix: config.prefix || 'images/',
       region: config.region || ((config.provider || 'custom_s3') === 'custom_s3' ? 'auto' : ''),
       secret_access_key: '',
+      superbed: {
+        ...imageStorageForm.value.superbed,
+        ...(config.superbed || {}),
+        token: '',
+        upload_url: config.superbed?.upload_url || 'https://api.superbed.cn/upload',
+      },
+      local: {
+        ...imageStorageForm.value.local,
+        ...(config.local || {}),
+      },
       async_image: {
         ...imageStorageForm.value.async_image,
         ...(config.async_image || {}),
@@ -898,10 +978,20 @@ async function loadImageStorageConfig() {
       },
     }
     imageStorageSecretConfigured.value = secret_configured
+    imageStorageSuperbedTokenConfigured.value = Boolean(superbed_token_configured)
   } catch (error) {
     appStore.showError((error as { message?: string })?.message || t('errors.networkError'))
   }
 }
+
+watch(
+  () => imageStorageForm.value.backend,
+  (backend) => {
+    if (backend !== 'oss') {
+      imageStorageForm.value.reuse_backup_s3 = false
+    }
+  },
+)
 
 watch(
   () => imageStorageForm.value.provider,
@@ -951,12 +1041,34 @@ async function testImageStorage() {
 }
 
 function validateImageStorageConfig(): boolean {
-  if (
-    imageStorageForm.value.provider !== 'custom_s3' &&
-    !imageStorageForm.value.region.trim()
-  ) {
-    appStore.showError(t('admin.backup.imageStorage.regionRequired'))
-    return false
+  if (imageStorageForm.value.backend === 'oss') {
+    if (
+      imageStorageForm.value.provider !== 'custom_s3' &&
+      !imageStorageForm.value.region.trim()
+    ) {
+      appStore.showError(t('admin.backup.imageStorage.regionRequired'))
+      return false
+    }
+  }
+  if (imageStorageForm.value.backend === 'superbed') {
+    if (!imageStorageForm.value.superbed.token?.trim() && !imageStorageSuperbedTokenConfigured.value) {
+      appStore.showError(t('admin.backup.imageStorage.superbed.tokenRequired'))
+      return false
+    }
+    if (!imageStorageForm.value.superbed.local_url.trim()) {
+      appStore.showError(t('admin.backup.imageStorage.localUrlRequired'))
+      return false
+    }
+  }
+  if (imageStorageForm.value.backend === 'local') {
+    if (
+      !imageStorageForm.value.local.local_url.trim() &&
+      !imageStorageForm.value.public_base_url.trim() &&
+      !imageStorageForm.value.async_image.public_base_url.trim()
+    ) {
+      appStore.showError(t('admin.backup.imageStorage.local.serveUrlRequired'))
+      return false
+    }
   }
   return true
 }

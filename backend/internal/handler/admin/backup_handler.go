@@ -219,8 +219,9 @@ func (h *BackupHandler) GetImageStorageConfig(c *gin.Context) {
 		return
 	}
 	response.Success(c, gin.H{
-		"config":            cfg,
-		"secret_configured": h.imageStorage.SecretConfigured(ctx),
+		"config":                    cfg,
+		"secret_configured":         h.imageStorage.SecretConfigured(ctx),
+		"superbed_token_configured": h.imageStorage.SuperbedTokenConfigured(ctx),
 	})
 }
 

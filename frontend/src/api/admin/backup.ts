@@ -81,11 +81,11 @@ export async function testS3Connection(config: BackupS3Config): Promise<TestS3Re
 
 // Async image object storage
 //
-// Shares the S3 client with backups, so `reuse_backup_s3` borrows the endpoint and
-// credentials configured above and only keeps its own bucket/prefix.
+// Shares the S3 client with backups when backend=oss and reuse_backup_s3 is set.
 export interface ImageStorageConfig {
   enabled: boolean
-  provider: 'custom_s3' | 'qiniu' | 'aliyun' | 'tencent'
+  backend: 'oss' | 'superbed' | 'local'
+  provider: 'custom_s3' | 'qiniu' | 'aliyun' | 'tencent' | 'local' | 'superbed'
   reuse_backup_s3: boolean
   bucket: string
   prefix: string
@@ -97,8 +97,22 @@ export interface ImageStorageConfig {
   access_key_id: string
   secret_access_key?: string
   force_path_style: boolean
+  superbed: ImageStorageSuperbedConfig
+  local: ImageStorageLocalConfig
   async_image: AsyncImageRuntimeConfig
   image_library: ImageLibraryRuntimeConfig
+}
+
+export interface ImageStorageSuperbedConfig {
+  token?: string
+  categories: string
+  upload_url: string
+  local_url: string
+}
+
+export interface ImageStorageLocalConfig {
+  data_dir: string
+  local_url: string
 }
 
 export interface ImageLibraryRuntimeConfig {
@@ -143,6 +157,7 @@ export interface AsyncImageRuntimeConfig {
 export interface ImageStorageConfigResponse {
   config: ImageStorageConfig
   secret_configured: boolean
+  superbed_token_configured?: boolean
 }
 
 export async function getImageStorageConfig(): Promise<ImageStorageConfigResponse> {

@@ -2,11 +2,15 @@ package service
 
 import (
 	"context"
+	"crypto/hmac"
 	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"io"
+	"net/url"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -15,14 +19,33 @@ import (
 
 const localObjectURLPrefix = "local:"
 
-// LocalImageStorage stores durable library/plaza bytes on the application server disk.
+// LocalImageServePathPrefix is the public HTTP path for HMAC-signed local objects.
+const LocalImageServePathPrefix = "/v1/images/local/"
+
+// LocalImageStorage stores durable library/plaza (or async) bytes on disk.
 type LocalImageStorage struct {
 	rootDir string
+
+	// Optional URL resolution for async image_storage.backend=local:
+	// - localURL / publicBaseURL: static/CDN root → base/object_key
+	// - signServeBaseURL + signKey: HMAC signed download under LocalImageServePathPrefix
+	// When neither is set, SignURL returns local:object_key (plaza/library internal use).
+	localURL         string
+	publicBaseURL    string
+	signServeBaseURL string
+	signKey          []byte
 }
 
 var _ DurableImageStorage = (*LocalImageStorage)(nil)
+var _ DurableImageStorageIntentResolver = (*LocalImageStorage)(nil)
 
 func NewLocalImageStorage(rootDir string) (*LocalImageStorage, error) {
+	return NewLocalImageStorageWithURLOptions(rootDir, "", "", "", nil)
+}
+
+// NewLocalImageStorageWithURLOptions constructs local storage with optional HTTP URL signing.
+// localURL takes precedence over publicBaseURL when forming client-facing links.
+func NewLocalImageStorageWithURLOptions(rootDir, localURL, publicBaseURL, signServeBaseURL string, signKey []byte) (*LocalImageStorage, error) {
 	rootDir = strings.TrimSpace(rootDir)
 	if rootDir == "" {
 		return nil, fmt.Errorf("local image storage root is required")
@@ -37,7 +60,13 @@ func NewLocalImageStorage(rootDir string) (*LocalImageStorage, error) {
 	if err := os.Chmod(abs, 0o700); err != nil {
 		return nil, fmt.Errorf("secure local image storage root: %w", err)
 	}
-	return &LocalImageStorage{rootDir: abs}, nil
+	return &LocalImageStorage{
+		rootDir:          abs,
+		localURL:         strings.TrimRight(strings.TrimSpace(localURL), "/"),
+		publicBaseURL:    strings.TrimRight(strings.TrimSpace(publicBaseURL), "/"),
+		signServeBaseURL: strings.TrimRight(strings.TrimSpace(signServeBaseURL), "/"),
+		signKey:          append([]byte(nil), signKey...),
+	}, nil
 }
 
 func (s *LocalImageStorage) RootDir() string {
@@ -129,9 +158,31 @@ func (s *LocalImageStorage) ObjectIntent(key, contentType string, sizeBytes int6
 	}, nil
 }
 
-func (s *LocalImageStorage) SignURL(_ context.Context, ref ObjectRef, _ time.Duration) (ObjectAccess, error) {
+func (s *LocalImageStorage) SignURL(_ context.Context, ref ObjectRef, expiry time.Duration) (ObjectAccess, error) {
 	if err := s.validateRef(ref); err != nil {
 		return ObjectAccess{}, err
+	}
+	base := s.localURL
+	if base == "" {
+		base = s.publicBaseURL
+	}
+	if base != "" {
+		joined, err := JoinLocalObjectURL(base, ref.ObjectKey)
+		if err != nil {
+			return ObjectAccess{}, err
+		}
+		return ObjectAccess{URL: joined}, nil
+	}
+	if len(s.signKey) > 0 && s.signServeBaseURL != "" {
+		if expiry <= 0 {
+			expiry = time.Hour
+		}
+		expiresAt := time.Now().UTC().Add(expiry)
+		signed, err := SignLocalImageURL(s.signServeBaseURL, ref.ObjectKey, expiresAt, s.signKey)
+		if err != nil {
+			return ObjectAccess{}, err
+		}
+		return ObjectAccess{URL: signed, ExpiresAt: expiresAt}, nil
 	}
 	return ObjectAccess{URL: localObjectURLPrefix + ref.ObjectKey}, nil
 }
@@ -214,4 +265,67 @@ func (s *LocalImageStorage) absolutePath(objectKey string) (string, error) {
 		return "", fmt.Errorf("object key escapes local storage root")
 	}
 	return absFull, nil
+}
+
+func escapeLocalObjectKey(key string) string {
+	parts := strings.Split(strings.Trim(strings.ReplaceAll(key, `\`, `/`), "/"), "/")
+	for i, p := range parts {
+		parts[i] = url.PathEscape(p)
+	}
+	return strings.Join(parts, "/")
+}
+
+// SignLocalImageURL builds an absolute HMAC-signed download URL.
+func SignLocalImageURL(serveBaseURL, objectKey string, expiresAt time.Time, key []byte) (string, error) {
+	objectKey = strings.TrimLeft(strings.ReplaceAll(strings.TrimSpace(objectKey), `\`, `/`), "/")
+	if objectKey == "" || strings.Contains(objectKey, "..") {
+		return "", fmt.Errorf("object key is invalid")
+	}
+	if len(key) == 0 {
+		return "", fmt.Errorf("local image sign key is required")
+	}
+	serveBaseURL = strings.TrimRight(strings.TrimSpace(serveBaseURL), "/")
+	if serveBaseURL == "" {
+		return "", fmt.Errorf("local image serve base url is required")
+	}
+	exp := expiresAt.UTC().Unix()
+	sig := LocalImageURLSignature(objectKey, exp, key)
+	u, err := url.Parse(serveBaseURL + LocalImageServePathPrefix + escapeLocalObjectKey(objectKey))
+	if err != nil {
+		return "", err
+	}
+	q := u.Query()
+	q.Set("exp", strconv.FormatInt(exp, 10))
+	q.Set("sig", sig)
+	u.RawQuery = q.Encode()
+	return u.String(), nil
+}
+
+// LocalImageURLSignature returns hex(HMAC-SHA256(key, objectKey + "\n" + exp)).
+func LocalImageURLSignature(objectKey string, exp int64, key []byte) string {
+	mac := hmac.New(sha256.New, key)
+	_, _ = mac.Write([]byte(objectKey))
+	_, _ = mac.Write([]byte{'\n'})
+	_, _ = mac.Write([]byte(strconv.FormatInt(exp, 10)))
+	return hex.EncodeToString(mac.Sum(nil))
+}
+
+// VerifyLocalImageURLSignature checks expiry and HMAC for a local download request.
+func VerifyLocalImageURLSignature(objectKey, expRaw, sig string, key []byte, now time.Time) error {
+	objectKey = strings.TrimLeft(strings.ReplaceAll(strings.TrimSpace(objectKey), `\`, `/`), "/")
+	if objectKey == "" || strings.Contains(objectKey, "..") {
+		return fmt.Errorf("object key is invalid")
+	}
+	exp, err := strconv.ParseInt(strings.TrimSpace(expRaw), 10, 64)
+	if err != nil || exp <= 0 {
+		return fmt.Errorf("invalid expiry")
+	}
+	if now.UTC().Unix() > exp {
+		return fmt.Errorf("signed url expired")
+	}
+	expected := LocalImageURLSignature(objectKey, exp, key)
+	if !hmac.Equal([]byte(strings.ToLower(strings.TrimSpace(sig))), []byte(expected)) {
+		return fmt.Errorf("invalid signature")
+	}
+	return nil
 }
