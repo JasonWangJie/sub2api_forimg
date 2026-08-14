@@ -3,6 +3,7 @@ package handler
 import (
 	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"io"
 	"mime/multipart"
 	"net/http"
@@ -870,7 +871,17 @@ func nextReportCursor(items []service.ImagePlazaReport, limit int) string {
 }
 
 func redirectToImageObject(c *gin.Context, access service.ObjectAccess) {
-	c.Header("Cache-Control", "private, no-store")
+	writeImageObjectRedirect(c, access, "private, no-store")
+}
+
+// redirectToPublishedPlazaImage allows short browser caching of the stable
+// /image-plaza/:id/content redirect. Personal library views stay no-store.
+func redirectToPublishedPlazaImage(c *gin.Context, access service.ObjectAccess) {
+	writeImageObjectRedirect(c, access, plazaRedirectCacheControl(access))
+}
+
+func writeImageObjectRedirect(c *gin.Context, access service.ObjectAccess, cacheControl string) {
+	c.Header("Cache-Control", cacheControl)
 	c.Header("Referrer-Policy", "no-referrer")
 	c.Header("X-Content-Type-Options", "nosniff")
 	c.Redirect(http.StatusTemporaryRedirect, access.URL)
@@ -889,6 +900,16 @@ func writeImageObjectAccess(c *gin.Context, access service.ObjectAccess) {
 }
 
 func writeImageObjectStream(c *gin.Context, reader io.Reader, contentType string) {
+	writeImageObjectStreamWithCache(c, reader, contentType, "private, no-store")
+}
+
+// writePublishedPlazaImageStream serves published plaza bytes with a cacheable
+// Cache-Control so grid thumbs and lightbox can reuse the same URL locally.
+func writePublishedPlazaImageStream(c *gin.Context, reader io.Reader, contentType string) {
+	writeImageObjectStreamWithCache(c, reader, contentType, "public, max-age=3600")
+}
+
+func writeImageObjectStreamWithCache(c *gin.Context, reader io.Reader, contentType, cacheControl string) {
 	if strings.Contains(strings.ToLower(c.GetHeader("Accept")), "application/json") {
 		// Local objects have no public CDN URL; return the same view endpoint for JSON clients.
 		response.Success(c, gin.H{"url": c.Request.URL.Path})
@@ -897,8 +918,28 @@ func writeImageObjectStream(c *gin.Context, reader io.Reader, contentType string
 	if strings.TrimSpace(contentType) == "" {
 		contentType = "application/octet-stream"
 	}
-	c.Header("Cache-Control", "private, no-store")
+	c.Header("Cache-Control", cacheControl)
 	c.Header("Referrer-Policy", "no-referrer")
 	c.Header("X-Content-Type-Options", "nosniff")
 	c.DataFromReader(http.StatusOK, -1, contentType, reader, nil)
+}
+
+// plazaRedirectCacheControl keeps redirect caching shorter than the signed URL
+// TTL so browsers reuse Location without serving an already-expired signature.
+func plazaRedirectCacheControl(access service.ObjectAccess) string {
+	const defaultMaxAge = 300
+	maxAge := defaultMaxAge
+	if !access.ExpiresAt.IsZero() {
+		remaining := int(time.Until(access.ExpiresAt).Seconds()) - 60
+		if remaining < 60 {
+			remaining = 60
+		}
+		if half := remaining / 2; half > 0 && half < maxAge {
+			maxAge = half
+		}
+		if remaining < maxAge {
+			maxAge = remaining
+		}
+	}
+	return fmt.Sprintf("public, max-age=%d", maxAge)
 }

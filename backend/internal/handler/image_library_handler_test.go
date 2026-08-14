@@ -91,6 +91,37 @@ func TestWriteImageObjectAccessRedirectsByDefault(t *testing.T) {
 	require.Equal(t, "nosniff", recorder.Header().Get("X-Content-Type-Options"))
 }
 
+func TestPublishedPlazaImageResponsesAreBrowserCacheable(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	streamRecorder := httptest.NewRecorder()
+	streamCtx, _ := gin.CreateTestContext(streamRecorder)
+	streamCtx.Request = httptest.NewRequest(http.MethodGet, "/api/v1/image-plaza/imgpub_1/content", nil)
+	writePublishedPlazaImageStream(streamCtx, bytes.NewReader([]byte("png-bytes")), "image/png")
+	require.Equal(t, http.StatusOK, streamRecorder.Code)
+	require.Equal(t, "public, max-age=3600", streamRecorder.Header().Get("Cache-Control"))
+	require.Equal(t, "image/png", streamRecorder.Header().Get("Content-Type"))
+	require.Equal(t, "png-bytes", streamRecorder.Body.String())
+
+	redirectRecorder := httptest.NewRecorder()
+	redirectCtx, _ := gin.CreateTestContext(redirectRecorder)
+	redirectCtx.Request = httptest.NewRequest(http.MethodGet, "/api/v1/image-plaza/imgpub_1/content", nil)
+	redirectToPublishedPlazaImage(redirectCtx, service.ObjectAccess{
+		URL:       "https://cdn.example.test/a.png?sig=1",
+		ExpiresAt: time.Now().Add(20 * time.Minute),
+	})
+	require.Equal(t, http.StatusTemporaryRedirect, redirectRecorder.Code)
+	require.Equal(t, "https://cdn.example.test/a.png?sig=1", redirectRecorder.Header().Get("Location"))
+	require.Equal(t, "public, max-age=300", redirectRecorder.Header().Get("Cache-Control"))
+}
+
+func TestPlazaRedirectCacheControlRespectsSignedExpiry(t *testing.T) {
+	require.Equal(t, "public, max-age=300", plazaRedirectCacheControl(service.ObjectAccess{}))
+	require.Equal(t, "public, max-age=30", plazaRedirectCacheControl(service.ObjectAccess{
+		ExpiresAt: time.Now().Add(90 * time.Second),
+	}))
+}
+
 func TestAdminListPublicationsUsesFilterAndCreatedAtCursorContract(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	firstCreated := time.Date(2026, time.July, 20, 10, 0, 0, 0, time.UTC)

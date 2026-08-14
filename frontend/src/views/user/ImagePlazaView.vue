@@ -199,8 +199,10 @@
           </button>
           <img
             class="plaza-lightbox__img"
-            :src="resolvePlazaImageUrl(previewItem)"
+            :src="previewUrl(previewItem)"
             :alt="previewItem.title || t('imageWorkflow.library.untitled')"
+            decoding="async"
+            fetchpriority="high"
             @click.stop
           />
         </div>
@@ -332,6 +334,11 @@ async function loadMore() {
 function plazaThumbUrl(item: ImagePlazaItem) {
   if (broken.value.has(String(item.id))) return ''
   return buildOssThumbnailUrl(resolvePlazaImageUrl(item), { width: 480 })
+}
+
+/** Same stable content URL as the grid tile so HTTP cache can serve the lightbox instantly. */
+function previewUrl(item: ImagePlazaItem) {
+  return resolvePlazaImageUrl(item)
 }
 
 const REUSE_PROMPT_KEY = 'image-workbench:reuse-payload'

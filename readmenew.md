@@ -4,6 +4,9 @@
 
 ## 从这里开始
 
+##加载代码索引codegraph
+codegraph init
+
 换电脑、换会话或交给新的 AI 后，按以下顺序恢复上下文：
 
 1. 阅读 [wiki-new/文档索引.md](wiki-new/文档索引.md)。
@@ -16,7 +19,7 @@
 
 ## 当前版本快照
 
-记录日期：`2026-08-14`（续更：1 Key 异步生图双平台分组映射；存储后端可随时切换；管理端清理覆盖异步任务结果与「清理全部」；固定 `TOTP_ENCRYPTION_KEY` 才能保存 OSS Secret；本机目录 `DATA_DIR` 回落与保存错误可读化）。
+记录日期：`2026-08-14`（续更：1 Key 异步生图双平台分组映射；存储后端可随时切换；管理端清理覆盖异步任务结果与「清理全部」；固定 `TOTP_ENCRYPTION_KEY` 才能保存 OSS Secret；本机目录 `DATA_DIR` 回落与保存错误可读化；公开广场图片浏览器短缓存）。
 
 | 项目 | 当前记录 |
 |---|---|
@@ -126,6 +129,8 @@
 本机目录的 `local_url`、对象 CDN、`async_image.public_base_url` 等公开访问地址不属于存储定位身份，可单独修改。
 
 **本机目录 `data_dir` 留空时**：优先 `{DATA_DIR}/data/image_storage`（发行版 `DATA_DIR=/opt/sub2api` 时即 `/opt/sub2api/data/image_storage`）；保存前会做本机读写探测，失败返回可读错误而非 `internal error`。自定义路径须在 systemd `ReadWritePaths` 可写范围内。
+
+**图片广场浏览缓存**：公开 `GET /api/v1/image-plaza/:id/content` 允许浏览器短缓存（本机流式约 1 小时；OSS 重定向 ≤5 分钟且短于签名有效期）。个人图库 `view` 仍为 `no-store`。详情见 [wiki-new/图片广场审核与迁移.md](wiki-new/图片广场审核与迁移.md)。
 
 | 配置 | 默认值 |
 |---|---:|
