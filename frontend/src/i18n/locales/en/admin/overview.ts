@@ -138,18 +138,18 @@ export default {
           uploadUrl: 'Upload API URL',
           help: 'Docs: https://www.superbed.cn/help ; default https://api.superbed.cn/upload'
         },
-        localUrl: 'Static file public root (local_url, optional — usually empty)',
-        localUrlPlaceholder: 'Usually empty; set only if a real CDN/Nginx maps data_dir',
-        localUrlHint: 'Do not put an old OSS/CDN host here (e.g. static.*); that yields broken /images/... paths. For self-hosting leave empty and set the site/API public URL.',
+        localUrl: 'Static file public root (local_url — for a dedicated image host)',
+        localUrlPlaceholder: 'e.g. https://status.apiimg.example (site root must equal data_dir)',
+        localUrlHint: 'Set only if Nginx/panel maps that host document root to the local data_dir. Otherwise leave empty and use the site/API public URL for signed downloads.',
         localUrlRequired: 'local_url is required',
         local: {
           dataDir: 'Local data directory',
           dataDirPlaceholder: 'Leave empty to use {data_dir}/image_storage',
           dataDirHint: 'Ensure the process user can write here and include it in backups. Multi-instance setups need a shared path or OSS/Superbed.',
-          sitePublicBaseUrl: 'Site/API public URL (signed downloads, recommended)',
-          publicBaseUrlPlaceholder: 'e.g. https://api.example.com (host reverse-proxied to this service — not an old CDN)',
-          sitePublicBaseUrlHint: 'Mints https://your-host/v1/images/local/...?exp=&sig=. Must reach this API. If async runtime public base URL is set, this may be left empty.',
-          serveUrlRequired: 'Set the site/API public URL or the async runtime public base URL (host reverse-proxied to this service). local_url may stay empty; do not rely on an old CDN alone.'
+          sitePublicBaseUrl: 'Site/API public URL (signed downloads)',
+          publicBaseUrlPlaceholder: 'e.g. https://api.example.com (may still be set for task links when using a dedicated image host)',
+          sitePublicBaseUrlHint: 'Used for /v1/images/local/... when local_url is empty. When local_url is set, result images prefer the static image host.',
+          serveUrlRequired: 'Set dedicated-image local_url, or the site/API public URL / async runtime public base URL (at least one).'
         },
         runtimeTitle: 'Async task runtime',
         runtimeDescription: 'Queue recovery, reference download limits, URL signing, and retention controls.',

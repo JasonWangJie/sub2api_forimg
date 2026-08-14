@@ -1429,7 +1429,11 @@ image_storage:
     # 二进制发行版常见默认：/opt/sub2api/data/image_storage
     # 多实例部署请挂载共享盘或改用 oss/superbed；systemd 下目录宜在 ReadWritePaths 内。
     data_dir: ""
-    # 对外访问根地址。异步查询返回 local_url/object_key；优先于上方 public_base_url。
+    # 专用图片域名根地址（可选）。填写后异步查询优先返回 local_url/object_key，
+    # 例如 https://status.apiimg.example/images/results/.../000.png
+    # 要求 Nginx/宝塔「网站目录」等于上方 data_dir；未映射真实静态站时请留空，
+    # 改填 public_base_url / async_image.public_base_url 走 /v1/images/local 签名下载。
+    # 填写后新写入对象使用 0755/0644，便于 Web 用户读取。
     local_url: ""
 
 # =============================================================================

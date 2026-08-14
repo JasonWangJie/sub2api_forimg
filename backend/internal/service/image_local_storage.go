@@ -54,13 +54,16 @@ type LocalImageStorage struct {
 	rootDir string
 
 	// Optional URL resolution for async image_storage.backend=local:
-	// - signServeBaseURL + signKey: HMAC signed download under LocalImageServePathPrefix (preferred)
-	// - localURL / publicBaseURL: static/CDN root → base/object_key (only when signed serve is unset)
+	// - localURL: static/CDN root mapped to data_dir → base/object_key (highest priority when set)
+	// - signServeBaseURL + signKey: HMAC signed download under LocalImageServePathPrefix
+	// - publicBaseURL: legacy static join when localURL empty and signed serve unset
 	// When neither is set, SignURL returns local:object_key (plaza/library internal use).
 	localURL         string
 	publicBaseURL    string
 	signServeBaseURL string
 	signKey          []byte
+	// publicReadable is true when localURL is set (Nginx/CDN must read objects).
+	publicReadable bool
 }
 
 var _ DurableImageStorage = (*LocalImageStorage)(nil)
@@ -71,8 +74,7 @@ func NewLocalImageStorage(rootDir string) (*LocalImageStorage, error) {
 }
 
 // NewLocalImageStorageWithURLOptions constructs local storage with optional HTTP URL signing.
-// When signServeBaseURL and signKey are set, SignURL prefers HMAC links over static localURL.
-// Otherwise localURL takes precedence over publicBaseURL for static CDN joins.
+// localURL (static CDN mapped to data_dir) takes precedence over signed serve and publicBaseURL.
 func NewLocalImageStorageWithURLOptions(rootDir, localURL, publicBaseURL, signServeBaseURL string, signKey []byte) (*LocalImageStorage, error) {
 	rootDir = strings.TrimSpace(rootDir)
 	if rootDir == "" {
@@ -82,19 +84,26 @@ func NewLocalImageStorageWithURLOptions(rootDir, localURL, publicBaseURL, signSe
 	if err != nil {
 		return nil, fmt.Errorf("resolve local image storage root: %w", err)
 	}
-	if err := os.MkdirAll(abs, 0o700); err != nil {
+	trimmedLocal := strings.TrimRight(strings.TrimSpace(localURL), "/")
+	publicReadable := trimmedLocal != ""
+	dirMode := os.FileMode(0o700)
+	if publicReadable {
+		dirMode = 0o755
+	}
+	if err := os.MkdirAll(abs, dirMode); err != nil {
 		return nil, fmt.Errorf("create local image storage root: %w", err)
 	}
 	// Best-effort: installs under /opt/sub2api often leave dirs owned by root or
 	// group-writable; chmod can return EPERM under systemd NoNewPrivileges even
-	// when the service user can create files. MkdirAll already requested 0700.
-	_ = os.Chmod(abs, 0o700)
+	// when the service user can create files. MkdirAll already requested the mode.
+	_ = os.Chmod(abs, dirMode)
 	return &LocalImageStorage{
 		rootDir:          abs,
-		localURL:         strings.TrimRight(strings.TrimSpace(localURL), "/"),
+		localURL:         trimmedLocal,
 		publicBaseURL:    strings.TrimRight(strings.TrimSpace(publicBaseURL), "/"),
 		signServeBaseURL: strings.TrimRight(strings.TrimSpace(signServeBaseURL), "/"),
 		signKey:          append([]byte(nil), signKey...),
+		publicReadable:   publicReadable,
 	}, nil
 }
 
@@ -128,18 +137,24 @@ func (s *LocalImageStorage) SaveObject(ctx context.Context, key, contentType str
 	if err != nil {
 		return ObjectRef{}, err
 	}
+	dirMode := os.FileMode(0o700)
+	fileMode := os.FileMode(0o600)
+	if s.publicReadable {
+		dirMode = 0o755
+		fileMode = 0o644
+	}
 	directory := filepath.Dir(fullPath)
-	if err := os.MkdirAll(directory, 0o700); err != nil {
+	if err := os.MkdirAll(directory, dirMode); err != nil {
 		return ObjectRef{}, fmt.Errorf("create local object directory: %w", err)
 	}
-	_ = os.Chmod(directory, 0o700)
+	_ = os.Chmod(directory, dirMode)
 	tmp := fullPath + ".tmp"
-	file, err := os.OpenFile(tmp, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600)
+	file, err := os.OpenFile(tmp, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, fileMode)
 	if err != nil {
 		return ObjectRef{}, fmt.Errorf("write local object: %w", err)
 	}
 	// Mode was requested at OpenFile; chmod may fail for the same reasons as dirs.
-	_ = file.Chmod(0o600)
+	_ = file.Chmod(fileMode)
 	if _, err := file.Write(data); err != nil {
 		_ = file.Close()
 		_ = os.Remove(tmp)
@@ -153,6 +168,7 @@ func (s *LocalImageStorage) SaveObject(ctx context.Context, key, contentType str
 		_ = os.Remove(tmp)
 		return ObjectRef{}, fmt.Errorf("commit local object: %w", err)
 	}
+	_ = os.Chmod(fullPath, fileMode)
 	return intent, nil
 }
 
@@ -186,8 +202,14 @@ func (s *LocalImageStorage) SignURL(_ context.Context, ref ObjectRef, expiry tim
 	if err := s.validateRef(ref); err != nil {
 		return ObjectAccess{}, err
 	}
-	// Prefer signed serve whenever configured. Leftover local_url (e.g. an old
-	// OSS/CDN host that no longer maps data_dir) must not win over /v1/images/local.
+	// Intentional static CDN (local_url) wins when set.
+	if s.localURL != "" {
+		joined, err := JoinLocalObjectURL(s.localURL, ref.ObjectKey)
+		if err != nil {
+			return ObjectAccess{}, err
+		}
+		return ObjectAccess{URL: joined}, nil
+	}
 	if len(s.signKey) > 0 && s.signServeBaseURL != "" {
 		if expiry <= 0 {
 			expiry = time.Hour
@@ -199,12 +221,8 @@ func (s *LocalImageStorage) SignURL(_ context.Context, ref ObjectRef, expiry tim
 		}
 		return ObjectAccess{URL: signed, ExpiresAt: expiresAt}, nil
 	}
-	base := s.localURL
-	if base == "" {
-		base = s.publicBaseURL
-	}
-	if base != "" {
-		joined, err := JoinLocalObjectURL(base, ref.ObjectKey)
+	if s.publicBaseURL != "" {
+		joined, err := JoinLocalObjectURL(s.publicBaseURL, ref.ObjectKey)
 		if err != nil {
 			return ObjectAccess{}, err
 		}

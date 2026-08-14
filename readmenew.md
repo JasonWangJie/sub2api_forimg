@@ -19,7 +19,7 @@ codegraph init
 
 ## 当前版本快照
 
-记录日期：`2026-08-14`（续更：1 Key 异步生图双平台分组映射；存储后端可随时切换；管理端清理覆盖异步任务结果与「清理全部」；固定 `TOTP_ENCRYPTION_KEY` 才能保存 OSS Secret；本机目录 `DATA_DIR` 回落与保存错误可读化；公开广场图片浏览器短缓存）。
+记录日期：`2026-08-15`（续更：本机目录专用图片域名 `local_url` + 网站目录=`data_dir`；签名下载与静态站二选一；`local_url` 模式下新文件 `0755/0644`。此前 `2026-08-14`：1 Key 异步生图双平台分组映射；存储后端可随时切换；管理端清理覆盖异步任务结果与「清理全部」；固定 `TOTP_ENCRYPTION_KEY`；本机 `DATA_DIR` 回落与保存错误可读化；公开广场图片浏览器短缓存）。
 
 | 项目 | 当前记录 |
 |---|---|
@@ -130,6 +130,11 @@ codegraph init
 
 **本机目录 `data_dir` 留空时**：优先 `{DATA_DIR}/data/image_storage`（发行版 `DATA_DIR=/opt/sub2api` 时即 `/opt/sub2api/data/image_storage`）；保存前会做本机读写探测，失败返回可读错误而非 `internal error`。自定义路径须在 systemd `ReadWritePaths` 可写范围内。
 
+**本机结果图访问（二选一）**，详见 [wiki-new/对象存储与保留策略.md](wiki-new/对象存储与保留策略.md)：
+
+1. **签名下载（默认）**：留空 `local_url`，填写站点/API 公开地址 → `https://API域名/v1/images/local/...?exp=&sig=`。
+2. **专用图片域名**：宝塔/Nginx 网站目录 = `data_dir`，后台 `local_url` = `https://图片域名` → `https://图片域名/images/results/...`；新文件 `0755/0644`，旧目录若 403 执行 `chmod -R a+rX <data_dir>`。
+
 **图片广场浏览缓存**：公开 `GET /api/v1/image-plaza/:id/content` 允许浏览器短缓存（本机流式约 1 小时；OSS 重定向 ≤5 分钟且短于签名有效期）。个人图库 `view` 仍为 `no-store`。详情见 [wiki-new/图片广场审核与迁移.md](wiki-new/图片广场审核与迁移.md)。
 
 | 配置 | 默认值 |
@@ -168,6 +173,8 @@ codegraph init
 ## 当前完成度
 
 工作树中已经存在工作台能力接口、实时/异步分流、Gemini 实时图片计费采集、服务端图库、统一对象引用、投稿审核、举报、维护 Worker、旧广场迁移、管理页面和安全校验实现。管理员批量审核 API/UI、旧数字/`imgpub_*`/`img_*` 删除兼容、Worker 优雅 `Stop()`、历史成功异步任务归档回填、永久归档错误终止重排，以及迁移 `187` 的 SC 上传安全层均已补齐。
+
+`2026-08-15` 续更：本机目录结果图访问支持 **站内签名下载** 与 **专用图片域名（`local_url`，网站目录=`data_dir`）**；填 `local_url` 时优先静态拼链且新文件 `0755/0644`。详见 [wiki-new/对象存储与保留策略.md](wiki-new/对象存储与保留策略.md)。
 
 `2026-08-14` 续更：存储后端（本机 / 图床 / OSS）可随时切换并立即生效；管理端清理新增 `async_results` 与 `all`；保存 OSS Secret 要求固定 `TOTP_ENCRYPTION_KEY`；**1 Key 双用**（`221_ZJ_api_key_platform_groups`）已实现，本地定向测试与 `service`/`handler`/`handler/admin` 包冒烟通过，详见 [wiki-new/API密钥双平台生图映射.md](wiki-new/API密钥双平台生图映射.md)。
 

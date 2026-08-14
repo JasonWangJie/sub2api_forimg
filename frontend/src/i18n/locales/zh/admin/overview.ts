@@ -138,18 +138,18 @@ export default {
           uploadUrl: '上传接口地址',
           help: '文档：https://www.superbed.cn/help ；默认 https://api.superbed.cn/upload'
         },
-        localUrl: '静态文件对外根地址（local_url，可选，通常留空）',
-        localUrlPlaceholder: '通常留空；仅真实 CDN/Nginx 映射 data_dir 时填写',
-        localUrlHint: '旧 OSS/CDN 域名（如 static.xxx）不要填这里，否则会拼出不存在的 /images/... 路径。自托管请留空，改填「站点/API 公开地址」。',
+        localUrl: '静态文件对外根地址（local_url，专用图片域名时填写）',
+        localUrlPlaceholder: '例如 https://status.apiimg.example（网站目录须等于 data_dir）',
+        localUrlHint: '仅当 Nginx/宝塔已把该域名的网站目录指到本机 data_dir 时填写。否则留空，改用「站点/API 公开地址」走签名下载。',
         localUrlRequired: '请填写对外访问地址 local_url',
         local: {
           dataDir: '本机存储目录',
           dataDirPlaceholder: '留空则使用 {data_dir}/image_storage',
           dataDirHint: '请确保运行用户可写，并纳入备份策略。多实例需共享同一目录或改用对象存储/图床。',
-          sitePublicBaseUrl: '站点/API 公开地址（签名下载，推荐）',
-          publicBaseUrlPlaceholder: '例如 https://api.example.com（反代到本服务的域名，不要填旧 CDN）',
-          sitePublicBaseUrlHint: '用于生成 https://你的域名/v1/images/local/...?exp=&sig=。必须是能访问本 API 的域名；若已填运行参数里的「任务查询链接的站点公开地址」，此处可留空。',
-          serveUrlRequired: '请填写「站点/API 公开地址」或运行参数里的「任务查询链接的站点公开地址」（反代到本服务的域名）。local_url 可留空；不要只填旧 CDN。'
+          sitePublicBaseUrl: '站点/API 公开地址（签名下载）',
+          publicBaseUrlPlaceholder: '例如 https://api.example.com（反代到本服务；有专用图片域名时可仍填此项给任务链接）',
+          sitePublicBaseUrlHint: '未填 local_url 时用于生成 /v1/images/local/... 签名链接。已填专用图片域名 local_url 时，结果图优先走静态域名。',
+          serveUrlRequired: '请填写专用图片域名 local_url，或「站点/API 公开地址」/运行参数里的站点公开地址（至少一项）。'
         },
         runtimeTitle: '异步任务运行参数',
         runtimeDescription: '配置队列恢复、参考图下载限制、链接签名和保留时间。',

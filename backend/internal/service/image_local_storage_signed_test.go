@@ -6,6 +6,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"testing"
 	"time"
@@ -78,12 +79,12 @@ func TestLocalImageStorageLocalURLTakesPrecedence(t *testing.T) {
 	require.Equal(t, "https://img.local/a/b.png", access.URL)
 }
 
-func TestLocalImageStorageSignedServeBeatsStaleLocalURL(t *testing.T) {
+func TestLocalImageStorageLocalURLBeatsSignedServe(t *testing.T) {
 	root := t.TempDir()
 	signKey := []byte("test-sign-key")
 	storage, err := NewLocalImageStorageWithURLOptions(
 		root,
-		"https://static.apiimg.example/cdn",
+		"https://status.apiimg.example",
 		"",
 		"https://api.example.com",
 		signKey,
@@ -93,9 +94,13 @@ func TestLocalImageStorageSignedServeBeatsStaleLocalURL(t *testing.T) {
 	require.NoError(t, err)
 	access, err := storage.SignURL(context.Background(), ref, time.Hour)
 	require.NoError(t, err)
-	require.Contains(t, access.URL, "https://api.example.com/v1/images/local/images/results/a.png")
-	require.Contains(t, access.URL, "sig=")
-	require.NotContains(t, access.URL, "static.apiimg.example")
+	require.Equal(t, "https://status.apiimg.example/images/results/a.png", access.URL)
+
+	if runtime.GOOS != "windows" {
+		info, err := os.Stat(filepath.Join(root, "images", "results", "a.png"))
+		require.NoError(t, err)
+		require.Equal(t, os.FileMode(0o644), info.Mode().Perm())
+	}
 }
 
 func TestJoinLocalObjectURL(t *testing.T) {

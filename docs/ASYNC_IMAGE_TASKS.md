@@ -26,7 +26,12 @@ Asynchronous image tasks are **disabled by default** and gated on object storage
 
 Because the async image storage and the database backup share one S3 client, the form defaults to **reusing the backup S3 configuration**: it borrows the endpoint, region and credentials already configured above and keeps only its own bucket and prefix, so backups stay under `backups/` while images go to `images/`. Leave the bucket empty to use the backup bucket as well. Untick the box to point images at a completely separate account.
 
-**Local disk (`backend=local`)** is also supported for async results and SC reference uploads. Leave `local.data_dir` empty to auto-resolve under `{DATA_DIR}/data/image_storage` when `DATA_DIR` is set (common install default: `/opt/sub2api/data/image_storage`). Provide at least one public base: `local.local_url`, `image_storage.public_base_url`, or `async_image.public_base_url`. Saving with `enabled=true` runs an upload/HEAD/read/delete probe on that directory; failures return HTTP 400 with a readable message instead of a generic `internal error`.
+**Local disk (`backend=local`)** is also supported for async results and SC reference uploads. Leave `local.data_dir` empty to auto-resolve under `{DATA_DIR}/data/image_storage` when `DATA_DIR` is set (common install default: `/opt/sub2api/data/image_storage`). Provide at least one public base:
+
+- **Signed downloads (default):** leave `local.local_url` empty; set `image_storage.public_base_url` and/or `async_image.public_base_url` to the HTTPS host reverse-proxied to this API. Result URLs look like `https://api.example.com/v1/images/local/{object_key}?exp=&sig=`.
+- **Dedicated image host:** point Nginx/panel document root at the same `data_dir`, set `local.local_url` to `https://img.example.com` (no trailing slash). Result URLs become `https://img.example.com/{object_key}`. When `local_url` is set it wins over signed serve; new files are written `0755/0644` so the web user can read them. For older `0700/0600` trees run `chmod -R a+rX <data_dir>` once.
+
+Saving with `enabled=true` runs an upload/HEAD/read/delete probe on that directory; failures return HTTP 400 with a readable message instead of a generic `internal error`. See `wiki-new/对象存储与保留策略.md` for the Chinese ops guide.
 
 Saving requires step-up 2FA when that gate is enabled, for the same reason the backup S3 form does: changing the target redirects generated content to another account.
 
