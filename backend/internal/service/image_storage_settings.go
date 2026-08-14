@@ -752,9 +752,16 @@ func (s *ImageStorageSettingService) toImageStorageConfig(ctx context.Context, i
 		pricingBase := EffectivePricingDataDir(s.pricingDataDir)
 		cfg.RuntimePricingDataDir = pricingBase
 		cfg.Local.DataDir = ResolveLocalImageStorageDataDir(s.pricingDataDir, cfg.Local.DataDir)
+		// HMAC download root: async_image.public_base_url → config fallback →
+		// image_storage.public_base_url (admin often fills the site domain here).
+		// Do not treat PublicBaseURL as a static CDN for local files — that produces
+		// https://site/images/... paths the website does not serve (404).
 		cfg.SignServeBaseURL = strings.TrimSpace(in.AsyncImage.PublicBaseURL)
 		if cfg.SignServeBaseURL == "" {
 			cfg.SignServeBaseURL = strings.TrimSpace(s.asyncFallback.PublicBaseURL)
+		}
+		if cfg.SignServeBaseURL == "" {
+			cfg.SignServeBaseURL = strings.TrimSpace(in.PublicBaseURL)
 		}
 		cfg.SignKey = append([]byte(nil), s.signKey...)
 	default:

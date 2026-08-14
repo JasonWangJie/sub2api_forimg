@@ -138,16 +138,18 @@ export default {
           uploadUrl: 'Upload API URL',
           help: 'Docs: https://www.superbed.cn/help ; default https://api.superbed.cn/upload'
         },
-        localUrl: 'Public access base URL (local_url)',
-        localUrlPlaceholder: 'e.g. https://img.example.com',
-        localUrlHint: 'Async image results return local_url + object path. Ensure that host can serve the files.',
+        localUrl: 'Static file public root (local_url, optional)',
+        localUrlPlaceholder: 'e.g. https://img.example.com (must serve object paths from disk)',
+        localUrlHint: 'Fill only if Nginx/CDN maps that host to the local data_dir. For a normal site domain, leave empty and set the site/API public URL below for signed /v1/images/local downloads.',
         localUrlRequired: 'local_url is required',
         local: {
           dataDir: 'Local data directory',
           dataDirPlaceholder: 'Leave empty to use {data_dir}/image_storage',
           dataDirHint: 'Ensure the process user can write here and include it in backups. Multi-instance setups need a shared path or OSS/Superbed.',
-          publicBaseUrlPlaceholder: 'Optional fallback CDN; local_url above takes precedence',
-          serveUrlRequired: 'Local storage requires local_url, or the object CDN / site public base URL'
+          sitePublicBaseUrl: 'Site/API public URL (signed downloads)',
+          publicBaseUrlPlaceholder: 'e.g. https://api.example.com (same host reverse-proxied to this service)',
+          sitePublicBaseUrlHint: 'Used to mint /v1/images/local/... signed links. Do not treat this as a fake CDN path. If async runtime public base URL is already set, this may be left empty.',
+          serveUrlRequired: 'Local storage requires static local_url, or a site/API public URL (this field or the async runtime public base URL)'
         },
         runtimeTitle: 'Async task runtime',
         runtimeDescription: 'Queue recovery, reference download limits, URL signing, and retention controls.',

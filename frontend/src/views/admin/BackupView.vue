@@ -180,9 +180,10 @@
               <label class="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">{{ t('admin.backup.imageStorage.prefix') }}</label>
               <input v-model="imageStorageForm.prefix" class="input w-full" placeholder="images/" />
             </div>
-            <div>
-              <label class="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">{{ t('admin.backup.imageStorage.objectPublicBaseUrl') }}</label>
+            <div class="md:col-span-2">
+              <label class="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">{{ t('admin.backup.imageStorage.local.sitePublicBaseUrl') }}</label>
               <input v-model="imageStorageForm.public_base_url" class="input w-full" :placeholder="t('admin.backup.imageStorage.local.publicBaseUrlPlaceholder')" />
+              <p class="mt-1 text-xs text-gray-400">{{ t('admin.backup.imageStorage.local.sitePublicBaseUrlHint') }}</p>
             </div>
           </template>
         </div>

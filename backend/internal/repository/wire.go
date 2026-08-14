@@ -205,11 +205,19 @@ func ProvideImageStorageFactory() service.ImageStorageFactory {
 			if strings.TrimSpace(dataDir) == "" {
 				return nil, errors.New("image_storage.local.data_dir is required")
 			}
+			signServe := strings.TrimSpace(cfg.SignServeBaseURL)
+			if signServe == "" {
+				// Legacy/admin forms often put the API or site root in public_base_url.
+				signServe = strings.TrimSpace(cfg.PublicBaseURL)
+			}
+			// Static CDN join only when local.local_url is set (real file host).
+			// Never pass PublicBaseURL as the static join base — that yields
+			// https://site/images/... which 404s on a normal Sub2API reverse proxy.
 			return service.NewLocalImageStorageWithURLOptions(
 				dataDir,
 				cfg.Local.LocalURL,
-				cfg.PublicBaseURL,
-				cfg.SignServeBaseURL,
+				"",
+				signServe,
 				cfg.SignKey,
 			)
 		default:

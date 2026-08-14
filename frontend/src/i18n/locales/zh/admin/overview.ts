@@ -138,16 +138,18 @@ export default {
           uploadUrl: '上传接口地址',
           help: '文档：https://www.superbed.cn/help ；默认 https://api.superbed.cn/upload'
         },
-        localUrl: '对外访问地址（local_url）',
-        localUrlPlaceholder: '例如 https://img.example.com',
-        localUrlHint: '异步生图结果将返回 local_url + 对象路径；请确保该域名可访问对应文件。',
+        localUrl: '静态文件对外根地址（local_url，可选）',
+        localUrlPlaceholder: '例如 https://img.example.com（须能直接访问磁盘上的对象路径）',
+        localUrlHint: '仅当你已用 Nginx/CDN 把该域名映射到本机 data_dir 时才填写。普通站点域名请留空，改填下方「站点/API 公开地址」走站内签名下载。',
         localUrlRequired: '请填写对外访问地址 local_url',
         local: {
           dataDir: '本机存储目录',
           dataDirPlaceholder: '留空则使用 {data_dir}/image_storage',
           dataDirHint: '请确保运行用户可写，并纳入备份策略。多实例需共享同一目录或改用对象存储/图床。',
-          publicBaseUrlPlaceholder: '可选兜底 CDN；优先使用上方 local_url',
-          serveUrlRequired: '本机存储需填写 local_url，或对象 CDN / 站点公开地址之一'
+          sitePublicBaseUrl: '站点/API 公开地址（签名下载）',
+          publicBaseUrlPlaceholder: '例如 https://api.example.com（与反代到本服务的域名一致）',
+          sitePublicBaseUrlHint: '用于生成 /v1/images/local/... 签名链接。不要填成「假 CDN」路径；若已填上方运行参数里的「任务查询链接的站点公开地址」，此处可留空。',
+          serveUrlRequired: '本机存储需填写：静态 local_url，或站点/API 公开地址（本栏或运行参数中的站点公开地址）'
         },
         runtimeTitle: '异步任务运行参数',
         runtimeDescription: '配置队列恢复、参考图下载限制、链接签名和保留时间。',

@@ -469,6 +469,37 @@ func TestImageStorageSettingsSwitchOSSToLocalPersistsResolvedDataDir(t *testing.
 	require.Equal(t, filepath.Join(root, "data", "image_storage"), updated.Local.DataDir)
 }
 
+func TestLocalImageStorageConfigUsesPublicBaseURLAsSignServeNotStaticCDN(t *testing.T) {
+	svc, _, _ := newImageStorageFixture(t, config.ImageStorageConfig{})
+	svc.WithLocalDefaults(t.TempDir(), []byte("sign-key"))
+
+	cfg, err := svc.toImageStorageConfig(context.Background(), &ImageStorageSettings{
+		Enabled:       true,
+		Backend:       ImageStorageBackendLocal,
+		PublicBaseURL: "https://www.example.com",
+		Local:         ImageStorageLocalSettings{DataDir: t.TempDir()},
+	})
+	require.NoError(t, err)
+	require.Equal(t, "https://www.example.com", cfg.SignServeBaseURL)
+	require.Equal(t, "https://www.example.com", cfg.PublicBaseURL)
+
+	storage, err := NewLocalImageStorageWithURLOptions(
+		cfg.Local.DataDir,
+		cfg.Local.LocalURL,
+		"", // factory must not pass PublicBaseURL as static join base
+		cfg.SignServeBaseURL,
+		cfg.SignKey,
+	)
+	require.NoError(t, err)
+	ref, err := storage.SaveObject(context.Background(), "images/results/a.png", "image/png", []byte("x"))
+	require.NoError(t, err)
+	access, err := storage.SignURL(context.Background(), ref, time.Hour)
+	require.NoError(t, err)
+	require.Contains(t, access.URL, "https://www.example.com/v1/images/local/images/results/a.png")
+	require.Contains(t, access.URL, "sig=")
+	require.NotContains(t, access.URL, "https://www.example.com/images/results/a.png?")
+}
+
 func TestWrapImageStorageSaveErrorSurfacesLocalDirectoryFailure(t *testing.T) {
 	err := wrapImageStorageSaveError(fmt.Errorf("test image storage connection before save: create local image storage root: permission denied"))
 	require.True(t, apperrors.IsBadRequest(err))
