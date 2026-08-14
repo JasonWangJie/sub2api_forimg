@@ -1278,8 +1278,8 @@ SELECT
 }
 
 func (r *imageLibraryRepository) CreateCleanupJob(ctx context.Context, adminUserID int64, scope string, filters json.RawMessage) (*service.ImageLibraryCleanupJob, error) {
-	if scope != "expired" && scope != "deleted" && scope != "user" {
-		return nil, apperrors.BadRequest("INVALID_CLEANUP_SCOPE", "cleanup scope must be expired, deleted, or user")
+	if !validImageLibraryCleanupScope(scope) {
+		return nil, apperrors.BadRequest("INVALID_CLEANUP_SCOPE", "cleanup scope must be expired, deleted, user, async_results, or all")
 	}
 	if len(filters) == 0 || !json.Valid(filters) {
 		filters = json.RawMessage(`{}`)
@@ -1316,17 +1316,96 @@ func (r *imageLibraryRepository) ListCleanupJobs(ctx context.Context, limit int)
 }
 
 func (r *imageLibraryRepository) PreviewCleanup(ctx context.Context, scope string, filters json.RawMessage) (*service.ImageLibraryCleanupPreview, error) {
-	where, args, err := imageLibraryCleanupWhere(scope, filters)
+	preview := &service.ImageLibraryCleanupPreview{}
+	switch scope {
+	case "async_results":
+		return r.previewAsyncResultsCleanup(ctx, filters)
+	case "all":
+		libWhere, libArgs, err := imageLibraryCleanupWhere("all", filters)
+		if err != nil {
+			return nil, err
+		}
+		err = r.db.QueryRowContext(ctx, `
+SELECT COUNT(*),COALESCE(SUM(byte_size),0) FROM (
+ SELECT i.id,o.byte_size FROM image_library_items i
+ JOIN image_storage_objects o ON o.id=i.storage_object_id
+ WHERE i.purged_at IS NULL AND `+libWhere+`) matched`, libArgs...).Scan(&preview.MatchedItems, &preview.MatchedBytes)
+		if err != nil {
+			return nil, err
+		}
+		asyncPreview, err := r.previewAsyncResultsCleanup(ctx, filters)
+		if err != nil {
+			return nil, err
+		}
+		preview.MatchedItems += asyncPreview.MatchedItems
+		preview.MatchedBytes += asyncPreview.MatchedBytes
+
+		orphanItems, orphanBytes, err := r.previewOrphanStorageObjects(ctx, filters)
+		if err != nil {
+			return nil, err
+		}
+		preview.MatchedItems += orphanItems
+		preview.MatchedBytes += orphanBytes
+
+		inputItems, inputBytes, err := r.previewAsyncInputObjects(ctx, filters)
+		if err != nil {
+			return nil, err
+		}
+		preview.MatchedItems += inputItems
+		preview.MatchedBytes += inputBytes
+		return preview, nil
+	default:
+		where, args, err := imageLibraryCleanupWhere(scope, filters)
+		if err != nil {
+			return nil, err
+		}
+		err = r.db.QueryRowContext(ctx, `
+SELECT COUNT(*),COALESCE(SUM(byte_size),0) FROM (
+ SELECT i.id,o.byte_size FROM image_library_items i
+ JOIN image_storage_objects o ON o.id=i.storage_object_id
+ WHERE i.purged_at IS NULL AND `+where+`) matched`, args...).Scan(&preview.MatchedItems, &preview.MatchedBytes)
+		return preview, err
+	}
+}
+
+func (r *imageLibraryRepository) previewAsyncResultsCleanup(ctx context.Context, filters json.RawMessage) (*service.ImageLibraryCleanupPreview, error) {
+	where, args, err := asyncResultsCleanupWhere(filters)
 	if err != nil {
 		return nil, err
 	}
 	preview := &service.ImageLibraryCleanupPreview{}
 	err = r.db.QueryRowContext(ctx, `
-SELECT COUNT(*),COALESCE(SUM(byte_size),0) FROM (
- SELECT i.id,o.byte_size FROM image_library_items i
- JOIN image_storage_objects o ON o.id=i.storage_object_id
- WHERE i.purged_at IS NULL AND `+where+`) matched`, args...).Scan(&preview.MatchedItems, &preview.MatchedBytes)
+SELECT COUNT(*),COALESCE(SUM(COALESCE(o.byte_size,r.byte_size)),0)
+FROM async_image_results r
+LEFT JOIN image_storage_objects o ON o.id=r.storage_object_id
+WHERE `+where, args...).Scan(&preview.MatchedItems, &preview.MatchedBytes)
 	return preview, err
+}
+
+func (r *imageLibraryRepository) previewOrphanStorageObjects(ctx context.Context, filters json.RawMessage) (int64, int64, error) {
+	where, args, err := orphanStorageCleanupWhere(filters)
+	if err != nil {
+		return 0, 0, err
+	}
+	var items, bytes int64
+	err = r.db.QueryRowContext(ctx, `
+SELECT COUNT(*),COALESCE(SUM(o.byte_size),0)
+FROM image_storage_objects o
+WHERE o.state IN ('active','deleting') AND `+where, args...).Scan(&items, &bytes)
+	return items, bytes, err
+}
+
+func (r *imageLibraryRepository) previewAsyncInputObjects(ctx context.Context, filters json.RawMessage) (int64, int64, error) {
+	where, args, err := asyncInputCleanupWhere(filters)
+	if err != nil {
+		return 0, 0, err
+	}
+	var items, bytes int64
+	err = r.db.QueryRowContext(ctx, `
+SELECT COUNT(*),COALESCE(SUM(byte_size),0)
+FROM async_image_input_objects
+WHERE `+where, args...).Scan(&items, &bytes)
+	return items, bytes, err
 }
 
 func (r *imageLibraryRepository) EnsureExpiredCleanupJob(ctx context.Context) error {
@@ -1371,6 +1450,37 @@ func (r *imageLibraryRepository) PrepareCleanupBatch(ctx context.Context, jobID,
 	if limit <= 0 || limit > 500 {
 		limit = 100
 	}
+	if scope == "async_results" || scope == "all" {
+		batch, err := r.prepareAsyncResultsCleanupBatch(ctx, jobID, leaseVersion, filters, limit)
+		if err != nil {
+			return nil, err
+		}
+		if batch.MatchedItems > 0 || len(batch.Objects) > 0 {
+			return batch, nil
+		}
+		if scope == "async_results" {
+			return &service.ImageLibraryCleanupBatch{Done: true}, nil
+		}
+		batch, err = r.prepareLibraryItemsCleanupBatch(ctx, jobID, leaseVersion, "all", filters, limit)
+		if err != nil {
+			return nil, err
+		}
+		if batch.MatchedItems > 0 || len(batch.Objects) > 0 {
+			return batch, nil
+		}
+		batch, err = r.prepareOrphanStorageCleanupBatch(ctx, jobID, leaseVersion, filters, limit)
+		if err != nil {
+			return nil, err
+		}
+		if batch.MatchedItems > 0 || len(batch.Objects) > 0 {
+			return batch, nil
+		}
+		return r.prepareStorageResidueCleanupBatch(ctx, jobID, leaseVersion, filters, limit)
+	}
+	return r.prepareLibraryItemsCleanupBatch(ctx, jobID, leaseVersion, scope, filters, limit)
+}
+
+func (r *imageLibraryRepository) prepareLibraryItemsCleanupBatch(ctx context.Context, jobID, leaseVersion int64, scope string, filters json.RawMessage, limit int) (*service.ImageLibraryCleanupBatch, error) {
 	where, args, err := imageLibraryCleanupWhere(scope, filters)
 	if err != nil {
 		return nil, err
@@ -1774,12 +1884,384 @@ type imageLibraryCleanupFilters struct {
 	UserID int64      `json:"user_id"`
 }
 
-func imageLibraryCleanupWhere(scope string, filters json.RawMessage) (string, []any, error) {
+func validImageLibraryCleanupScope(scope string) bool {
+	switch scope {
+	case "expired", "deleted", "user", "async_results", "all":
+		return true
+	default:
+		return false
+	}
+}
+
+func parseImageLibraryCleanupFilters(filters json.RawMessage) (imageLibraryCleanupFilters, error) {
 	parsed := imageLibraryCleanupFilters{}
 	if len(filters) > 0 && string(filters) != "null" {
 		if err := json.Unmarshal(filters, &parsed); err != nil {
-			return "", nil, apperrors.BadRequest("INVALID_CLEANUP_FILTERS", "cleanup filters are invalid")
+			return parsed, apperrors.BadRequest("INVALID_CLEANUP_FILTERS", "cleanup filters are invalid")
 		}
+	}
+	return parsed, nil
+}
+
+func asyncResultsCleanupWhere(filters json.RawMessage) (string, []any, error) {
+	parsed, err := parseImageLibraryCleanupFilters(filters)
+	if err != nil {
+		return "", nil, err
+	}
+	if parsed.Before != nil && !parsed.Before.IsZero() {
+		return "r.created_at<=$1", []any{parsed.Before.UTC()}, nil
+	}
+	return "TRUE", nil, nil
+}
+
+func asyncInputCleanupWhere(filters json.RawMessage) (string, []any, error) {
+	parsed, err := parseImageLibraryCleanupFilters(filters)
+	if err != nil {
+		return "", nil, err
+	}
+	if parsed.Before != nil && !parsed.Before.IsZero() {
+		return "created_at<=$1", []any{parsed.Before.UTC()}, nil
+	}
+	return "TRUE", nil, nil
+}
+
+func orphanStorageCleanupWhere(filters json.RawMessage) (string, []any, error) {
+	parsed, err := parseImageLibraryCleanupFilters(filters)
+	if err != nil {
+		return "", nil, err
+	}
+	clauses := []string{
+		`NOT EXISTS (SELECT 1 FROM image_library_items i WHERE i.storage_object_id=o.id AND i.deleted_at IS NULL)`,
+		`NOT EXISTS (
+      SELECT 1 FROM image_plaza_publications p
+      JOIN image_library_items i ON i.id=p.library_item_id
+      WHERE i.storage_object_id=o.id
+        AND p.status IN ('pending_review','published','admin_hidden')
+        AND p.expires_at>NOW()
+    )`,
+		`NOT EXISTS (
+      SELECT 1 FROM async_image_results ar
+      WHERE ar.storage_object_id=o.id OR (ar.provider=o.provider AND ar.bucket=o.bucket AND ar.object_key=o.object_key)
+    )`,
+	}
+	args := make([]any, 0, 1)
+	if parsed.Before != nil && !parsed.Before.IsZero() {
+		args = append(args, parsed.Before.UTC())
+		clauses = append(clauses, fmt.Sprintf("o.created_at<=$%d", len(args)))
+	}
+	return strings.Join(clauses, " AND "), args, nil
+}
+
+func (r *imageLibraryRepository) prepareAsyncResultsCleanupBatch(ctx context.Context, jobID, leaseVersion int64, filters json.RawMessage, limit int) (*service.ImageLibraryCleanupBatch, error) {
+	where, args, err := asyncResultsCleanupWhere(filters)
+	if err != nil {
+		return nil, err
+	}
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = tx.Rollback() }()
+	var leaseAlive bool
+	if err := tx.QueryRowContext(ctx, `
+SELECT TRUE FROM image_library_cleanup_jobs
+WHERE id=$1 AND lease_version=$2 AND status='running'
+FOR UPDATE`, jobID, leaseVersion).Scan(&leaseAlive); err != nil {
+		if err == sql.ErrNoRows {
+			return nil, service.ErrImageLibraryLeaseLost
+		}
+		return nil, err
+	}
+	args = append(args, limit)
+	rows, err := tx.QueryContext(ctx, `
+SELECT r.id,r.storage_object_id,r.provider,r.bucket,r.object_key,r.content_type,r.byte_size,r.checksum,r.width,r.height
+FROM async_image_results r
+WHERE `+where+fmt.Sprintf(" ORDER BY r.id LIMIT $%d FOR UPDATE OF r SKIP LOCKED", len(args)), args...)
+	if err != nil {
+		return nil, err
+	}
+	type resultRow struct {
+		id       int64
+		objectID sql.NullInt64
+		ref      service.ObjectRef
+	}
+	claimed := make([]resultRow, 0, limit)
+	for rows.Next() {
+		var row resultRow
+		var width, height sql.NullInt64
+		if err := rows.Scan(
+			&row.id, &row.objectID, &row.ref.Provider, &row.ref.Bucket, &row.ref.ObjectKey,
+			&row.ref.ContentType, &row.ref.SizeBytes, &row.ref.ChecksumSHA256, &width, &height,
+		); err != nil {
+			_ = rows.Close()
+			return nil, err
+		}
+		if width.Valid {
+			row.ref.Width = int(width.Int64)
+		}
+		if height.Valid {
+			row.ref.Height = int(height.Int64)
+		}
+		claimed = append(claimed, row)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if len(claimed) == 0 {
+		return &service.ImageLibraryCleanupBatch{Done: true}, tx.Commit()
+	}
+	resultIDs := make([]int64, 0, len(claimed))
+	for _, row := range claimed {
+		resultIDs = append(resultIDs, row.id)
+	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM async_image_results WHERE id=ANY($1)`, pq.Array(resultIDs)); err != nil {
+		return nil, err
+	}
+	objects := make([]service.ObjectRef, 0, len(claimed))
+	seen := make(map[string]struct{}, len(claimed))
+	for _, row := range claimed {
+		key := row.ref.Provider + "\x00" + row.ref.Bucket + "\x00" + row.ref.ObjectKey
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		objectRows, queryErr := tx.QueryContext(ctx, `
+UPDATE image_storage_objects o SET state='deleting',deletion_claimed_at=NOW(),updated_at=NOW()
+WHERE o.state IN ('active','deleting')
+  AND (
+    ($1::BIGINT>0 AND o.id=$1)
+    OR (o.provider=$2 AND o.bucket=$3 AND o.object_key=$4)
+  )
+  AND NOT EXISTS (SELECT 1 FROM image_library_items i WHERE i.storage_object_id=o.id AND i.deleted_at IS NULL)
+  AND NOT EXISTS (
+    SELECT 1 FROM image_plaza_publications p JOIN image_library_items i ON i.id=p.library_item_id
+    WHERE i.storage_object_id=o.id AND p.status IN ('pending_review','published','admin_hidden') AND p.expires_at>NOW()
+  )
+  AND NOT EXISTS (
+    SELECT 1 FROM async_image_results ar
+    WHERE ar.storage_object_id=o.id OR (ar.provider=o.provider AND ar.bucket=o.bucket AND ar.object_key=o.object_key)
+  )
+RETURNING o.provider,o.bucket,o.object_key,o.content_type,o.byte_size,o.checksum_sha256,o.width,o.height`,
+			nullInt64OrZero(row.objectID), row.ref.Provider, row.ref.Bucket, row.ref.ObjectKey)
+		if queryErr != nil {
+			return nil, queryErr
+		}
+		claimedObject := false
+		for objectRows.Next() {
+			ref, scanErr := scanObjectRef(objectRows)
+			if scanErr != nil {
+				_ = objectRows.Close()
+				return nil, scanErr
+			}
+			objects = append(objects, *ref)
+			claimedObject = true
+		}
+		if closeErr := objectRows.Close(); closeErr != nil {
+			return nil, closeErr
+		}
+		if !claimedObject && row.ref.ObjectKey != "" {
+			// Object metadata may only live on the result row (legacy / local path).
+			objects = append(objects, row.ref)
+		}
+		seen[key] = struct{}{}
+	}
+	result, err := tx.ExecContext(ctx, `
+UPDATE image_library_cleanup_jobs
+SET scanned_count=scanned_count+$3,deleted_count=deleted_count+$3,updated_at=NOW()
+WHERE id=$1 AND lease_version=$2 AND status='running'`, jobID, leaseVersion, len(claimed))
+	if err := requireImageLibraryLease(result, err); err != nil {
+		return nil, err
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+	return &service.ImageLibraryCleanupBatch{
+		MatchedItems: int64(len(claimed)),
+		Objects:      objects,
+		Done:         len(claimed) < limit,
+	}, nil
+}
+
+func nullInt64OrZero(value sql.NullInt64) int64 {
+	if value.Valid {
+		return value.Int64
+	}
+	return 0
+}
+
+func (r *imageLibraryRepository) prepareOrphanStorageCleanupBatch(ctx context.Context, jobID, leaseVersion int64, filters json.RawMessage, limit int) (*service.ImageLibraryCleanupBatch, error) {
+	where, args, err := orphanStorageCleanupWhere(filters)
+	if err != nil {
+		return nil, err
+	}
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = tx.Rollback() }()
+	var leaseAlive bool
+	if err := tx.QueryRowContext(ctx, `
+SELECT TRUE FROM image_library_cleanup_jobs
+WHERE id=$1 AND lease_version=$2 AND status='running'
+FOR UPDATE`, jobID, leaseVersion).Scan(&leaseAlive); err != nil {
+		if err == sql.ErrNoRows {
+			return nil, service.ErrImageLibraryLeaseLost
+		}
+		return nil, err
+	}
+	args = append(args, limit)
+	objectRows, err := tx.QueryContext(ctx, `
+WITH candidates AS (
+ SELECT o.id FROM image_storage_objects o
+ WHERE o.state IN ('active','deleting') AND `+where+fmt.Sprintf(`
+ ORDER BY o.id LIMIT $%d FOR UPDATE OF o SKIP LOCKED
+)
+UPDATE image_storage_objects o SET state='deleting',deletion_claimed_at=NOW(),updated_at=NOW()
+FROM candidates c WHERE o.id=c.id
+RETURNING o.provider,o.bucket,o.object_key,o.content_type,o.byte_size,o.checksum_sha256,o.width,o.height`, len(args)), args...)
+	if err != nil {
+		return nil, err
+	}
+	objects := make([]service.ObjectRef, 0, limit)
+	for objectRows.Next() {
+		ref, scanErr := scanObjectRef(objectRows)
+		if scanErr != nil {
+			_ = objectRows.Close()
+			return nil, scanErr
+		}
+		objects = append(objects, *ref)
+	}
+	if err := objectRows.Close(); err != nil {
+		return nil, err
+	}
+	if len(objects) == 0 {
+		return &service.ImageLibraryCleanupBatch{Done: true}, tx.Commit()
+	}
+	result, err := tx.ExecContext(ctx, `
+UPDATE image_library_cleanup_jobs
+SET scanned_count=scanned_count+$3,deleted_count=deleted_count+$3,updated_at=NOW()
+WHERE id=$1 AND lease_version=$2 AND status='running'`, jobID, leaseVersion, len(objects))
+	if err := requireImageLibraryLease(result, err); err != nil {
+		return nil, err
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+	return &service.ImageLibraryCleanupBatch{
+		MatchedItems: int64(len(objects)),
+		Objects:      objects,
+		Done:         len(objects) < limit,
+	}, nil
+}
+
+func (r *imageLibraryRepository) prepareStorageResidueCleanupBatch(ctx context.Context, jobID, leaseVersion int64, filters json.RawMessage, limit int) (*service.ImageLibraryCleanupBatch, error) {
+	inputWhere, inputArgs, err := asyncInputCleanupWhere(filters)
+	if err != nil {
+		return nil, err
+	}
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = tx.Rollback() }()
+	var leaseAlive bool
+	if err := tx.QueryRowContext(ctx, `
+SELECT TRUE FROM image_library_cleanup_jobs
+WHERE id=$1 AND lease_version=$2 AND status='running'
+FOR UPDATE`, jobID, leaseVersion).Scan(&leaseAlive); err != nil {
+		if err == sql.ErrNoRows {
+			return nil, service.ErrImageLibraryLeaseLost
+		}
+		return nil, err
+	}
+
+	inputArgs = append(inputArgs, limit)
+	inputRows, err := tx.QueryContext(ctx, `
+SELECT id,provider,bucket,object_key,content_type,byte_size,checksum,width,height
+FROM async_image_input_objects
+WHERE `+inputWhere+fmt.Sprintf(" ORDER BY id LIMIT $%d FOR UPDATE SKIP LOCKED", len(inputArgs)), inputArgs...)
+	if err != nil {
+		return nil, err
+	}
+	type inputRow struct {
+		id  int64
+		ref service.ObjectRef
+	}
+	inputs := make([]inputRow, 0, limit)
+	for inputRows.Next() {
+		var row inputRow
+		var width, height sql.NullInt64
+		if err := inputRows.Scan(
+			&row.id, &row.ref.Provider, &row.ref.Bucket, &row.ref.ObjectKey,
+			&row.ref.ContentType, &row.ref.SizeBytes, &row.ref.ChecksumSHA256, &width, &height,
+		); err != nil {
+			_ = inputRows.Close()
+			return nil, err
+		}
+		if width.Valid {
+			row.ref.Width = int(width.Int64)
+		}
+		if height.Valid {
+			row.ref.Height = int(height.Int64)
+		}
+		inputs = append(inputs, row)
+	}
+	if err := inputRows.Close(); err != nil {
+		return nil, err
+	}
+
+	objects := make([]service.ObjectRef, 0, len(inputs))
+	if len(inputs) > 0 {
+		ids := make([]int64, 0, len(inputs))
+		for _, row := range inputs {
+			ids = append(ids, row.id)
+			if row.ref.ObjectKey != "" {
+				objects = append(objects, row.ref)
+			}
+		}
+		if _, err := tx.ExecContext(ctx, `DELETE FROM async_image_input_objects WHERE id=ANY($1)`, pq.Array(ids)); err != nil {
+			return nil, err
+		}
+	}
+
+	// Wipe leftover upload intents / reservations that keep storage "in use".
+	if _, err := tx.ExecContext(ctx, `DELETE FROM async_image_result_upload_intents`); err != nil {
+		return nil, err
+	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM image_library_upload_intents`); err != nil {
+		return nil, err
+	}
+	if _, err := tx.ExecContext(ctx, `
+DELETE FROM async_image_upload_reservations
+WHERE status='reserved' OR intent_object_key IS NOT NULL`); err != nil {
+		return nil, err
+	}
+
+	matched := int64(len(inputs))
+	if matched == 0 && len(objects) == 0 {
+		// Still count one synthetic pass so the job can finish after residue wipe.
+		matched = 0
+	}
+	result, err := tx.ExecContext(ctx, `
+UPDATE image_library_cleanup_jobs
+SET scanned_count=scanned_count+$3,deleted_count=deleted_count+$3,updated_at=NOW()
+WHERE id=$1 AND lease_version=$2 AND status='running'`, jobID, leaseVersion, matched)
+	if err := requireImageLibraryLease(result, err); err != nil {
+		return nil, err
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+	return &service.ImageLibraryCleanupBatch{
+		MatchedItems: matched,
+		Objects:      objects,
+		Done:         len(inputs) < limit,
+	}, nil
+}
+
+func imageLibraryCleanupWhere(scope string, filters json.RawMessage) (string, []any, error) {
+	parsed, err := parseImageLibraryCleanupFilters(filters)
+	if err != nil {
+		return "", nil, err
 	}
 	args := make([]any, 0, 2)
 	cutoff := "NOW()"
@@ -1798,8 +2280,13 @@ func imageLibraryCleanupWhere(scope string, filters json.RawMessage) (string, []
 		}
 		args = append(args, parsed.UserID)
 		return fmt.Sprintf("i.user_id=$%d", len(args)), args, nil
+	case "all":
+		if parsed.Before != nil && !parsed.Before.IsZero() {
+			return "i.created_at<=" + cutoff, args, nil
+		}
+		return "TRUE", args, nil
 	default:
-		return "", nil, apperrors.BadRequest("INVALID_CLEANUP_SCOPE", "cleanup scope must be expired, deleted, or user")
+		return "", nil, apperrors.BadRequest("INVALID_CLEANUP_SCOPE", "cleanup scope must be expired, deleted, user, async_results, or all")
 	}
 }
 

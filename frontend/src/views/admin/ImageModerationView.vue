@@ -281,9 +281,9 @@
           <form class="cleanup-form" @submit.prevent="previewCleanupJob">
             <h2>{{ t('imageWorkflow.admin.cleanupPlan') }}</h2>
             <p>{{ t('imageWorkflow.admin.cleanupHint') }}</p>
-            <label><span>{{ t('imageWorkflow.admin.cleanupScope') }}</span><select v-model="cleanupForm.scope" class="input"><option value="expired">{{ t('imageWorkflow.admin.expiredAssets') }}</option><option value="deleted">{{ t('imageWorkflow.admin.deletedAssets') }}</option><option value="user">{{ t('imageWorkflow.admin.userAssets') }}</option></select></label>
+            <label><span>{{ t('imageWorkflow.admin.cleanupScope') }}</span><select v-model="cleanupForm.scope" class="input"><option value="all">{{ t('imageWorkflow.admin.allStorageAssets') }}</option><option value="async_results">{{ t('imageWorkflow.admin.asyncResultAssets') }}</option><option value="expired">{{ t('imageWorkflow.admin.expiredAssets') }}</option><option value="deleted">{{ t('imageWorkflow.admin.deletedAssets') }}</option><option value="user">{{ t('imageWorkflow.admin.userAssets') }}</option></select></label>
             <label v-if="cleanupForm.scope === 'user'"><span>{{ t('imageWorkflow.admin.userId') }}</span><input v-model.number="cleanupForm.userId" type="number" min="1" inputmode="numeric" class="input" :placeholder="t('imageWorkflow.admin.userIdPlaceholder')" /></label>
-            <label v-else><span>{{ t('imageWorkflow.admin.beforeDate') }}</span><input v-model="cleanupForm.before" type="date" class="input" /></label>
+            <label v-else-if="cleanupForm.scope !== 'all'"><span>{{ t('imageWorkflow.admin.beforeDate') }}</span><input v-model="cleanupForm.before" type="date" class="input" /></label>
             <button type="submit" class="btn btn-secondary" data-testid="cleanup-preview" :disabled="cleanupBusy || !cleanupFormValid">{{ t('imageWorkflow.admin.previewCleanup') }}</button>
             <div v-if="cleanupPreview" class="cleanup-preview" role="status">
               <strong>{{ t('imageWorkflow.admin.cleanupMatches', { count: cleanupPreview.matched_items, bytes: formatBytes(cleanupPreview.matched_bytes) }) }}</strong>
@@ -376,7 +376,7 @@ const libraryFilters = reactive<{
   publicationStatus: string
 }>({ q: '', userId: '', platform: '', source: '', visibility: '', publicationStatus: '' })
 const cleanupForm = reactive<{ scope: string; before: string; userId: number | '' }>({
-  scope: 'expired',
+  scope: 'all',
   before: new Date().toISOString().slice(0, 10),
   userId: '',
 })
@@ -535,7 +535,7 @@ async function previewCleanupJob() {
   catch (cause: any) { appStore.showError(cause?.message || t('imageWorkflow.admin.actionFailed')) } finally { cleanupBusy.value = false }
 }
 async function startCleanup() {
-  if (!cleanupPreview.value || !window.confirm(t('imageWorkflow.admin.cleanupConfirm'))) return
+  if (!cleanupPreview.value || !window.confirm(cleanupForm.scope === 'all' ? t('imageWorkflow.admin.cleanupConfirmAll') : t('imageWorkflow.admin.cleanupConfirm'))) return
   cleanupBusy.value = true
   try { await createCleanupJob(cleanupPayload()); cleanupPreview.value = null; await loadCleanup(); appStore.showSuccess(t('imageWorkflow.admin.cleanupQueued')) }
   catch (cause: any) { appStore.showError(cause?.message || t('imageWorkflow.admin.actionFailed')) } finally { cleanupBusy.value = false }
@@ -616,6 +616,8 @@ function statusClass(value: string) {
 async function resolveAdminImages(items: ImageLibraryItem[]) { await Promise.allSettled(items.map(async (item) => { const access = await resolveImageLibraryViewURL(item.id, true); adminImageURLs.value = { ...adminImageURLs.value, [String(item.id)]: access.url } })) }
 
 function cleanupScopeLabel(scope: string) {
+  if (scope === 'all') return t('imageWorkflow.admin.allStorageAssets')
+  if (scope === 'async_results') return t('imageWorkflow.admin.asyncResultAssets')
   if (scope === 'expired') return t('imageWorkflow.admin.expiredAssets')
   if (scope === 'deleted') return t('imageWorkflow.admin.deletedAssets')
   if (scope === 'user') return t('imageWorkflow.admin.userAssets')

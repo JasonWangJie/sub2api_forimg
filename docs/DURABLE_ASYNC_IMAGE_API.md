@@ -1,6 +1,6 @@
 # Sub2API 持久化异步生图 API
 
-本文档说明 Sub2API 对下游提供的持久化异步生图兼容层。这里的 **BB** 和 **SC** 是两种下游请求/响应方言，不是上游供应商。实际调用 Gemini 还是 OpenAI，由请求所用 API Key 当前所属分组决定。
+本文档说明 Sub2API 对下游提供的持久化异步生图兼容层。这里的 **BB** 和 **SC** 是两种下游请求/响应方言，不是上游供应商。实际调用 Gemini 还是 OpenAI，由请求路径决定；计费分组由 API Key 的 `image_platform_groups` 映射（优先）或主分组平台回退解析。详见仓库 [wiki-new/API密钥双平台生图映射.md](../wiki-new/API密钥双平台生图映射.md)。
 
 ## 1. 范围与兼容性
 
@@ -30,13 +30,16 @@
 
 新任务必须同时满足以下条件：
 
-1. 请求携带有效的 Sub2API API Key，且该 Key 已分配分组。
-2. 分组平台与接口匹配：`_gm`、`_sc` 需要 Gemini，`_oa` 需要 OpenAI。
-3. 分组已开启普通“图片生成”和新增的“异步生图”。字段名分别为 `allow_image_generation` 与 `allow_async_image_generation`。
-4. 全站对象存储已启用、凭证完整并可用。
-5. 用户、API Key、分组、订阅/余额、额度和并发等现有检查通过。
+1. 请求携带有效的 Sub2API API Key。
+2. 能为该路径解析出计费分组：Key 的 `image_platform_groups`（`gemini`/`openai`）优先；否则主 `group_id` 且平台与路径匹配。
+3. 计费分组平台与接口匹配：`_gm`、`_sc` 需要 Gemini，`_oa` 需要 OpenAI。
+4. 计费分组已开启普通“图片生成”和新增的“异步生图”。字段名分别为 `allow_image_generation` 与 `allow_async_image_generation`。
+5. 全站对象存储已启用、凭证完整并可用。
+6. 用户、API Key、分组、订阅/余额、额度和并发等现有检查通过。
 
 `allow_async_image_generation` 默认关闭，只对 Gemini/OpenAI 分组有效。关闭普通图片生成或把分组切换到其他平台时，该值会自动关闭。未开启异步生图的分组调用新提交接口返回 `403`，而不是自动回退到同步接口。
+
+同一把 Key 可同时映射 Gemini 与 OpenAI 生图分组（1 Key 双用）；聊天等非异步生图仍使用主分组。旧 Key 仅有主分组时行为与升级前一致。
 
 对象存储支持 `qiniu`（七牛云）、`aliyun`（阿里云）、`tencent`（腾讯云）和兼容既有部署的 `custom_s3`。部署参数见 [deploy/config.example.yaml](../deploy/config.example.yaml) 中的 `image_storage` 与 `async_image`。
 

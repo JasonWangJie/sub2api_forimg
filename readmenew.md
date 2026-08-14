@@ -16,28 +16,22 @@
 
 ## 当前版本快照
 
-记录日期：`2026-07-22`（当日续更：延期投稿、OSS 年月日目录、工作台本机生图与异步任务中心 UX）。
+记录日期：`2026-08-14`（续更：1 Key 异步生图双平台分组映射；存储后端可随时切换；管理端清理覆盖异步任务结果与「清理全部」；固定 `TOTP_ENCRYPTION_KEY` 才能保存 OSS Secret）。
 
 | 项目 | 当前记录 |
 |---|---|
-| 发布版本文件 | `backend/cmd/server/VERSION = 0.1.162` |
-| 本轮开发基线 | `51b083d374decf811ac88f8b0194165db9a8ba79` |
-| 基线描述 | `v0.1.162-4-g51b083d37` |
-| 文档记录时 HEAD | `63db66427aa6997c778171b140c786b6dfbfec5e`（工作树可能 dirty；以 `git rev-parse`/`git status` 为准） |
-| HEAD 描述 | `63db6642` / dirty 时见 `git describe --dirty` |
+| 发布版本文件 | `backend/cmd/server/VERSION`（以仓库文件为准） |
+| 文档记录时 HEAD | `91ecca6114a6e5e8eecac89eccb76ce04603a38b`（工作树可能 dirty；以 `git rev-parse`/`git status` 为准） |
+| HEAD 描述 | `v0.1.173.3-dirty`（以 `git describe --tags --always --dirty` 为准） |
 | 当前及后续默认分支 | `main` |
-| 已合并原作者主线 | `upstream/main = 5a8d6c4e41e38f05cea4164e6ff03443fc0f6923` |
-| 上游合并提交 | `433cf0096` |
-| 合并后代码验证提交 | `6412b5eb7` |
+| 已合并原作者主线 | 以 `git log` / `upstream/main` 实际为准 |
 | SC 上传安全迁移 | `backend/migrations/187_ZJ_async_image_upload_reservations.sql` |
 | 延期广场投稿迁移 | `backend/migrations/188_ZJ_plaza_submission_deferred_upload.sql` |
-| 功能代码主线合并提交 | `a9d23973d352c9923eccdaf789ffd2598d9d0ffe` |
-| 合并提交描述 | `v0.1.162-52-ga9d23973d` |
-| 功能分支推送 | `origin/feat/image-workflow-library-moderation` 已推送 |
-| Fork CI | 旧仓库在 `2026-07-22` 为 `BLOCKED`；新仓库需在首次发版时核对 `sub2api_forimg/actions` 实际结果 |
-| 合并并推送 `origin/main` | `COMPLETED`：按用户明确指示绕过原 CI 等待顺序，非强制合并并推送 |
+| 结果上传意图迁移 | `backend/migrations/189_ZJ_async_image_result_upload_intents.sql` |
+| API Key 双平台生图映射 | `backend/migrations/221_ZJ_api_key_platform_groups.sql` |
+| Fork CI | 发版时在 `JasonWangJie/sub2api_forimg/actions` 核对实际结果 |
 
-本轮不主动修改 `0.1.162` 发布版本号。最终交付必须同时报告 `VERSION`、完整 SHA、`git describe`、推送分支和 CI 链接/结果。
+最终交付必须同时报告 `VERSION`、完整 SHA、`git describe`、推送分支和 CI 链接/结果。历史 `2026-07-22` 基线与测试证据仍保留在下方「当前完成度」与 [wiki-new/测试与验收记录.md](wiki-new/测试与验收记录.md)。
 
 ## 本 Fork 的图片能力
 
@@ -50,16 +44,18 @@
 
 ## 工作台模式矩阵
 
-工作台不提供手工“实时/异步”切换。每次提交前重新读取 Key 当前分组的能力；平台、分组开关或能力版本发生变化时，应停止本次提交并要求用户重新确认。
+工作台不提供手工“实时/异步”切换。每次提交前重新读取 Key 能力；平台、分组开关或能力版本发生变化时，应停止本次提交并要求用户重新确认。
 
-| API Key 当前分组 | 执行模式 | 实际入口 |
+**持久异步 API（下游客户端）** 支持「1 Key 双用」：Key 可额外绑定 `image_platform_groups.gemini` / `openai`，按路径选计费组（映射优先，主分组平台匹配则回退）。配置见 [wiki-new/API密钥双平台生图映射.md](wiki-new/API密钥双平台生图映射.md)。
+
+| API Key 当前分组 / 映射 | 执行模式 | 实际入口 |
 |---|---|---|
 | OpenAI，异步开关关闭 | 实时 | `/v1/images/generations`、`/v1/images/edits` |
-| OpenAI，异步开关开启 | 异步 | `/v1/images/generations_oa`（有有效 `image_urls` / 参考图 → 图生图，否则文生图）；查询 `/v1/images/tasks_async/{task_id}` |
+| OpenAI，异步开关开启（主组或 openai 映射） | 异步 | `/v1/images/generations_oa`（有有效 `image_urls` / 参考图 → 图生图，否则文生图）；查询 `/v1/images/tasks_async/{task_id}` |
 | Gemini，异步开关关闭 | 实时 | `/v1beta/models/{model}:generateContent` |
-| Gemini，异步开关开启 | 异步 | `/v1/uploads/images_sc`、`/v1/images/generations_sc`；查询同 OpenAI：`/v1/images/tasks_async/{task_id}` |
+| Gemini，异步开关开启（主组或 gemini 映射） | 异步 | `/v1/uploads/images_sc`、`/v1/images/generations_sc`；查询同 OpenAI：`/v1/images/tasks_async/{task_id}` |
 | Grok 图片分组 | 仅实时 | 现有 `/v1/images/generations`、`/v1/images/edits` |
-| Antigravity 或其他平台 | 不可用 | 不在图片工作台显示为可用 Key |
+| Antigravity 或其他平台（且无 gemini/openai 映射） | 不可用 | 不在图片工作台显示为可用 Key |
 
 失败、超时、`execution_unknown`、`403` 或 `409` 都不能让工作台在实时和异步链路之间自动回退。异步重试必须复用同一请求字节和 `Idempotency-Key`。
 
@@ -67,7 +63,7 @@
 
 ## 数据与公开模型
 
-数据库迁移 `182_ZJ_add_image_plaza.sql` 建立初版图片广场；迁移 `185_ZJ_async_image_tasks.sql` 建立持久异步任务中心；迁移 `186_ZJ_image_library_and_plaza_moderation.sql` 建立统一图片对象、个人图库、审核投稿、举报、事件、Outbox、清理任务和旧广场迁移状态；迁移 `187_ZJ_async_image_upload_reservations.sql` 增加 SC 上传的两阶段 admission、幂等 reservation、URL alias 和崩溃恢复意图；迁移 `188_ZJ_plaza_submission_deferred_upload.sql` 建立本机持图延期投稿队列表 `image_plaza_submission_requests`；迁移 `189_ZJ_async_image_result_upload_intents.sql` 为异步结果增加 PUT 前持久化意图，并为 Outbox 增加 claim token 所有权。
+数据库迁移 `182_ZJ_add_image_plaza.sql` 建立初版图片广场；迁移 `185_ZJ_async_image_tasks.sql` 建立持久异步任务中心；迁移 `186_ZJ_image_library_and_plaza_moderation.sql` 建立统一图片对象、个人图库、审核投稿、举报、事件、Outbox、清理任务和旧广场迁移状态；迁移 `187_ZJ_async_image_upload_reservations.sql` 增加 SC 上传的两阶段 admission、幂等 reservation、URL alias 和崩溃恢复意图；迁移 `188_ZJ_plaza_submission_deferred_upload.sql` 建立本机持图延期投稿队列表 `image_plaza_submission_requests`；迁移 `189_ZJ_async_image_result_upload_intents.sql` 为异步结果增加 PUT 前持久化意图，并为 Outbox 增加 claim token 所有权；迁移 `221_ZJ_api_key_platform_groups.sql` 为 API Key 增加 Gemini/OpenAI 异步生图计费分组映射（1 Key 双用）。
 
 本 Fork 自研 SQL 迁移统一使用 `NNN_ZJ_description.sql`，原作者迁移文件不加该标记。`182_add_image_plaza.sql` 和 `185` 至 `189` 的无标记旧名仅作为已部署数据库兼容别名保留在迁移器映射中，不再作为仓库文件存在；同编号的上游 `182_prompt_audit_full_prompt.sql` 保持原名。
 
@@ -83,8 +79,9 @@
 - SC 上传在 multipart body 前先以 `async_image_upload_attempts` 做 PostgreSQL rolling-rate admission，读取有界文件后、解码/OSS 前再以 `async_image_upload_reservations` 原子执行幂等和 Key 级字节额度；`async_image_input_url_aliases` 绑定原 URL 与重签 URL 的所有权。
 - 上传默认 20 次/Key/分钟（最大 1000）、默认 1 GiB/Key 输入额度（最大 100 GiB）、单图/请求有效图片负载硬上限 64 MiB、单次 OSS Put 默认 300 秒且最大 600 秒、输入最长保留 720 小时。相同幂等上传只重签并返回 `X-Idempotency-Replayed: true`；冲突、处理中或结果墓碑返回 `409`。
 - 每个输入对象最多保留 128 个重签 URL alias。注册由输入对象行锁串行化，过期 alias 仍作为所有权墓碑保留；第 129 个新 alias 返回结构化 `429`，不会无限扩张表。
-- SC 客户端文件名会净化且不进入对象 key；OSS 前持久化 deterministic object intent。失败或 stale intent 第一次 Delete 后保留恢复事实，至少十分钟后二次 Delete 成功才移除；未清理 failed intent 始终计入 Key 容量。存储身份 guard 同时统计输入对象和未清理 intent。
+- SC 客户端文件名会净化且不进入对象 key；OSS 前持久化 deterministic object intent。失败或 stale intent 第一次 Delete 后保留恢复事实，至少十分钟后二次 Delete 成功才移除；未清理 failed intent 始终计入 Key 容量。
 - 异步结果的每个 OSS PUT 也必须先写入 `async_image_result_upload_intents`。对象 key 由任务提交日期、任务号和结果序号确定；部分上传或进程崩溃后只覆盖同一 key，不重新生成。结果清单落库时同事务删除 intent；过期孤儿由 retention Worker 在确认没有任务、图库或广场活动引用后删除。
+- `2026-08-14`：管理端清理已覆盖异步任务结果与「清理全部」；存储后端切换不再被活跃对象拦截，但切换前仍建议先清理。
 
 ## 异步并发与性能边界
 
@@ -112,9 +109,21 @@
 
 ## 存储、配额与安全默认值
 
-全站使用一个当前图片对象存储，支持 `qiniu`、`aliyun`、`tencent` 和兼容已有配置的 `custom_s3`。后台“图片存储”设置统一管理异步任务和个人图库运行参数。
+全站使用一个当前图片对象存储，支持 `oss`（`qiniu` / `aliyun` / `tencent` / `custom_s3`）、`superbed` 聚合图床与 `local` 本机目录。后台「备份 / 异步生图对象存储」统一管理后端选择、凭证与异步/图库运行参数。
 
-为避免全站单存储配置切换后历史对象失联，只要数据库中仍存在非 `deleted` 图片对象，服务端就拒绝修改 provider、bucket、endpoint、region 或 path-style 寻址身份。应先迁移或清空旧对象；按历史存储身份解析多套凭证的 resolver 仍是后续 P1。
+**存储后端可随时切换并立即生效**（不再因库内仍有活跃对象而拒绝保存）。切换后新上传写入新后端；旧对象若未迁移，查看/签名/删除可能失败或落到错误位置。生产切换前建议先在「图片管理 → 清理」执行 **清理全部存储对象** 或 **异步生图任务结果**，再改配置。按历史身份并行解析多套凭证的 resolver 仍是后续 P1。
+
+保存对象存储 Secret / Superbed Token 前必须配置**固定** `TOTP_ENCRYPTION_KEY`（或 `config.yaml` 的 `totp.encryption_key`，可用 `openssl rand -hex 32` 生成）。未配置固定密钥时拒绝落库 Secret，避免重启后密文无法解密。
+
+管理端清理 scope：
+
+| scope | 含义 |
+|---|---|
+| `all` | 清理全部：图库项、异步任务结果、孤儿 `image_storage_objects`、SC 参考图与上传残留 |
+| `async_results` | 仅异步生图任务结果（`async_image_results`） |
+| `expired` / `deleted` / `user` | 仅个人图库资产（原有范围） |
+
+本机目录的 `local_url`、对象 CDN、`async_image.public_base_url` 等公开访问地址不属于存储定位身份，可单独修改。
 
 | 配置 | 默认值 |
 |---|---:|
@@ -144,13 +153,16 @@
 - 用户个人图库：`/image-library`
 - 审核后图片广场：`/image-plaza`
 - 用户/管理员异步任务中心：任务号加宽并可一键复制；列表行点击不打开详情，仅「查看」打开
-- 管理员图片审核、举报、全站图库和清理：含「本机投稿审核」页签（无图预览占位）
+- 管理员图片审核、举报、全站图库和清理：含「本机投稿审核」页签；清理支持全部存储 / 异步任务结果 / 过期 / 软删 / 指定用户
 - 分组创建/编辑：“图片生成计费”区域内的“异步生图”开关
-- 备份/存储设置：OSS、异步运行参数和图库保留/配额配置
+- 密钥创建/编辑：可选 Gemini / OpenAI 生图分组（`image_platform_groups`，1 Key 双用）
+- 备份/存储设置：本机目录、聚合图床、对象存储、异步运行参数和图库保留/配额配置
 
 ## 当前完成度
 
-工作树中已经存在工作台能力接口、实时/异步分流、Gemini 实时图片计费采集、服务端图库、统一对象引用、投稿审核、举报、维护 Worker、旧广场迁移、管理页面和安全校验实现。管理员批量审核 API/UI、旧数字/`imgpub_*`/`img_*` 删除兼容、Worker 优雅 `Stop()`、历史成功异步任务归档回填、永久归档错误终止重排、OSS 身份切换保护，以及迁移 `187` 的 SC 上传安全层均已补齐。
+工作树中已经存在工作台能力接口、实时/异步分流、Gemini 实时图片计费采集、服务端图库、统一对象引用、投稿审核、举报、维护 Worker、旧广场迁移、管理页面和安全校验实现。管理员批量审核 API/UI、旧数字/`imgpub_*`/`img_*` 删除兼容、Worker 优雅 `Stop()`、历史成功异步任务归档回填、永久归档错误终止重排，以及迁移 `187` 的 SC 上传安全层均已补齐。
+
+`2026-08-14` 续更：存储后端（本机 / 图床 / OSS）可随时切换并立即生效；管理端清理新增 `async_results` 与 `all`；保存 OSS Secret 要求固定 `TOTP_ENCRYPTION_KEY`；**1 Key 双用**（`221_ZJ_api_key_platform_groups`）已实现，本地定向测试与 `service`/`handler`/`handler/admin` 包冒烟通过，详见 [wiki-new/API密钥双平台生图映射.md](wiki-new/API密钥双平台生图映射.md)。
 
 `2026-07-22` 续更（多在 dirty 工作树，交付前需提交）：迁移 `188` 延期广场投稿；实时本机投稿+审核后同步上传；OSS 对象 key 年/月/日分区；异步任务中心复制任务号/禁止误开详情；工作台侧栏不再提示异步归档恢复；`upstream_failed` 写入真实 HTTP 状态与上游摘要。
 
@@ -183,6 +195,7 @@
 | [wiki-new/接口契约.md](wiki-new/接口契约.md) | 下游异步协议与站内图片 API |
 | [wiki-new/对象存储与保留策略.md](wiki-new/对象存储与保留策略.md) | OSS、对象引用、签名和保留策略 |
 | [wiki-new/图片工作台.md](wiki-new/图片工作台.md) | Key 分组驱动的工作台实时/异步分流 |
+| [wiki-new/API密钥双平台生图映射.md](wiki-new/API密钥双平台生图映射.md) | 1 Key 异步生图 Gemini/OpenAI 计费组分歧与配置 |
 | [wiki-new/图片图库与对象模型.md](wiki-new/图片图库与对象模型.md) | 服务端图库和统一对象引用 |
 | [wiki-new/图片广场审核与迁移.md](wiki-new/图片广场审核与迁移.md) | 审核广场、举报、安全迁移和维护 Worker |
 | [wiki-new/本地开发运行手册.md](wiki-new/本地开发运行手册.md) | 本地前后端运行、Docker 联调和常见故障 |

@@ -227,6 +227,9 @@ type CreateAPIKeyRequest struct {
 	RateLimit5h float64 `json:"rate_limit_5h"`
 	RateLimit1d float64 `json:"rate_limit_1d"`
 	RateLimit7d float64 `json:"rate_limit_7d"`
+
+	// ImagePlatformGroups is optional; when non-nil it replaces gemini/openai billing mappings.
+	ImagePlatformGroups *map[string]int64 `json:"image_platform_groups,omitempty"`
 }
 
 // UpdateAPIKeyRequest 更新API Key请求
@@ -248,6 +251,9 @@ type UpdateAPIKeyRequest struct {
 	RateLimit1d         *float64 `json:"rate_limit_1d"`
 	RateLimit7d         *float64 `json:"rate_limit_7d"`
 	ResetRateLimitUsage *bool    `json:"reset_rate_limit_usage"` // Reset all usage counters to 0
+
+	// ImagePlatformGroups nil = no change; non-nil replaces the full mapping set.
+	ImagePlatformGroups *map[string]int64 `json:"image_platform_groups,omitempty"`
 }
 
 func validateAPIKeyLimit(v float64) error {
@@ -292,6 +298,7 @@ type APIKeyService struct {
 	groupRepo                 GroupRepository
 	userSubRepo               UserSubscriptionRepository
 	userGroupRateRepo         UserGroupRateRepository
+	platformGroupRepo         APIKeyPlatformGroupRepository
 	cache                     APIKeyCache
 	rateLimitCacheInvalid     RateLimitCacheInvalidator // optional: invalidate Redis rate limit cache
 	concurrencyService        *ConcurrencyService
@@ -560,6 +567,15 @@ func (s *APIKeyService) Create(ctx context.Context, userID int64, req CreateAPIK
 		return nil, fmt.Errorf("create api key: %w", err)
 	}
 
+	if req.ImagePlatformGroups != nil {
+		if err := s.ReplaceImagePlatformGroups(ctx, apiKey, user, *req.ImagePlatformGroups, false); err != nil {
+			_ = s.apiKeyRepo.DeleteWithAudit(ctx, apiKey.ID)
+			return nil, err
+		}
+	} else if err := s.AttachImagePlatformGroups(ctx, apiKey); err != nil {
+		return nil, err
+	}
+
 	s.InvalidateAuthCacheByKey(ctx, apiKey.Key)
 	s.compileAPIKeyIPRules(apiKey)
 
@@ -577,6 +593,9 @@ func (s *APIKeyService) List(ctx context.Context, userID int64, params paginatio
 		return nil, nil, fmt.Errorf("list api keys: %w", err)
 	}
 	s.fillCurrentConcurrency(ctx, keys)
+	if err := s.AttachImagePlatformGroupsBatch(ctx, keys); err != nil {
+		return nil, nil, err
+	}
 	return keys, pagination, nil
 }
 
@@ -591,6 +610,9 @@ func (s *APIKeyService) listByCurrentConcurrency(ctx context.Context, userID int
 		return nil, nil, fmt.Errorf("list api keys: %w", err)
 	}
 	s.fillCurrentConcurrency(ctx, keys)
+	if err := s.AttachImagePlatformGroupsBatch(ctx, keys); err != nil {
+		return nil, nil, err
+	}
 	sortAPIKeysByCurrentConcurrency(keys, params.NormalizedSortOrder(pagination.SortOrderDesc))
 	return paginateAPIKeys(keys, params), apiKeyPaginationResult(int64(len(keys)), params), nil
 }
@@ -700,6 +722,9 @@ func (s *APIKeyService) GetByID(ctx context.Context, id int64) (*APIKey, error) 
 	s.compileAPIKeyIPRules(apiKey)
 	if apiKey != nil {
 		apiKey.CurrentConcurrency = s.currentConcurrencyForAPIKey(ctx, apiKey.ID)
+		if err := s.AttachImagePlatformGroups(ctx, apiKey); err != nil {
+			return nil, err
+		}
 	}
 	return apiKey, nil
 }
@@ -922,6 +947,18 @@ func (s *APIKeyService) Update(ctx context.Context, id int64, userID int64, req 
 
 	if err := s.apiKeyRepo.Update(ctx, apiKey, fields); err != nil {
 		return nil, fmt.Errorf("update api key: %w", err)
+	}
+
+	if req.ImagePlatformGroups != nil {
+		user, err := s.userRepo.GetByID(ctx, userID)
+		if err != nil {
+			return nil, fmt.Errorf("get user: %w", err)
+		}
+		if err := s.ReplaceImagePlatformGroups(ctx, apiKey, user, *req.ImagePlatformGroups, false); err != nil {
+			return nil, err
+		}
+	} else if err := s.AttachImagePlatformGroups(ctx, apiKey); err != nil {
+		return nil, err
 	}
 
 	s.InvalidateAuthCacheByKey(ctx, apiKey.Key)

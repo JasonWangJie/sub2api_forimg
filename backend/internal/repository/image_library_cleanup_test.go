@@ -25,6 +25,21 @@ func TestImageLibraryCleanupWhereUsesBoundParameters(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "i.user_id=$2", where)
 	require.Equal(t, []any{before, int64(42)}, args)
+
+	where, args, err = imageLibraryCleanupWhere("all", filters)
+	require.NoError(t, err)
+	require.Equal(t, "i.created_at<=$1", where)
+	require.Equal(t, []any{before}, args)
+
+	where, args, err = imageLibraryCleanupWhere("all", json.RawMessage(`{}`))
+	require.NoError(t, err)
+	require.Equal(t, "TRUE", where)
+	require.Empty(t, args)
+
+	where, args, err = asyncResultsCleanupWhere(filters)
+	require.NoError(t, err)
+	require.Equal(t, "r.created_at<=$1", where)
+	require.Equal(t, []any{before}, args)
 }
 
 func TestImageLibraryCleanupWhereRejectsInvalidUserScope(t *testing.T) {

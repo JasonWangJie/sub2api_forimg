@@ -45,6 +45,9 @@ type APIKey struct {
 	UpdatedAt           time.Time
 	User                *User
 	Group               *Group
+	// ImagePlatformGroups maps platform (gemini|openai) → billing group ID for durable async image.
+	// Nil means not loaded; empty map means loaded with no mappings.
+	ImagePlatformGroups map[string]int64
 	CurrentConcurrency  int
 
 	// Quota fields

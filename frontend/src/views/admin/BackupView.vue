@@ -990,12 +990,23 @@ watch(
     if (backend !== 'oss') {
       imageStorageForm.value.reuse_backup_s3 = false
     }
+    if (backend === 'local') {
+      imageStorageForm.value.provider = 'local'
+    } else if (backend === 'superbed') {
+      imageStorageForm.value.provider = 'superbed'
+    } else if (imageStorageForm.value.provider === 'local' || imageStorageForm.value.provider === 'superbed') {
+      imageStorageForm.value.provider = 'custom_s3'
+      if (!imageStorageForm.value.region) imageStorageForm.value.region = 'auto'
+    }
   },
 )
 
 watch(
   () => imageStorageForm.value.provider,
   (provider) => {
+    // region/auto only applies to OSS providers; ignore when backend is local/superbed
+    // so reloading a saved local config does not mutate leftover region fields.
+    if (imageStorageForm.value.backend !== 'oss') return
     if (provider !== 'custom_s3') {
       imageStorageForm.value.reuse_backup_s3 = false
       if (imageStorageForm.value.region === 'auto') imageStorageForm.value.region = ''
@@ -1005,11 +1016,43 @@ watch(
   },
 )
 
+function payloadForImageStorageSave(): ImageStorageConfig {
+  const payload: ImageStorageConfig = {
+    ...imageStorageForm.value,
+    superbed: { ...imageStorageForm.value.superbed },
+    local: { ...imageStorageForm.value.local },
+    async_image: { ...imageStorageForm.value.async_image },
+    image_library: { ...imageStorageForm.value.image_library },
+  }
+  if (payload.backend === 'local') {
+    payload.provider = 'local'
+    payload.reuse_backup_s3 = false
+    payload.bucket = ''
+    payload.endpoint = ''
+    payload.region = ''
+    payload.access_key_id = ''
+    payload.secret_access_key = ''
+    payload.force_path_style = false
+    payload.superbed = { token: '', categories: '', upload_url: '', local_url: '' }
+  } else if (payload.backend === 'superbed') {
+    payload.provider = 'superbed'
+    payload.reuse_backup_s3 = false
+    payload.bucket = ''
+    payload.endpoint = ''
+    payload.region = ''
+    payload.access_key_id = ''
+    payload.secret_access_key = ''
+    payload.force_path_style = false
+    payload.local = { data_dir: '', local_url: '' }
+  }
+  return payload
+}
+
 async function saveImageStorageConfig() {
   if (!validateImageStorageConfig()) return
   savingImageStorage.value = true
   try {
-    await backupStepUp.run(() => adminAPI.backup.updateImageStorageConfig(imageStorageForm.value))
+    await backupStepUp.run(() => adminAPI.backup.updateImageStorageConfig(payloadForImageStorageSave()))
     appStore.showSuccess(t('admin.backup.imageStorage.saved'))
     await loadImageStorageConfig()
   } catch (error) {
@@ -1027,7 +1070,7 @@ async function testImageStorage() {
   if (!validateImageStorageConfig()) return
   testingImageStorage.value = true
   try {
-    const result = await adminAPI.backup.testImageStorageConnection(imageStorageForm.value)
+    const result = await adminAPI.backup.testImageStorageConnection(payloadForImageStorageSave())
     if (result.ok) {
       appStore.showSuccess(result.message || t('admin.backup.s3.testSuccess'))
     } else {

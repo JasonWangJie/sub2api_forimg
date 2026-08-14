@@ -882,6 +882,11 @@ func (r *groupRepository) DeleteCascade(ctx context.Context, id int64) ([]int64,
 		return nil, err
 	}
 
+	// 2b. Clear API key platform billing mappings that reference this group.
+	if _, err := exec.ExecContext(ctx, "DELETE FROM api_key_platform_groups WHERE group_id = $1", id); err != nil {
+		return nil, err
+	}
+
 	// 3. Delete account_groups join rows.
 	if _, err := exec.ExecContext(ctx, "DELETE FROM account_groups WHERE group_id = $1", id); err != nil {
 		return nil, err

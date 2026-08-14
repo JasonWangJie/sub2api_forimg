@@ -296,7 +296,7 @@ func TestImageStorageSettingsFallBackToConfigFile(t *testing.T) {
 	require.Empty(t, fetched.SecretAccessKey)
 }
 
-func TestImageStorageSettingsRejectIdentityChangeWithActiveObjects(t *testing.T) {
+func TestImageStorageSettingsAllowIdentityChangeWithActiveObjects(t *testing.T) {
 	svc, repo, _ := newImageStorageFixture(t, config.ImageStorageConfig{})
 	ctx := context.Background()
 	seedBackupS3(t, repo, BackupS3Config{
@@ -306,15 +306,16 @@ func TestImageStorageSettingsRejectIdentityChangeWithActiveObjects(t *testing.T)
 	require.NoError(t, repo.Set(ctx, settingKeyImageStorageConfig, `{"enabled":false,"reuse_backup_s3":true,"provider":"custom_s3","bucket":"old-bucket"}`))
 	svc.identityGuard = imageStorageIdentityGuardStub{inUse: true}
 
-	_, err := svc.Update(ctx, ImageStorageSettings{
-		Enabled: false, Provider: ImageStorageProviderCustomS3, Bucket: "new-bucket",
-		Endpoint: "https://new.example.test", Region: "auto",
+	updated, err := svc.Update(ctx, ImageStorageSettings{
+		Enabled: false, ReuseBackupS3: true, Provider: ImageStorageProviderCustomS3,
+		Bucket: "new-bucket",
 	})
-	require.ErrorIs(t, err, ErrImageStorageIdentityInUse)
+	require.NoError(t, err)
+	require.Equal(t, "new-bucket", updated.Bucket)
 
 	raw, loadErr := repo.GetValue(ctx, settingKeyImageStorageConfig)
 	require.NoError(t, loadErr)
-	require.Contains(t, raw, "old-bucket")
+	require.Contains(t, raw, "new-bucket")
 }
 
 func TestImageStorageSettingsAllowNonIdentityChangesWithActiveObjects(t *testing.T) {
@@ -335,4 +336,36 @@ func TestImageStorageSettingsAllowNonIdentityChangesWithActiveObjects(t *testing
 	require.NoError(t, err)
 	require.Equal(t, "https://new-cdn.example.test", updated.PublicBaseURL)
 	require.Equal(t, 120, updated.Library.RetentionDays)
+}
+
+func TestImageStorageSettingsAllowLocalURLChangeWithActiveObjects(t *testing.T) {
+	svc, repo, _ := newImageStorageFixture(t, config.ImageStorageConfig{})
+	ctx := context.Background()
+	// Simulate a previously saved local backend that still carries leftover OSS
+	// form fields (region=auto). Changing only local_url must succeed.
+	require.NoError(t, repo.Set(ctx, settingKeyImageStorageConfig, `{
+		"enabled":false,
+		"backend":"local",
+		"provider":"local",
+		"region":"auto",
+		"local":{"data_dir":"/data/image_storage","local_url":"https://old.example.test"},
+		"async_image":{"public_base_url":"https://api.old.example.test"}
+	}`))
+	svc.identityGuard = imageStorageIdentityGuardStub{inUse: true}
+	svc.WithLocalDefaults("/data", []byte("test-sign-key"))
+
+	updated, err := svc.Update(ctx, ImageStorageSettings{
+		Enabled: false,
+		Backend: ImageStorageBackendLocal,
+		Region:  "", // frontend watch clears auto when provider=local
+		Local: ImageStorageLocalSettings{
+			DataDir:  "/data/image_storage",
+			LocalURL: "https://new.example.test",
+		},
+		AsyncImage: AsyncImageRuntimeConfig{PublicBaseURL: "https://api.new.example.test"},
+	})
+	require.NoError(t, err)
+	require.Equal(t, "https://new.example.test", updated.Local.LocalURL)
+	require.Equal(t, "https://api.new.example.test", updated.AsyncImage.PublicBaseURL)
+	require.Empty(t, updated.Region)
 }

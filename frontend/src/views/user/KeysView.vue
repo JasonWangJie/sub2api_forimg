@@ -516,6 +516,34 @@
           </Select>
         </div>
 
+        <div class="space-y-3 rounded-lg border border-gray-200 p-3 dark:border-dark-600">
+          <p class="text-xs text-gray-500 dark:text-dark-400">{{ t('keys.imagePlatformGroupsHint') }}</p>
+          <div>
+            <label class="input-label">{{ t('keys.geminiImageGroupLabel') }}</label>
+            <Select
+              v-model="formData.gemini_image_group_id"
+              :options="geminiImageGroupOptions as any"
+              :placeholder="t('keys.selectImageGroupOptional')"
+              :searchable="true"
+              :clearable="true"
+              :search-placeholder="t('keys.searchGroup')"
+              portal-class="select-portal--tech"
+            />
+          </div>
+          <div>
+            <label class="input-label">{{ t('keys.openaiImageGroupLabel') }}</label>
+            <Select
+              v-model="formData.openai_image_group_id"
+              :options="openaiImageGroupOptions as any"
+              :placeholder="t('keys.selectImageGroupOptional')"
+              :searchable="true"
+              :clearable="true"
+              :search-placeholder="t('keys.searchGroup')"
+              portal-class="select-portal--tech"
+            />
+          </div>
+        </div>
+
         <!-- Custom Key Section (only for create) -->
         <div v-if="!showEditModal" class="space-y-3">
           <div class="flex items-center justify-between">
@@ -1353,6 +1381,8 @@ const setGroupButtonRef = (keyId: number, el: Element | ComponentPublicInstance 
 const formData = ref({
   name: '',
   group_id: null as number | null,
+  gemini_image_group_id: null as number | null,
+  openai_image_group_id: null as number | null,
   status: 'active' as 'active' | 'inactive',
   use_custom_key: false,
   custom_key: '',
@@ -1449,6 +1479,29 @@ const groupOptions = computed(() => {
   }))
   return withGroupSectionHeaders(items, t('keys.uncategorizedSection')) as GroupOption[]
 })
+
+const geminiImageGroupOptions = computed(() =>
+  groups.value
+    .filter((group) => String(group.platform || '').toLowerCase() === 'gemini')
+    .map((group) => ({ value: group.id, label: group.name, platform: group.platform }))
+)
+
+const openaiImageGroupOptions = computed(() =>
+  groups.value
+    .filter((group) => String(group.platform || '').toLowerCase() === 'openai')
+    .map((group) => ({ value: group.id, label: group.name, platform: group.platform }))
+)
+
+const buildImagePlatformGroupsPayload = (): Record<string, number> => {
+  const mappings: Record<string, number> = {}
+  if (formData.value.gemini_image_group_id) {
+    mappings.gemini = formData.value.gemini_image_group_id
+  }
+  if (formData.value.openai_image_group_id) {
+    mappings.openai = formData.value.openai_image_group_id
+  }
+  return mappings
+}
 
 // Group dropdown search
 const groupSearchQuery = ref('')
@@ -1587,6 +1640,8 @@ const editKey = (key: ApiKey) => {
   formData.value = {
     name: key.name,
     group_id: key.group_id,
+    gemini_image_group_id: key.image_platform_groups?.gemini ?? null,
+    openai_image_group_id: key.image_platform_groups?.openai ?? null,
     status: key.status === 'quota_exhausted' || key.status === 'expired' ? 'inactive' : key.status,
     use_custom_key: false,
     custom_key: '',
@@ -1751,6 +1806,7 @@ const handleSubmit = async () => {
         rate_limit_5h: rateLimitData.rate_limit_5h,
         rate_limit_1d: rateLimitData.rate_limit_1d,
         rate_limit_7d: rateLimitData.rate_limit_7d,
+        image_platform_groups: buildImagePlatformGroupsPayload(),
       }
       if (shouldSubmitEditStatus(selectedKey.value, formData.value.status)) {
         updates.status = formData.value.status
@@ -1767,7 +1823,8 @@ const handleSubmit = async () => {
         ipBlacklist,
         quota,
         expiresInDays,
-        rateLimitData
+        rateLimitData,
+        buildImagePlatformGroupsPayload()
       )
       appStore.showSuccess(t('keys.keyCreatedSuccess'))
       // Only advance tour if active, on submit step, and creation succeeded
@@ -1813,6 +1870,8 @@ const closeModals = () => {
   formData.value = {
     name: '',
     group_id: null,
+    gemini_image_group_id: null,
+    openai_image_group_id: null,
     status: 'active',
     use_custom_key: false,
     custom_key: '',

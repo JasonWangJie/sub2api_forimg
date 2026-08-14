@@ -13,16 +13,29 @@ export interface UpdateApiKeyGroupResult {
   granted_group_name?: string
 }
 
+export interface UpdateApiKeyAdminPayload {
+  /** undefined = no change; null = unbind; number = bind */
+  group_id?: number | null
+  image_platform_groups?: Record<string, number>
+  reset_rate_limit_usage?: boolean
+}
+
 /**
- * Update an API key's group binding
- * @param id - API Key ID
- * @param groupId - Group ID (0 to unbind, positive to bind, null/undefined to skip)
- * @returns Updated API key with auto-grant info
+ * Update an API key's admin-managed bindings.
  */
-export async function updateApiKeyGroup(id: number, groupId: number | null): Promise<UpdateApiKeyGroupResult> {
-  const { data } = await apiClient.put<UpdateApiKeyGroupResult>(`/admin/api-keys/${id}`, {
-    group_id: groupId === null ? 0 : groupId
-  })
+export async function updateApiKeyGroup(
+  id: number,
+  groupId?: number | null,
+  imagePlatformGroups?: Record<string, number>
+): Promise<UpdateApiKeyGroupResult> {
+  const payload: UpdateApiKeyAdminPayload = {}
+  if (groupId !== undefined) {
+    payload.group_id = groupId === null ? 0 : groupId
+  }
+  if (imagePlatformGroups !== undefined) {
+    payload.image_platform_groups = imagePlatformGroups
+  }
+  const { data } = await apiClient.put<UpdateApiKeyGroupResult>(`/admin/api-keys/${id}`, payload)
   return data
 }
 

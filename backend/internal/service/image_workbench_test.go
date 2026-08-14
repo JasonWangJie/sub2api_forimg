@@ -17,6 +17,20 @@ func (s imageWorkbenchAPIKeyReaderStub) GetByID(context.Context, int64) (*APIKey
 	return s.key, s.err
 }
 
+func (s imageWorkbenchAPIKeyReaderStub) AttachImagePlatformGroups(_ context.Context, apiKey *APIKey) error {
+	if apiKey != nil && apiKey.ImagePlatformGroups == nil {
+		apiKey.ImagePlatformGroups = map[string]int64{}
+	}
+	return nil
+}
+
+func (s imageWorkbenchAPIKeyReaderStub) GetGroupByID(_ context.Context, groupID int64) (*Group, error) {
+	if s.key != nil && s.key.Group != nil && s.key.Group.ID == groupID {
+		return s.key.Group, nil
+	}
+	return nil, ErrGroupNotFound
+}
+
 type imageWorkbenchModelCatalogStub struct {
 	models []string
 }

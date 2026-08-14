@@ -22,6 +22,20 @@ func (s handlerImageWorkbenchKeyReader) GetByID(context.Context, int64) (*servic
 	return s.key, nil
 }
 
+func (s handlerImageWorkbenchKeyReader) AttachImagePlatformGroups(_ context.Context, apiKey *service.APIKey) error {
+	if apiKey != nil && apiKey.ImagePlatformGroups == nil {
+		apiKey.ImagePlatformGroups = map[string]int64{}
+	}
+	return nil
+}
+
+func (s handlerImageWorkbenchKeyReader) GetGroupByID(_ context.Context, groupID int64) (*service.Group, error) {
+	if s.key != nil && s.key.Group != nil && s.key.Group.ID == groupID {
+		return s.key.Group, nil
+	}
+	return nil, service.ErrGroupNotFound
+}
+
 func TestImageWorkbenchHandlerGetCapabilities(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	groupID := int64(20)

@@ -725,6 +725,8 @@ export interface ApiKey {
   updated_at: string
   current_concurrency: number
   group?: Group
+  /** gemini/openai → billing group id for durable async image dual-use */
+  image_platform_groups?: Record<string, number>
   rate_limit_5h: number
   rate_limit_1d: number
   rate_limit_7d: number
@@ -750,6 +752,7 @@ export interface CreateApiKeyRequest {
   rate_limit_5h?: number
   rate_limit_1d?: number
   rate_limit_7d?: number
+  image_platform_groups?: Record<string, number>
 }
 
 export interface UpdateApiKeyRequest {
@@ -765,6 +768,7 @@ export interface UpdateApiKeyRequest {
   rate_limit_1d?: number
   rate_limit_7d?: number
   reset_rate_limit_usage?: boolean
+  image_platform_groups?: Record<string, number>
 }
 
 export interface CreateGroupRequest {

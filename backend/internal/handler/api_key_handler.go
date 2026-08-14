@@ -44,6 +44,8 @@ type CreateAPIKeyRequest struct {
 	RateLimit5h *float64 `json:"rate_limit_5h"`
 	RateLimit1d *float64 `json:"rate_limit_1d"`
 	RateLimit7d *float64 `json:"rate_limit_7d"`
+
+	ImagePlatformGroups *map[string]int64 `json:"image_platform_groups"`
 }
 
 // UpdateAPIKeyRequest represents the update API key request payload
@@ -62,6 +64,8 @@ type UpdateAPIKeyRequest struct {
 	RateLimit1d         *float64 `json:"rate_limit_1d"`
 	RateLimit7d         *float64 `json:"rate_limit_7d"`
 	ResetRateLimitUsage *bool    `json:"reset_rate_limit_usage"` // 重置限速用量
+
+	ImagePlatformGroups *map[string]int64 `json:"image_platform_groups"`
 }
 
 func validAPIKeyLimit(v float64) bool { return !math.IsNaN(v) && !math.IsInf(v, 0) && v >= 0 }
@@ -200,12 +204,13 @@ func (h *APIKeyHandler) Create(c *gin.Context) {
 	}
 
 	svcReq := service.CreateAPIKeyRequest{
-		Name:          req.Name,
-		GroupID:       req.GroupID,
-		CustomKey:     req.CustomKey,
-		IPWhitelist:   req.IPWhitelist,
-		IPBlacklist:   req.IPBlacklist,
-		ExpiresInDays: req.ExpiresInDays,
+		Name:                req.Name,
+		GroupID:             req.GroupID,
+		CustomKey:           req.CustomKey,
+		IPWhitelist:         req.IPWhitelist,
+		IPBlacklist:         req.IPBlacklist,
+		ExpiresInDays:       req.ExpiresInDays,
+		ImagePlatformGroups: req.ImagePlatformGroups,
 	}
 	if req.Quota != nil {
 		svcReq.Quota = *req.Quota
@@ -263,6 +268,7 @@ func (h *APIKeyHandler) Update(c *gin.Context) {
 		RateLimit1d:         req.RateLimit1d,
 		RateLimit7d:         req.RateLimit7d,
 		ResetRateLimitUsage: req.ResetRateLimitUsage,
+		ImagePlatformGroups: req.ImagePlatformGroups,
 	}
 	if req.Name != "" {
 		svcReq.Name = &req.Name

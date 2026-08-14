@@ -85,6 +85,8 @@ type APIKey struct {
 
 	User  *User  `json:"user,omitempty"`
 	Group *Group `json:"group,omitempty"`
+	// ImagePlatformGroups maps gemini/openai → billing group IDs for durable async image.
+	ImagePlatformGroups map[string]int64 `json:"image_platform_groups,omitempty"`
 }
 
 type Group struct {

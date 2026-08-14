@@ -44,6 +44,32 @@
             </div>
             <div class="flex items-center gap-1"><span>{{ t('admin.users.columns.created') }}: {{ formatDateTime(key.created_at) }}</span></div>
           </div>
+          <div class="mt-3 grid gap-2 sm:grid-cols-2">
+            <label class="block text-xs text-gray-500">
+              <span class="mb-1 block">{{ t('admin.users.geminiImageGroup') }}</span>
+              <select
+                class="w-full rounded-md border border-gray-200 bg-white px-2 py-1.5 text-sm dark:border-dark-600 dark:bg-dark-900"
+                :value="key.image_platform_groups?.gemini || ''"
+                :disabled="updatingKeyIds.has(key.id)"
+                @change="changeImagePlatformGroup(key, 'gemini', ($event.target as HTMLSelectElement).value)"
+              >
+                <option value="">{{ t('admin.users.none') }}</option>
+                <option v-for="group in geminiGroups" :key="group.id" :value="group.id">{{ group.name }}</option>
+              </select>
+            </label>
+            <label class="block text-xs text-gray-500">
+              <span class="mb-1 block">{{ t('admin.users.openaiImageGroup') }}</span>
+              <select
+                class="w-full rounded-md border border-gray-200 bg-white px-2 py-1.5 text-sm dark:border-dark-600 dark:bg-dark-900"
+                :value="key.image_platform_groups?.openai || ''"
+                :disabled="updatingKeyIds.has(key.id)"
+                @change="changeImagePlatformGroup(key, 'openai', ($event.target as HTMLSelectElement).value)"
+              >
+                <option value="">{{ t('admin.users.none') }}</option>
+                <option v-for="group in openaiGroups" :key="group.id" :value="group.id">{{ group.name }}</option>
+              </select>
+            </label>
+          </div>
         </div>
       </div>
     </div>
@@ -136,6 +162,13 @@ const selectedKeyForGroup = computed(() => {
   return apiKeys.value.find((k) => k.id === groupSelectorKeyId.value) || null
 })
 
+const geminiGroups = computed(() =>
+  allGroups.value.filter((group) => String(group.platform || '').toLowerCase() === 'gemini')
+)
+const openaiGroups = computed(() =>
+  allGroups.value.filter((group) => String(group.platform || '').toLowerCase() === 'openai')
+)
+
 const setGroupButtonRef = (keyId: number, el: Element | ComponentPublicInstance | null) => {
   if (el instanceof HTMLElement) {
     groupButtonRefs.value.set(keyId, el)
@@ -221,6 +254,34 @@ const changeGroup = async (key: ApiKey, newGroupId: number | null) => {
     }
   } catch (error: any) {
     appStore.showError(error?.message || t('admin.users.groupChangeFailed'))
+  } finally {
+    updatingKeyIds.value.delete(key.id)
+  }
+}
+
+const changeImagePlatformGroup = async (key: ApiKey, platform: 'gemini' | 'openai', rawValue: string) => {
+  const nextID = rawValue ? Number(rawValue) : 0
+  const current = key.image_platform_groups?.[platform] || 0
+  if (current === nextID || (!current && !nextID)) return
+
+  const mappings: Record<string, number> = { ...(key.image_platform_groups || {}) }
+  if (nextID > 0) {
+    mappings[platform] = nextID
+  } else {
+    delete mappings[platform]
+  }
+
+  updatingKeyIds.value.add(key.id)
+  try {
+    const result = await adminAPI.apiKeys.updateApiKeyGroup(key.id, undefined, mappings)
+    const idx = apiKeys.value.findIndex((k) => k.id === key.id)
+    if (idx !== -1) {
+      apiKeys.value[idx] = result.api_key
+    }
+    appStore.showSuccess(t('admin.users.imagePlatformGroupsUpdated'))
+  } catch (error: any) {
+    appStore.showError(error?.message || t('admin.users.imagePlatformGroupsUpdateFailed'))
+    await load()
   } finally {
     updatingKeyIds.value.delete(key.id)
   }

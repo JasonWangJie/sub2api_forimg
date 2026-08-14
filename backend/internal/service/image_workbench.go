@@ -30,6 +30,8 @@ const (
 
 type imageWorkbenchAPIKeyReader interface {
 	GetByID(ctx context.Context, id int64) (*APIKey, error)
+	AttachImagePlatformGroups(ctx context.Context, apiKey *APIKey) error
+	GetGroupByID(ctx context.Context, groupID int64) (*Group, error)
 }
 
 type imageWorkbenchModelCatalog interface {
@@ -86,6 +88,7 @@ func (s *ImageWorkbenchService) GetCapabilities(ctx context.Context, userID, api
 	if err != nil || apiKey == nil || apiKey.UserID != userID {
 		return nil, infraerrors.NotFound("IMAGE_WORKBENCH_KEY_NOT_FOUND", "API key not found")
 	}
+	_ = s.apiKeys.AttachImagePlatformGroups(ctx, apiKey)
 
 	capabilities := &ImageWorkbenchCapabilities{
 		APIKeyID:     apiKey.ID,
@@ -98,26 +101,21 @@ func (s *ImageWorkbenchService) GetCapabilities(ctx context.Context, userID, api
 		Formats:      []string{},
 		Backgrounds:  []string{},
 	}
-	group := apiKey.Group
 	if apiKey.Status != StatusActive {
 		capabilities.UnavailableReason = "api_key_inactive"
 		return finalizeImageWorkbenchCapabilities(capabilities), nil
 	}
-	if group == nil || apiKey.GroupID == nil {
-		capabilities.UnavailableReason = "group_required"
-		return finalizeImageWorkbenchCapabilities(capabilities), nil
-	}
-	capabilities.Platform = strings.ToLower(strings.TrimSpace(group.Platform))
-	if group.Status != StatusActive {
-		capabilities.UnavailableReason = "group_inactive"
-		return finalizeImageWorkbenchCapabilities(capabilities), nil
-	}
-	if !group.AllowImageGeneration {
-		capabilities.UnavailableReason = "image_generation_disabled"
-		return finalizeImageWorkbenchCapabilities(capabilities), nil
-	}
 
+	group, reason := s.resolveImageWorkbenchBillingGroup(ctx, apiKey)
+	if group == nil {
+		capabilities.UnavailableReason = reason
+		return finalizeImageWorkbenchCapabilities(capabilities), nil
+	}
+	groupID := group.ID
+	capabilities.GroupID = &groupID
+	capabilities.Platform = strings.ToLower(strings.TrimSpace(group.Platform))
 	configureImageWorkbenchPlatform(capabilities, group)
+	mergeImageWorkbenchAsyncEndpoints(capabilities, s.collectImageWorkbenchAsyncGroups(ctx, apiKey))
 	if capabilities.Protocol == "" {
 		capabilities.UnavailableReason = "platform_not_supported"
 		return finalizeImageWorkbenchCapabilities(capabilities), nil
@@ -125,15 +123,160 @@ func (s *ImageWorkbenchService) GetCapabilities(ctx context.Context, userID, api
 
 	availableModels := []string(nil)
 	if s.models != nil {
-		availableModels = s.models.GetAvailableModels(ctx, apiKey.GroupID, capabilities.Platform)
+		availableModels = s.models.GetAvailableModels(ctx, &groupID, capabilities.Platform)
 	}
 	capabilities.Models = imageWorkbenchModelsForGroup(group, availableModels)
+	for _, extra := range s.collectImageWorkbenchAsyncGroups(ctx, apiKey) {
+		if extra == nil || extra.ID == group.ID {
+			continue
+		}
+		extraModels := []string(nil)
+		if s.models != nil {
+			gid := extra.ID
+			extraModels = s.models.GetAvailableModels(ctx, &gid, extra.Platform)
+		}
+		capabilities.Models = mergeImageWorkbenchModels(capabilities.Models, imageWorkbenchModelsForGroup(extra, extraModels))
+	}
 	if len(capabilities.Models) == 0 {
 		capabilities.UnavailableReason = "no_image_models"
 		return finalizeImageWorkbenchCapabilities(capabilities), nil
 	}
 	capabilities.Available = true
 	return finalizeImageWorkbenchCapabilities(capabilities), nil
+}
+
+func (s *ImageWorkbenchService) resolveImageWorkbenchBillingGroup(ctx context.Context, apiKey *APIKey) (*Group, string) {
+	if apiKey == nil {
+		return nil, "group_required"
+	}
+	if apiKey.Group != nil && apiKey.GroupID != nil && *apiKey.GroupID == apiKey.Group.ID {
+		if apiKey.Group.Status != StatusActive {
+			return nil, "group_inactive"
+		}
+		if GroupAllowsImageGeneration(apiKey.Group) {
+			return apiKey.Group, ""
+		}
+	}
+	for _, platform := range []string{PlatformGemini, PlatformOpenAI} {
+		groupID, ok := ResolveAsyncImageBillingGroupID(apiKey, platform)
+		if !ok {
+			continue
+		}
+		if apiKey.Group != nil && apiKey.Group.ID == groupID {
+			if apiKey.Group.Status == StatusActive && GroupAllowsImageGeneration(apiKey.Group) {
+				return apiKey.Group, ""
+			}
+			continue
+		}
+		group, err := s.apiKeys.GetGroupByID(ctx, groupID)
+		if err != nil || group == nil || group.Status != StatusActive || !GroupAllowsImageGeneration(group) {
+			continue
+		}
+		return group, ""
+	}
+	if apiKey.Group == nil || apiKey.GroupID == nil {
+		return nil, "group_required"
+	}
+	if apiKey.Group.Status != StatusActive {
+		return nil, "group_inactive"
+	}
+	if !GroupAllowsImageGeneration(apiKey.Group) {
+		return nil, "image_generation_disabled"
+	}
+	return apiKey.Group, ""
+}
+
+func (s *ImageWorkbenchService) collectImageWorkbenchAsyncGroups(ctx context.Context, apiKey *APIKey) []*Group {
+	out := make([]*Group, 0, 2)
+	seen := map[int64]struct{}{}
+	for _, platform := range []string{PlatformGemini, PlatformOpenAI} {
+		groupID, ok := ResolveAsyncImageBillingGroupID(apiKey, platform)
+		if !ok {
+			continue
+		}
+		if _, exists := seen[groupID]; exists {
+			continue
+		}
+		var group *Group
+		if apiKey.Group != nil && apiKey.Group.ID == groupID {
+			group = apiKey.Group
+		} else {
+			loaded, err := s.apiKeys.GetGroupByID(ctx, groupID)
+			if err != nil || loaded == nil {
+				continue
+			}
+			group = loaded
+		}
+		if group.Status != StatusActive || !GroupAllowsImageGeneration(group) || !group.AllowAsyncImageGeneration {
+			continue
+		}
+		seen[groupID] = struct{}{}
+		out = append(out, group)
+	}
+	return out
+}
+
+func mergeImageWorkbenchAsyncEndpoints(out *ImageWorkbenchCapabilities, groups []*Group) {
+	if out == nil || len(groups) == 0 {
+		return
+	}
+	hasGemini, hasOpenAI := false, false
+	for _, group := range groups {
+		switch strings.ToLower(strings.TrimSpace(group.Platform)) {
+		case PlatformGemini:
+			hasGemini = true
+		case PlatformOpenAI:
+			hasOpenAI = true
+		}
+	}
+	if !(hasGemini && hasOpenAI) {
+		return
+	}
+	// Dual-use keys expose both async surfaces while keeping the preferred platform/protocol.
+	out.ExecutionMode = ImageWorkbenchModeAsync
+	out.Endpoints.Query = "/v1/images/tasks_async/{task_id}"
+	if out.Platform == PlatformOpenAI {
+		out.Protocol = ImageWorkbenchProtocolOpenAIAsync
+		out.Endpoints.Generation = "/v1/images/generations_oa"
+		out.Endpoints.Edit = "/v1/images/generations_oa"
+		out.Endpoints.Upload = "/v1/uploads/images_sc"
+	} else {
+		out.Protocol = ImageWorkbenchProtocolGeminiSC
+		out.Endpoints.Generation = "/v1/images/generations_sc"
+		out.Endpoints.Upload = "/v1/uploads/images_sc"
+		out.Endpoints.Edit = "/v1/images/generations_oa"
+	}
+}
+
+func mergeImageWorkbenchModels(base, extra []ImageWorkbenchModel) []ImageWorkbenchModel {
+	if len(extra) == 0 {
+		return base
+	}
+	seen := make(map[string]struct{}, len(base)+len(extra))
+	out := make([]ImageWorkbenchModel, 0, len(base)+len(extra))
+	for _, model := range base {
+		id := strings.TrimSpace(model.ID)
+		if id == "" {
+			continue
+		}
+		if _, ok := seen[id]; ok {
+			continue
+		}
+		seen[id] = struct{}{}
+		out = append(out, model)
+	}
+	for _, model := range extra {
+		id := strings.TrimSpace(model.ID)
+		if id == "" {
+			continue
+		}
+		if _, ok := seen[id]; ok {
+			continue
+		}
+		seen[id] = struct{}{}
+		out = append(out, model)
+	}
+	return out
 }
 
 func configureImageWorkbenchPlatform(out *ImageWorkbenchCapabilities, group *Group) {

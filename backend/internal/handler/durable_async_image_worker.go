@@ -1096,9 +1096,14 @@ func (h *DurableAsyncImageHandler) applyAsyncImageBilling(ctx context.Context, t
 	if err != nil {
 		return err
 	}
+	group, err := h.apiKeys.GetGroupByID(ctx, task.GroupID)
+	if err != nil || group == nil {
+		return errors.New("prepared asynchronous image billing group is unavailable")
+	}
 	keyCopy := *apiKey
 	groupID := task.GroupID
 	keyCopy.GroupID = &groupID
+	keyCopy.Group = group
 	if keyCopy.User == nil {
 		keyCopy.User = &service.User{ID: task.UserID}
 	}
@@ -1146,11 +1151,19 @@ func (h *DurableAsyncImageHandler) reloadAsyncImageIdentity(ctx context.Context,
 		if !apiKey.IsActive() || apiKey.IsExpired() || apiKey.IsQuotaExhausted() {
 			return nil, nil, errors.New("task API key is disabled, expired, or exhausted")
 		}
-		if apiKey.GroupID == nil || *apiKey.GroupID != task.GroupID || apiKey.Group == nil || apiKey.Group.Platform != task.Platform {
+		billingGroup, resolveErr := h.apiKeys.ResolveAsyncImageBillingGroup(ctx, apiKey, task.Platform)
+		if resolveErr != nil || billingGroup == nil || billingGroup.ID != task.GroupID {
 			return nil, nil, errors.New("task API key group or platform changed before execution")
 		}
-		if err := validateAsyncImageGroup(apiKey, task.Platform); err != nil {
-			return nil, nil, err
+		groupID := billingGroup.ID
+		apiKey.GroupID = &groupID
+		apiKey.Group = billingGroup
+	} else if apiKey.Group == nil || apiKey.GroupID == nil || *apiKey.GroupID != task.GroupID {
+		// Soft path: still prefer the task snapshotted billing group for scheduling/pricing context.
+		if group, groupErr := h.apiKeys.GetGroupByID(ctx, task.GroupID); groupErr == nil && group != nil {
+			groupID := group.ID
+			apiKey.GroupID = &groupID
+			apiKey.Group = group
 		}
 	}
 	var subscription *service.UserSubscription

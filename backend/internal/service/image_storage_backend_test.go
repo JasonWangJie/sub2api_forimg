@@ -44,7 +44,16 @@ func TestNormalizeImageStorageSettingsBackend(t *testing.T) {
 	require.Equal(t, "https://api.superbed.cn/upload", in.Superbed.UploadURL)
 	require.False(t, in.ReuseBackupS3)
 
-	local := &ImageStorageSettings{Backend: "local"}
+	local := &ImageStorageSettings{
+		Backend: "local",
+		Region:  "auto",
+		Bucket:  "leftover",
+		Local:   ImageStorageLocalSettings{DataDir: "/tmp/img", LocalURL: "https://img.example"},
+	}
 	normalizeImageStorageSettings(local)
 	require.Equal(t, ImageStorageProviderLocal, local.Provider)
+	require.Empty(t, local.Region)
+	require.Empty(t, local.Bucket)
+	require.Equal(t, "/tmp/img", local.Local.DataDir)
+	require.Equal(t, "https://img.example", local.Local.LocalURL)
 }

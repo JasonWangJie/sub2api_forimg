@@ -12,20 +12,23 @@ import (
 
 // AdminAPIKeyHandler handles admin API key management
 type AdminAPIKeyHandler struct {
-	adminService service.AdminService
+	adminService  service.AdminService
+	apiKeyService *service.APIKeyService
 }
 
 // NewAdminAPIKeyHandler creates a new admin API key handler
-func NewAdminAPIKeyHandler(adminService service.AdminService) *AdminAPIKeyHandler {
+func NewAdminAPIKeyHandler(adminService service.AdminService, apiKeyService *service.APIKeyService) *AdminAPIKeyHandler {
 	return &AdminAPIKeyHandler{
-		adminService: adminService,
+		adminService:  adminService,
+		apiKeyService: apiKeyService,
 	}
 }
 
 // AdminUpdateAPIKeyGroupRequest represents the request to update an API key.
 type AdminUpdateAPIKeyGroupRequest struct {
-	GroupID             *int64 `json:"group_id"`               // nil=不修改, 0=解绑, >0=绑定到目标分组
-	ResetRateLimitUsage *bool  `json:"reset_rate_limit_usage"` // true=重置 5h/1d/7d 限速用量
+	GroupID             *int64             `json:"group_id"`               // nil=不修改, 0=解绑, >0=绑定到目标分组
+	ResetRateLimitUsage *bool              `json:"reset_rate_limit_usage"` // true=重置 5h/1d/7d 限速用量
+	ImagePlatformGroups *map[string]int64  `json:"image_platform_groups"`  // nil=不修改；非 nil 整表替换
 }
 
 // UpdateGroup handles updating an API key's admin-managed fields.
@@ -59,6 +62,25 @@ func (h *AdminAPIKeyHandler) UpdateGroup(c *gin.Context) {
 	}
 	if resetKey != nil && req.GroupID == nil {
 		result.APIKey = resetKey
+	}
+
+	apiKey := result.APIKey
+	if req.ImagePlatformGroups != nil && h.apiKeyService != nil {
+		if apiKey == nil {
+			apiKey, err = h.apiKeyService.GetByID(c.Request.Context(), keyID)
+			if err != nil {
+				response.ErrorFrom(c, err)
+				return
+			}
+		}
+		if err := h.apiKeyService.ReplaceImagePlatformGroups(c.Request.Context(), apiKey, nil, *req.ImagePlatformGroups, true); err != nil {
+			response.ErrorFrom(c, err)
+			return
+		}
+		result.APIKey = apiKey
+	} else if apiKey != nil && h.apiKeyService != nil {
+		_ = h.apiKeyService.AttachImagePlatformGroups(c.Request.Context(), apiKey)
+		result.APIKey = apiKey
 	}
 
 	resp := struct {

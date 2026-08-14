@@ -464,9 +464,9 @@ func (s *ImageStorageSettingService) Update(ctx context.Context, in ImageStorage
 			in.SecretAccessKey = encrypted
 		}
 	}
-	if err := s.preventStorageIdentityChange(ctx, &in); err != nil {
-		return nil, err
-	}
+	// Storage backend/identity may change while historical objects still exist.
+	// Admins can switch immediately; old object refs may become unreachable until
+	// cleaned up via the storage cleanup tools (scope=all / async_results).
 	if in.Enabled {
 		// A configuration cannot become active based only on syntactically valid
 		// credentials. Probe the exact value that will be persisted so failed
@@ -539,17 +539,26 @@ func (s *ImageStorageSettingService) storageIdentity(ctx context.Context, settin
 	if err != nil {
 		return imageStorageIdentity{}, err
 	}
-	return imageStorageIdentity{
-		Backend:        cfg.NormalizedBackend(),
-		Provider:       cfg.Provider,
-		Bucket:         cfg.Bucket,
-		Endpoint:       cfg.Endpoint,
-		Region:         cfg.Region,
-		ForcePathStyle: cfg.ForcePathStyle,
-		LocalDataDir:   cfg.Local.DataDir,
-		SuperbedCat:    cfg.Superbed.Categories,
-		SuperbedURL:    cfg.Superbed.UploadURL,
-	}, nil
+	identity := imageStorageIdentity{
+		Backend:  cfg.NormalizedBackend(),
+		Provider: cfg.Provider,
+	}
+	// Only compare fields that actually locate durable objects for the active
+	// backend. Leftover OSS region/endpoint from the admin form (or Superbed
+	// upload URL defaults) must not block local_url / public_base_url edits.
+	switch identity.Backend {
+	case ImageStorageBackendLocal:
+		identity.LocalDataDir = cfg.Local.DataDir
+	case ImageStorageBackendSuperbed:
+		identity.SuperbedCat = cfg.Superbed.Categories
+		identity.SuperbedURL = cfg.Superbed.UploadURL
+	default:
+		identity.Bucket = cfg.Bucket
+		identity.Endpoint = cfg.Endpoint
+		identity.Region = cfg.Region
+		identity.ForcePathStyle = cfg.ForcePathStyle
+	}
+	return identity, nil
 }
 
 // TestConnection performs a complete object-store probe: upload, HEAD, read,
@@ -855,10 +864,18 @@ func normalizeImageStorageSettings(in *ImageStorageSettings) {
 	if in.Backend == ImageStorageBackendLocal {
 		in.Provider = ImageStorageProviderLocal
 		in.ReuseBackupS3 = false
+		// Drop OSS/Superbed leftovers so reloads do not resurface irrelevant
+		// identity fields (e.g. region=auto from the default form state).
+		in.Bucket, in.Endpoint, in.Region, in.AccessKeyID, in.SecretAccessKey = "", "", "", "", ""
+		in.ForcePathStyle = false
+		in.Superbed = ImageStorageSuperbedSettings{}
 	}
 	if in.Backend == ImageStorageBackendSuperbed {
 		in.Provider = ImageStorageProviderSuperbed
 		in.ReuseBackupS3 = false
+		in.Bucket, in.Endpoint, in.Region, in.AccessKeyID, in.SecretAccessKey = "", "", "", "", ""
+		in.ForcePathStyle = false
+		in.Local = ImageStorageLocalSettings{}
 	}
 
 	normalizeAsyncImageRuntimeConfig(&in.AsyncImage)

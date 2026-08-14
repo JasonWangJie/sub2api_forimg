@@ -117,11 +117,12 @@ func (h *DurableAsyncImageHandler) SubmitGeminiSC(c *gin.Context) {
 
 func (h *DurableAsyncImageHandler) submit(c *gin.Context, protocol, expectedPlatform string) {
 	apiKey, ok := middleware.GetAPIKeyFromContext(c)
-	if !ok || apiKey == nil || apiKey.User == nil || apiKey.Group == nil {
+	if !ok || apiKey == nil || apiKey.User == nil {
 		h.writeError(c, protocol, service.ErrAsyncImageTaskNotFound)
 		return
 	}
-	if err := validateAsyncImageGroup(apiKey, expectedPlatform); err != nil {
+	billingGroup, err := h.resolveAsyncImageBillingGroup(c.Request.Context(), apiKey, expectedPlatform)
+	if err != nil {
 		h.writeError(c, protocol, err)
 		return
 	}
@@ -254,7 +255,7 @@ func (h *DurableAsyncImageHandler) submit(c *gin.Context, protocol, expectedPlat
 	requestHash := service.AsyncImageTaskRequestHash(expectedPlatform, protocol, c.Request.URL.Path, body)
 	promptPreview := asyncImagePromptPreview(prompt, runtimeCfg)
 	params := service.CreateAsyncImageTaskParams{
-		UserID: apiKey.UserID, APIKeyID: apiKey.ID, GroupID: apiKey.Group.ID,
+		UserID: apiKey.UserID, APIKeyID: apiKey.ID, GroupID: billingGroup.ID,
 		Protocol: protocol, Platform: expectedPlatform, RequestType: kind,
 		Model: model, ImageCount: imageCount, IdempotencyKey: idempotencyKeyPtr,
 		RequestHash: requestHash, RequestPayload: []byte(ciphertext), ExpiresAt: &expiresAt,
@@ -347,20 +348,29 @@ func (h *DurableAsyncImageHandler) checkSecurityAuditBeforeSubmit(
 	return false
 }
 
+func (h *DurableAsyncImageHandler) resolveAsyncImageBillingGroup(ctx context.Context, apiKey *service.APIKey, expectedPlatform string) (*service.Group, error) {
+	if h == nil || h.apiKeys == nil {
+		return nil, infraerrors.New(http.StatusServiceUnavailable, "async_image_unavailable", "asynchronous image generation is unavailable")
+	}
+	return h.apiKeys.ResolveAsyncImageBillingGroup(ctx, apiKey, expectedPlatform)
+}
+
 func validateAsyncImageGroup(apiKey *service.APIKey, expectedPlatform string) error {
-	if apiKey == nil || apiKey.Group == nil || apiKey.GroupID == nil || *apiKey.GroupID != apiKey.Group.ID {
+	if apiKey == nil {
 		return infraerrors.New(http.StatusForbidden, "group_required", "an assigned image group is required")
 	}
-	if apiKey.Group.Platform != expectedPlatform {
-		return infraerrors.New(http.StatusForbidden, "group_platform_mismatch", "the API key group does not support this asynchronous image endpoint")
+	groupID, ok := service.ResolveAsyncImageBillingGroupID(apiKey, expectedPlatform)
+	if !ok {
+		return infraerrors.New(http.StatusForbidden, "group_required", "an assigned image group is required")
 	}
-	if !service.GroupAllowsImageGeneration(apiKey.Group) {
-		return infraerrors.New(http.StatusForbidden, "image_generation_disabled", service.ImageGenerationPermissionMessage())
+	if apiKey.Group != nil && apiKey.Group.ID == groupID {
+		return service.ValidateAsyncImageBillingGroup(apiKey.Group, expectedPlatform)
 	}
-	if !apiKey.Group.AllowAsyncImageGeneration {
-		return infraerrors.New(http.StatusForbidden, "async_image_generation_disabled", "asynchronous image generation is not enabled for this group")
+	// Legacy helper used when Group is already loaded as the primary group.
+	if apiKey.Group == nil || apiKey.GroupID == nil || *apiKey.GroupID != apiKey.Group.ID {
+		return infraerrors.New(http.StatusForbidden, "group_required", "an assigned image group is required")
 	}
-	return nil
+	return service.ValidateAsyncImageBillingGroup(apiKey.Group, expectedPlatform)
 }
 
 func (h *DurableAsyncImageHandler) writeSubmitResponse(c *gin.Context, protocol string, task *service.AsyncImageTask, cfg service.AsyncImageRuntimeConfig) {
@@ -484,7 +494,7 @@ func (h *DurableAsyncImageHandler) UploadSC(c *gin.Context) {
 		h.writeProtocolError(c, service.AsyncImageProtocolSC, http.StatusUnauthorized, "authentication_error", "invalid API key")
 		return
 	}
-	if err := validateAsyncImageGroup(apiKey, service.PlatformGemini); err != nil {
+	if _, err := h.resolveAsyncImageBillingGroup(c.Request.Context(), apiKey, service.PlatformGemini); err != nil {
 		h.writeError(c, service.AsyncImageProtocolSC, err)
 		return
 	}
