@@ -29,6 +29,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/ent/compositemodelroute"
 	"github.com/Wei-Shaw/sub2api/ent/errorpassthroughrule"
 	"github.com/Wei-Shaw/sub2api/ent/group"
+	"github.com/Wei-Shaw/sub2api/ent/groupimagesizeaccount"
 	"github.com/Wei-Shaw/sub2api/ent/idempotencyrecord"
 	"github.com/Wei-Shaw/sub2api/ent/identityadoptiondecision"
 	"github.com/Wei-Shaw/sub2api/ent/paymentauditlog"
@@ -81,6 +82,7 @@ const (
 	TypeCompositeModelRoute           = "CompositeModelRoute"
 	TypeErrorPassthroughRule          = "ErrorPassthroughRule"
 	TypeGroup                         = "Group"
+	TypeGroupImageSizeAccount         = "GroupImageSizeAccount"
 	TypeIdempotencyRecord             = "IdempotencyRecord"
 	TypeIdentityAdoptionDecision      = "IdentityAdoptionDecision"
 	TypePaymentAuditLog               = "PaymentAuditLog"
@@ -27311,6 +27313,684 @@ func (m *GroupMutation) ResetEdge(name string) error {
 		return nil
 	}
 	return fmt.Errorf("unknown Group edge %s", name)
+}
+
+// GroupImageSizeAccountMutation represents an operation that mutates the GroupImageSizeAccount nodes in the graph.
+type GroupImageSizeAccountMutation struct {
+	config
+	op             Op
+	typ            string
+	id             *int64
+	size_tier      *string
+	priority       *int
+	addpriority    *int
+	created_at     *time.Time
+	clearedFields  map[string]struct{}
+	account        *int64
+	clearedaccount bool
+	group          *int64
+	clearedgroup   bool
+	done           bool
+	oldValue       func(context.Context) (*GroupImageSizeAccount, error)
+	predicates     []predicate.GroupImageSizeAccount
+}
+
+var _ ent.Mutation = (*GroupImageSizeAccountMutation)(nil)
+
+// groupimagesizeaccountOption allows management of the mutation configuration using functional options.
+type groupimagesizeaccountOption func(*GroupImageSizeAccountMutation)
+
+// newGroupImageSizeAccountMutation creates new mutation for the GroupImageSizeAccount entity.
+func newGroupImageSizeAccountMutation(c config, op Op, opts ...groupimagesizeaccountOption) *GroupImageSizeAccountMutation {
+	m := &GroupImageSizeAccountMutation{
+		config:        c,
+		op:            op,
+		typ:           TypeGroupImageSizeAccount,
+		clearedFields: make(map[string]struct{}),
+	}
+	for _, opt := range opts {
+		opt(m)
+	}
+	return m
+}
+
+// withGroupImageSizeAccountID sets the ID field of the mutation.
+func withGroupImageSizeAccountID(id int64) groupimagesizeaccountOption {
+	return func(m *GroupImageSizeAccountMutation) {
+		var (
+			err   error
+			once  sync.Once
+			value *GroupImageSizeAccount
+		)
+		m.oldValue = func(ctx context.Context) (*GroupImageSizeAccount, error) {
+			once.Do(func() {
+				if m.done {
+					err = errors.New("querying old values post mutation is not allowed")
+				} else {
+					value, err = m.Client().GroupImageSizeAccount.Get(ctx, id)
+				}
+			})
+			return value, err
+		}
+		m.id = &id
+	}
+}
+
+// withGroupImageSizeAccount sets the old GroupImageSizeAccount of the mutation.
+func withGroupImageSizeAccount(node *GroupImageSizeAccount) groupimagesizeaccountOption {
+	return func(m *GroupImageSizeAccountMutation) {
+		m.oldValue = func(context.Context) (*GroupImageSizeAccount, error) {
+			return node, nil
+		}
+		m.id = &node.ID
+	}
+}
+
+// Client returns a new `ent.Client` from the mutation. If the mutation was
+// executed in a transaction (ent.Tx), a transactional client is returned.
+func (m GroupImageSizeAccountMutation) Client() *Client {
+	client := &Client{config: m.config}
+	client.init()
+	return client
+}
+
+// Tx returns an `ent.Tx` for mutations that were executed in transactions;
+// it returns an error otherwise.
+func (m GroupImageSizeAccountMutation) Tx() (*Tx, error) {
+	if _, ok := m.driver.(*txDriver); !ok {
+		return nil, errors.New("ent: mutation is not running in a transaction")
+	}
+	tx := &Tx{config: m.config}
+	tx.init()
+	return tx, nil
+}
+
+// ID returns the ID value in the mutation. Note that the ID is only available
+// if it was provided to the builder or after it was returned from the database.
+func (m *GroupImageSizeAccountMutation) ID() (id int64, exists bool) {
+	if m.id == nil {
+		return
+	}
+	return *m.id, true
+}
+
+// IDs queries the database and returns the entity ids that match the mutation's predicate.
+// That means, if the mutation is applied within a transaction with an isolation level such
+// as sql.LevelSerializable, the returned ids match the ids of the rows that will be updated
+// or updated by the mutation.
+func (m *GroupImageSizeAccountMutation) IDs(ctx context.Context) ([]int64, error) {
+	switch {
+	case m.op.Is(OpUpdateOne | OpDeleteOne):
+		id, exists := m.ID()
+		if exists {
+			return []int64{id}, nil
+		}
+		fallthrough
+	case m.op.Is(OpUpdate | OpDelete):
+		return m.Client().GroupImageSizeAccount.Query().Where(m.predicates...).IDs(ctx)
+	default:
+		return nil, fmt.Errorf("IDs is not allowed on %s operations", m.op)
+	}
+}
+
+// SetGroupID sets the "group_id" field.
+func (m *GroupImageSizeAccountMutation) SetGroupID(i int64) {
+	m.group = &i
+}
+
+// GroupID returns the value of the "group_id" field in the mutation.
+func (m *GroupImageSizeAccountMutation) GroupID() (r int64, exists bool) {
+	v := m.group
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldGroupID returns the old "group_id" field's value of the GroupImageSizeAccount entity.
+// If the GroupImageSizeAccount object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *GroupImageSizeAccountMutation) OldGroupID(ctx context.Context) (v int64, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldGroupID is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldGroupID requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldGroupID: %w", err)
+	}
+	return oldValue.GroupID, nil
+}
+
+// ResetGroupID resets all changes to the "group_id" field.
+func (m *GroupImageSizeAccountMutation) ResetGroupID() {
+	m.group = nil
+}
+
+// SetSizeTier sets the "size_tier" field.
+func (m *GroupImageSizeAccountMutation) SetSizeTier(s string) {
+	m.size_tier = &s
+}
+
+// SizeTier returns the value of the "size_tier" field in the mutation.
+func (m *GroupImageSizeAccountMutation) SizeTier() (r string, exists bool) {
+	v := m.size_tier
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldSizeTier returns the old "size_tier" field's value of the GroupImageSizeAccount entity.
+// If the GroupImageSizeAccount object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *GroupImageSizeAccountMutation) OldSizeTier(ctx context.Context) (v string, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldSizeTier is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldSizeTier requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldSizeTier: %w", err)
+	}
+	return oldValue.SizeTier, nil
+}
+
+// ResetSizeTier resets all changes to the "size_tier" field.
+func (m *GroupImageSizeAccountMutation) ResetSizeTier() {
+	m.size_tier = nil
+}
+
+// SetAccountID sets the "account_id" field.
+func (m *GroupImageSizeAccountMutation) SetAccountID(i int64) {
+	m.account = &i
+}
+
+// AccountID returns the value of the "account_id" field in the mutation.
+func (m *GroupImageSizeAccountMutation) AccountID() (r int64, exists bool) {
+	v := m.account
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldAccountID returns the old "account_id" field's value of the GroupImageSizeAccount entity.
+// If the GroupImageSizeAccount object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *GroupImageSizeAccountMutation) OldAccountID(ctx context.Context) (v int64, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldAccountID is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldAccountID requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldAccountID: %w", err)
+	}
+	return oldValue.AccountID, nil
+}
+
+// ResetAccountID resets all changes to the "account_id" field.
+func (m *GroupImageSizeAccountMutation) ResetAccountID() {
+	m.account = nil
+}
+
+// SetPriority sets the "priority" field.
+func (m *GroupImageSizeAccountMutation) SetPriority(i int) {
+	m.priority = &i
+	m.addpriority = nil
+}
+
+// Priority returns the value of the "priority" field in the mutation.
+func (m *GroupImageSizeAccountMutation) Priority() (r int, exists bool) {
+	v := m.priority
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldPriority returns the old "priority" field's value of the GroupImageSizeAccount entity.
+// If the GroupImageSizeAccount object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *GroupImageSizeAccountMutation) OldPriority(ctx context.Context) (v int, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldPriority is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldPriority requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldPriority: %w", err)
+	}
+	return oldValue.Priority, nil
+}
+
+// AddPriority adds i to the "priority" field.
+func (m *GroupImageSizeAccountMutation) AddPriority(i int) {
+	if m.addpriority != nil {
+		*m.addpriority += i
+	} else {
+		m.addpriority = &i
+	}
+}
+
+// AddedPriority returns the value that was added to the "priority" field in this mutation.
+func (m *GroupImageSizeAccountMutation) AddedPriority() (r int, exists bool) {
+	v := m.addpriority
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// ResetPriority resets all changes to the "priority" field.
+func (m *GroupImageSizeAccountMutation) ResetPriority() {
+	m.priority = nil
+	m.addpriority = nil
+}
+
+// SetCreatedAt sets the "created_at" field.
+func (m *GroupImageSizeAccountMutation) SetCreatedAt(t time.Time) {
+	m.created_at = &t
+}
+
+// CreatedAt returns the value of the "created_at" field in the mutation.
+func (m *GroupImageSizeAccountMutation) CreatedAt() (r time.Time, exists bool) {
+	v := m.created_at
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldCreatedAt returns the old "created_at" field's value of the GroupImageSizeAccount entity.
+// If the GroupImageSizeAccount object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *GroupImageSizeAccountMutation) OldCreatedAt(ctx context.Context) (v time.Time, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldCreatedAt is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldCreatedAt requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldCreatedAt: %w", err)
+	}
+	return oldValue.CreatedAt, nil
+}
+
+// ResetCreatedAt resets all changes to the "created_at" field.
+func (m *GroupImageSizeAccountMutation) ResetCreatedAt() {
+	m.created_at = nil
+}
+
+// ClearAccount clears the "account" edge to the Account entity.
+func (m *GroupImageSizeAccountMutation) ClearAccount() {
+	m.clearedaccount = true
+	m.clearedFields[groupimagesizeaccount.FieldAccountID] = struct{}{}
+}
+
+// AccountCleared reports if the "account" edge to the Account entity was cleared.
+func (m *GroupImageSizeAccountMutation) AccountCleared() bool {
+	return m.clearedaccount
+}
+
+// AccountIDs returns the "account" edge IDs in the mutation.
+// Note that IDs always returns len(IDs) <= 1 for unique edges, and you should use
+// AccountID instead. It exists only for internal usage by the builders.
+func (m *GroupImageSizeAccountMutation) AccountIDs() (ids []int64) {
+	if id := m.account; id != nil {
+		ids = append(ids, *id)
+	}
+	return
+}
+
+// ResetAccount resets all changes to the "account" edge.
+func (m *GroupImageSizeAccountMutation) ResetAccount() {
+	m.account = nil
+	m.clearedaccount = false
+}
+
+// ClearGroup clears the "group" edge to the Group entity.
+func (m *GroupImageSizeAccountMutation) ClearGroup() {
+	m.clearedgroup = true
+	m.clearedFields[groupimagesizeaccount.FieldGroupID] = struct{}{}
+}
+
+// GroupCleared reports if the "group" edge to the Group entity was cleared.
+func (m *GroupImageSizeAccountMutation) GroupCleared() bool {
+	return m.clearedgroup
+}
+
+// GroupIDs returns the "group" edge IDs in the mutation.
+// Note that IDs always returns len(IDs) <= 1 for unique edges, and you should use
+// GroupID instead. It exists only for internal usage by the builders.
+func (m *GroupImageSizeAccountMutation) GroupIDs() (ids []int64) {
+	if id := m.group; id != nil {
+		ids = append(ids, *id)
+	}
+	return
+}
+
+// ResetGroup resets all changes to the "group" edge.
+func (m *GroupImageSizeAccountMutation) ResetGroup() {
+	m.group = nil
+	m.clearedgroup = false
+}
+
+// Where appends a list predicates to the GroupImageSizeAccountMutation builder.
+func (m *GroupImageSizeAccountMutation) Where(ps ...predicate.GroupImageSizeAccount) {
+	m.predicates = append(m.predicates, ps...)
+}
+
+// WhereP appends storage-level predicates to the GroupImageSizeAccountMutation builder. Using this method,
+// users can use type-assertion to append predicates that do not depend on any generated package.
+func (m *GroupImageSizeAccountMutation) WhereP(ps ...func(*sql.Selector)) {
+	p := make([]predicate.GroupImageSizeAccount, len(ps))
+	for i := range ps {
+		p[i] = ps[i]
+	}
+	m.Where(p...)
+}
+
+// Op returns the operation name.
+func (m *GroupImageSizeAccountMutation) Op() Op {
+	return m.op
+}
+
+// SetOp allows setting the mutation operation.
+func (m *GroupImageSizeAccountMutation) SetOp(op Op) {
+	m.op = op
+}
+
+// Type returns the node type of this mutation (GroupImageSizeAccount).
+func (m *GroupImageSizeAccountMutation) Type() string {
+	return m.typ
+}
+
+// Fields returns all fields that were changed during this mutation. Note that in
+// order to get all numeric fields that were incremented/decremented, call
+// AddedFields().
+func (m *GroupImageSizeAccountMutation) Fields() []string {
+	fields := make([]string, 0, 5)
+	if m.group != nil {
+		fields = append(fields, groupimagesizeaccount.FieldGroupID)
+	}
+	if m.size_tier != nil {
+		fields = append(fields, groupimagesizeaccount.FieldSizeTier)
+	}
+	if m.account != nil {
+		fields = append(fields, groupimagesizeaccount.FieldAccountID)
+	}
+	if m.priority != nil {
+		fields = append(fields, groupimagesizeaccount.FieldPriority)
+	}
+	if m.created_at != nil {
+		fields = append(fields, groupimagesizeaccount.FieldCreatedAt)
+	}
+	return fields
+}
+
+// Field returns the value of a field with the given name. The second boolean
+// return value indicates that this field was not set, or was not defined in the
+// schema.
+func (m *GroupImageSizeAccountMutation) Field(name string) (ent.Value, bool) {
+	switch name {
+	case groupimagesizeaccount.FieldGroupID:
+		return m.GroupID()
+	case groupimagesizeaccount.FieldSizeTier:
+		return m.SizeTier()
+	case groupimagesizeaccount.FieldAccountID:
+		return m.AccountID()
+	case groupimagesizeaccount.FieldPriority:
+		return m.Priority()
+	case groupimagesizeaccount.FieldCreatedAt:
+		return m.CreatedAt()
+	}
+	return nil, false
+}
+
+// OldField returns the old value of the field from the database. An error is
+// returned if the mutation operation is not UpdateOne, or the query to the
+// database failed.
+func (m *GroupImageSizeAccountMutation) OldField(ctx context.Context, name string) (ent.Value, error) {
+	switch name {
+	case groupimagesizeaccount.FieldGroupID:
+		return m.OldGroupID(ctx)
+	case groupimagesizeaccount.FieldSizeTier:
+		return m.OldSizeTier(ctx)
+	case groupimagesizeaccount.FieldAccountID:
+		return m.OldAccountID(ctx)
+	case groupimagesizeaccount.FieldPriority:
+		return m.OldPriority(ctx)
+	case groupimagesizeaccount.FieldCreatedAt:
+		return m.OldCreatedAt(ctx)
+	}
+	return nil, fmt.Errorf("unknown GroupImageSizeAccount field %s", name)
+}
+
+// SetField sets the value of a field with the given name. It returns an error if
+// the field is not defined in the schema, or if the type mismatched the field
+// type.
+func (m *GroupImageSizeAccountMutation) SetField(name string, value ent.Value) error {
+	switch name {
+	case groupimagesizeaccount.FieldGroupID:
+		v, ok := value.(int64)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetGroupID(v)
+		return nil
+	case groupimagesizeaccount.FieldSizeTier:
+		v, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetSizeTier(v)
+		return nil
+	case groupimagesizeaccount.FieldAccountID:
+		v, ok := value.(int64)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetAccountID(v)
+		return nil
+	case groupimagesizeaccount.FieldPriority:
+		v, ok := value.(int)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetPriority(v)
+		return nil
+	case groupimagesizeaccount.FieldCreatedAt:
+		v, ok := value.(time.Time)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetCreatedAt(v)
+		return nil
+	}
+	return fmt.Errorf("unknown GroupImageSizeAccount field %s", name)
+}
+
+// AddedFields returns all numeric fields that were incremented/decremented during
+// this mutation.
+func (m *GroupImageSizeAccountMutation) AddedFields() []string {
+	var fields []string
+	if m.addpriority != nil {
+		fields = append(fields, groupimagesizeaccount.FieldPriority)
+	}
+	return fields
+}
+
+// AddedField returns the numeric value that was incremented/decremented on a field
+// with the given name. The second boolean return value indicates that this field
+// was not set, or was not defined in the schema.
+func (m *GroupImageSizeAccountMutation) AddedField(name string) (ent.Value, bool) {
+	switch name {
+	case groupimagesizeaccount.FieldPriority:
+		return m.AddedPriority()
+	}
+	return nil, false
+}
+
+// AddField adds the value to the field with the given name. It returns an error if
+// the field is not defined in the schema, or if the type mismatched the field
+// type.
+func (m *GroupImageSizeAccountMutation) AddField(name string, value ent.Value) error {
+	switch name {
+	case groupimagesizeaccount.FieldPriority:
+		v, ok := value.(int)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.AddPriority(v)
+		return nil
+	}
+	return fmt.Errorf("unknown GroupImageSizeAccount numeric field %s", name)
+}
+
+// ClearedFields returns all nullable fields that were cleared during this
+// mutation.
+func (m *GroupImageSizeAccountMutation) ClearedFields() []string {
+	return nil
+}
+
+// FieldCleared returns a boolean indicating if a field with the given name was
+// cleared in this mutation.
+func (m *GroupImageSizeAccountMutation) FieldCleared(name string) bool {
+	_, ok := m.clearedFields[name]
+	return ok
+}
+
+// ClearField clears the value of the field with the given name. It returns an
+// error if the field is not defined in the schema.
+func (m *GroupImageSizeAccountMutation) ClearField(name string) error {
+	return fmt.Errorf("unknown GroupImageSizeAccount nullable field %s", name)
+}
+
+// ResetField resets all changes in the mutation for the field with the given name.
+// It returns an error if the field is not defined in the schema.
+func (m *GroupImageSizeAccountMutation) ResetField(name string) error {
+	switch name {
+	case groupimagesizeaccount.FieldGroupID:
+		m.ResetGroupID()
+		return nil
+	case groupimagesizeaccount.FieldSizeTier:
+		m.ResetSizeTier()
+		return nil
+	case groupimagesizeaccount.FieldAccountID:
+		m.ResetAccountID()
+		return nil
+	case groupimagesizeaccount.FieldPriority:
+		m.ResetPriority()
+		return nil
+	case groupimagesizeaccount.FieldCreatedAt:
+		m.ResetCreatedAt()
+		return nil
+	}
+	return fmt.Errorf("unknown GroupImageSizeAccount field %s", name)
+}
+
+// AddedEdges returns all edge names that were set/added in this mutation.
+func (m *GroupImageSizeAccountMutation) AddedEdges() []string {
+	edges := make([]string, 0, 2)
+	if m.account != nil {
+		edges = append(edges, groupimagesizeaccount.EdgeAccount)
+	}
+	if m.group != nil {
+		edges = append(edges, groupimagesizeaccount.EdgeGroup)
+	}
+	return edges
+}
+
+// AddedIDs returns all IDs (to other nodes) that were added for the given edge
+// name in this mutation.
+func (m *GroupImageSizeAccountMutation) AddedIDs(name string) []ent.Value {
+	switch name {
+	case groupimagesizeaccount.EdgeAccount:
+		if id := m.account; id != nil {
+			return []ent.Value{*id}
+		}
+	case groupimagesizeaccount.EdgeGroup:
+		if id := m.group; id != nil {
+			return []ent.Value{*id}
+		}
+	}
+	return nil
+}
+
+// RemovedEdges returns all edge names that were removed in this mutation.
+func (m *GroupImageSizeAccountMutation) RemovedEdges() []string {
+	edges := make([]string, 0, 2)
+	return edges
+}
+
+// RemovedIDs returns all IDs (to other nodes) that were removed for the edge with
+// the given name in this mutation.
+func (m *GroupImageSizeAccountMutation) RemovedIDs(name string) []ent.Value {
+	return nil
+}
+
+// ClearedEdges returns all edge names that were cleared in this mutation.
+func (m *GroupImageSizeAccountMutation) ClearedEdges() []string {
+	edges := make([]string, 0, 2)
+	if m.clearedaccount {
+		edges = append(edges, groupimagesizeaccount.EdgeAccount)
+	}
+	if m.clearedgroup {
+		edges = append(edges, groupimagesizeaccount.EdgeGroup)
+	}
+	return edges
+}
+
+// EdgeCleared returns a boolean which indicates if the edge with the given name
+// was cleared in this mutation.
+func (m *GroupImageSizeAccountMutation) EdgeCleared(name string) bool {
+	switch name {
+	case groupimagesizeaccount.EdgeAccount:
+		return m.clearedaccount
+	case groupimagesizeaccount.EdgeGroup:
+		return m.clearedgroup
+	}
+	return false
+}
+
+// ClearEdge clears the value of the edge with the given name. It returns an error
+// if that edge is not defined in the schema.
+func (m *GroupImageSizeAccountMutation) ClearEdge(name string) error {
+	switch name {
+	case groupimagesizeaccount.EdgeAccount:
+		m.ClearAccount()
+		return nil
+	case groupimagesizeaccount.EdgeGroup:
+		m.ClearGroup()
+		return nil
+	}
+	return fmt.Errorf("unknown GroupImageSizeAccount unique edge %s", name)
+}
+
+// ResetEdge resets all changes to the edge with the given name in this mutation.
+// It returns an error if the edge is not defined in the schema.
+func (m *GroupImageSizeAccountMutation) ResetEdge(name string) error {
+	switch name {
+	case groupimagesizeaccount.EdgeAccount:
+		m.ResetAccount()
+		return nil
+	case groupimagesizeaccount.EdgeGroup:
+		m.ResetGroup()
+		return nil
+	}
+	return fmt.Errorf("unknown GroupImageSizeAccount edge %s", name)
 }
 
 // IdempotencyRecordMutation represents an operation that mutates the IdempotencyRecord nodes in the graph.

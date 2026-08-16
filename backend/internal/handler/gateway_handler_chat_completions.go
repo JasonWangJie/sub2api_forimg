@@ -159,6 +159,15 @@ func (h *GatewayHandler) ChatCompletions(c *gin.Context) {
 	if groupPlatform == service.PlatformGemini && selectionSessionHash != "" {
 		selectionSessionHash = "gemini:" + selectionSessionHash
 	}
+	// Attach image size-tier pool hint for Gemini image requests only.
+	if groupPlatform == service.PlatformGemini || groupPlatform == service.PlatformAntigravity {
+		if service.IsGeminiNativeImageGenerationIntent("generateContent", reqModel, body) ||
+			service.IsImageGenerationIntent("/v1/chat/completions", reqModel, body) {
+			if tier := service.ExtractImageSizePoolTierFromRequestBody(body); tier != "" {
+				c.Request = c.Request.WithContext(service.WithImageSizeAccountPoolTier(c.Request.Context(), tier))
+			}
+		}
+	}
 	// 3. Account selection + failover loop
 	fs := NewFailoverState(h.maxAccountSwitches, false)
 	if groupPlatform == service.PlatformGemini {

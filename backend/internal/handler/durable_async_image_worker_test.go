@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"net/http"
 	"testing"
 	"time"
 
@@ -12,6 +13,28 @@ func TestAsyncImageExecutionTimeoutDefaultsToTwentyMinutes(t *testing.T) {
 	require.Equal(t, 20*time.Minute, asyncImageExecutionTimeout(service.AsyncImageRuntimeConfig{}))
 	require.Equal(t, 20*time.Minute, asyncImageExecutionTimeout(service.AsyncImageRuntimeConfig{ExecutionTimeoutSeconds: 1200}))
 	require.Equal(t, 5*time.Minute, asyncImageExecutionTimeout(service.AsyncImageRuntimeConfig{ExecutionTimeoutSeconds: 300}))
+}
+
+func TestIsOpenAIImageURLFetchTimeoutFailure(t *testing.T) {
+	msg := "upstream image generation failed (HTTP 400): image_url fetch failed: Failed to perform, curl: (28) Connection timed out after 60002 milliseconds. See https://cdn.example/a.png first for more details."
+	require.True(t, isOpenAIImageURLFetchTimeoutFailure(http.StatusBadRequest, msg))
+	require.True(t, isOpenAIImageURLFetchTimeoutFailure(http.StatusBadRequest, "image_url fetch failed: connection timed out after 60001 milliseconds"))
+	require.False(t, isOpenAIImageURLFetchTimeoutFailure(http.StatusBadGateway, msg))
+	require.False(t, isOpenAIImageURLFetchTimeoutFailure(http.StatusBadRequest, "image_url fetch failed: HTTP 403 Forbidden"))
+	require.False(t, isOpenAIImageURLFetchTimeoutFailure(http.StatusBadRequest, "All available accounts exhausted"))
+}
+
+func TestShouldRetryOpenAIImageURLFetchTimeoutOnce(t *testing.T) {
+	msg := "upstream image generation failed (HTTP 400): image_url fetch failed: curl: (28) Connection timed out after 60002 milliseconds"
+	task := &service.AsyncImageTask{Platform: service.PlatformOpenAI}
+	require.True(t, shouldRetryOpenAIImageURLFetchTimeout(task, http.StatusBadRequest, msg))
+
+	code := asyncImageOpenAIImageURLFetchTimeoutCode
+	task.ErrorCode = &code
+	require.False(t, shouldRetryOpenAIImageURLFetchTimeout(task, http.StatusBadRequest, msg), "already scheduled retry must not retry again")
+
+	gemini := &service.AsyncImageTask{Platform: service.PlatformGemini}
+	require.False(t, shouldRetryOpenAIImageURLFetchTimeout(gemini, http.StatusBadRequest, msg))
 }
 
 func TestAsyncImageInvocationTimedOutUsesStartedAtWallClock(t *testing.T) {

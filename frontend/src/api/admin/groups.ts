@@ -473,6 +473,53 @@ export async function getCapacitySummary(): Promise<
   return data
 }
 
+export type GroupImageSizeAccountBinding = {
+  id?: number
+  group_id?: number
+  size_tier?: string
+  account_id: number
+  priority: number
+  created_at?: string
+  account_name?: string | null
+}
+
+export type GroupImageSizeAccountBindingsView = Record<
+  '1K' | '2K' | '4K',
+  GroupImageSizeAccountBinding[]
+>
+
+export type GroupImageSizeAccountBindingsPayload = Record<
+  '1K' | '2K' | '4K',
+  Array<{ account_id: number; priority: number }>
+>
+
+/**
+ * List optional 1K/2K/4K image account pools for a group.
+ * Empty tier arrays mean the default account_groups pool is used.
+ */
+export async function listImageSizeAccounts(
+  groupId: number
+): Promise<GroupImageSizeAccountBindingsView> {
+  const { data } = await apiClient.get<GroupImageSizeAccountBindingsView>(
+    `/admin/groups/${groupId}/image-size-accounts`
+  )
+  return data
+}
+
+/**
+ * Replace optional 1K/2K/4K image account pools for a group.
+ */
+export async function replaceImageSizeAccounts(
+  groupId: number,
+  bindings: GroupImageSizeAccountBindingsPayload
+): Promise<GroupImageSizeAccountBindingsView> {
+  const { data } = await apiClient.put<GroupImageSizeAccountBindingsView>(
+    `/admin/groups/${groupId}/image-size-accounts`,
+    bindings
+  )
+  return data
+}
+
 export const groupsAPI = {
   list,
   getAll,
@@ -493,6 +540,8 @@ export const groupsAPI = {
   updateCompositeRoute,
   deleteCompositeRoute,
   previewCompositeRoute,
+  listImageSizeAccounts,
+  replaceImageSizeAccounts,
   getGroupRateMultipliers,
   clearGroupRateMultipliers,
   batchSetGroupRateMultipliers,

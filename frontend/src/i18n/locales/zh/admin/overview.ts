@@ -1068,7 +1068,14 @@ export default {
         batchGeminiOnlyHint: '批量生图当前仅支持 Gemini 分组。',
         modeHint: '默认关闭独立倍率时，图片费用 = 图片价格 × 当前分组有效倍率；开启独立倍率后，图片费用 = 图片价格 × 生图独立倍率。',
         finalPricePreview: '最终单张价格预览',
-        notConfigured: '未配置'
+        notConfigured: '未配置',
+        accountPoolsTitle: '按清晰度账号池（可选）',
+        accountPoolsHint:
+          '按 1K/2K/4K 可选绑定上游账号（多账号用逗号分隔，顺序即优先级）。某档留空则用分组默认账号池；该档账号全不可用时回退默认池；账号可独立绑定，不必先在默认池。',
+        pool1k: '1K 账号',
+        pool2k: '2K 账号',
+        pool4k: '4K 账号',
+        poolPlaceholder: '例如：101, 102, 103'
       },
       videoPricing: {
         title: '视频生成计费',

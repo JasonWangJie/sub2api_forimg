@@ -1004,6 +1004,52 @@ var (
 			},
 		},
 	}
+	// GroupImageSizeAccountsColumns holds the columns for the "group_image_size_accounts" table.
+	GroupImageSizeAccountsColumns = []*schema.Column{
+		{Name: "id", Type: field.TypeInt64, Increment: true},
+		{Name: "size_tier", Type: field.TypeString, Size: 8},
+		{Name: "priority", Type: field.TypeInt, Default: 50},
+		{Name: "created_at", Type: field.TypeTime, SchemaType: map[string]string{"postgres": "timestamptz"}},
+		{Name: "account_id", Type: field.TypeInt64},
+		{Name: "group_id", Type: field.TypeInt64},
+	}
+	// GroupImageSizeAccountsTable holds the schema information for the "group_image_size_accounts" table.
+	GroupImageSizeAccountsTable = &schema.Table{
+		Name:       "group_image_size_accounts",
+		Columns:    GroupImageSizeAccountsColumns,
+		PrimaryKey: []*schema.Column{GroupImageSizeAccountsColumns[0]},
+		ForeignKeys: []*schema.ForeignKey{
+			{
+				Symbol:     "group_image_size_accounts_accounts_account",
+				Columns:    []*schema.Column{GroupImageSizeAccountsColumns[4]},
+				RefColumns: []*schema.Column{AccountsColumns[0]},
+				OnDelete:   schema.NoAction,
+			},
+			{
+				Symbol:     "group_image_size_accounts_groups_group",
+				Columns:    []*schema.Column{GroupImageSizeAccountsColumns[5]},
+				RefColumns: []*schema.Column{GroupsColumns[0]},
+				OnDelete:   schema.NoAction,
+			},
+		},
+		Indexes: []*schema.Index{
+			{
+				Name:    "groupimagesizeaccount_group_id_size_tier_account_id",
+				Unique:  true,
+				Columns: []*schema.Column{GroupImageSizeAccountsColumns[5], GroupImageSizeAccountsColumns[1], GroupImageSizeAccountsColumns[4]},
+			},
+			{
+				Name:    "groupimagesizeaccount_group_id_size_tier_priority_account_id",
+				Unique:  false,
+				Columns: []*schema.Column{GroupImageSizeAccountsColumns[5], GroupImageSizeAccountsColumns[1], GroupImageSizeAccountsColumns[2], GroupImageSizeAccountsColumns[4]},
+			},
+			{
+				Name:    "groupimagesizeaccount_account_id",
+				Unique:  false,
+				Columns: []*schema.Column{GroupImageSizeAccountsColumns[4]},
+			},
+		},
+	}
 	// IdempotencyRecordsColumns holds the columns for the "idempotency_records" table.
 	IdempotencyRecordsColumns = []*schema.Column{
 		{Name: "id", Type: field.TypeInt64, Increment: true},
@@ -2092,6 +2138,7 @@ var (
 		CompositeModelRoutesTable,
 		ErrorPassthroughRulesTable,
 		GroupsTable,
+		GroupImageSizeAccountsTable,
 		IdempotencyRecordsTable,
 		IdentityAdoptionDecisionsTable,
 		PaymentAuditLogsTable,
@@ -2182,6 +2229,11 @@ func init() {
 	}
 	GroupsTable.Annotation = &entsql.Annotation{
 		Table: "groups",
+	}
+	GroupImageSizeAccountsTable.ForeignKeys[0].RefTable = AccountsTable
+	GroupImageSizeAccountsTable.ForeignKeys[1].RefTable = GroupsTable
+	GroupImageSizeAccountsTable.Annotation = &entsql.Annotation{
+		Table: "group_image_size_accounts",
 	}
 	IdempotencyRecordsTable.Annotation = &entsql.Annotation{
 		Table: "idempotency_records",

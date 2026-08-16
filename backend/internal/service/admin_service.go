@@ -53,6 +53,8 @@ type AdminService interface {
 	UpdateCompositeRoute(ctx context.Context, groupID, routeID int64, input CompositeRouteInput) (*CompositeModelRoute, error)
 	DeleteCompositeRoute(ctx context.Context, groupID, routeID int64) error
 	PreviewCompositeRoute(ctx context.Context, groupID int64, input CompositeRoutePreviewRequest) (*CompositeRouteDecision, error)
+	ListGroupImageSizeAccounts(ctx context.Context, groupID int64) (GroupImageSizeAccountBindingsView, error)
+	ReplaceGroupImageSizeAccounts(ctx context.Context, groupID int64, bindings GroupImageSizeAccountBindings) (GroupImageSizeAccountBindingsView, error)
 	GetGroupAPIKeys(ctx context.Context, groupID int64, page, pageSize int) ([]APIKey, int64, error)
 	GetGroupRateMultipliers(ctx context.Context, groupID int64) ([]UserGroupRateEntry, error)
 	ClearGroupRateMultipliers(ctx context.Context, groupID int64) error

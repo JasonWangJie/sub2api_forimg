@@ -2715,6 +2715,36 @@
             </div>
           </div>
           <div
+            v-if="supportsImageSizeAccountPools(editForm.platform) && editForm.allow_image_generation"
+            class="mt-4 border-t border-dashed border-gray-200 pt-4 dark:border-dark-700"
+          >
+            <div class="text-sm font-medium text-gray-700 dark:text-gray-300">
+              {{ t("admin.groups.imagePricing.accountPoolsTitle") }}
+            </div>
+            <p class="mt-2 text-xs text-gray-500 dark:text-gray-400">
+              {{ t("admin.groups.imagePricing.accountPoolsHint") }}
+            </p>
+            <div class="mt-3 grid grid-cols-1 gap-3 md:grid-cols-3">
+              <div v-for="tier in imageSizePoolTier" :key="tier">
+                <label class="input-label">{{
+                  t(
+                    tier === "1K"
+                      ? "admin.groups.imagePricing.pool1k"
+                      : tier === "2K"
+                        ? "admin.groups.imagePricing.pool2k"
+                        : "admin.groups.imagePricing.pool4k",
+                  )
+                }}</label>
+                <input
+                  v-model="editImageSizePoolDraft[tier]"
+                  type="text"
+                  class="input"
+                  :placeholder="t('admin.groups.imagePricing.poolPlaceholder')"
+                />
+              </div>
+            </div>
+          </div>
+          <div
             v-if="['gemini', 'openai'].includes(editForm.platform) && editForm.allow_image_generation"
             class="mt-4 border-t border-dashed border-gray-200 pt-4 dark:border-dark-700"
           >
@@ -4489,6 +4519,14 @@ import {
   videoPricingI18nKey,
 } from "./groupsImagePricing";
 import {
+  emptyImageSizePoolView,
+  formatImageSizePoolInput,
+  normalizeImageSizePoolView,
+  supportsImageSizeAccountPools,
+  toImageSizePoolPayload,
+  type ImageSizePoolTier,
+} from "./groupsImageAccountPools";
+import {
   createVideoModelPricesForm,
   grokVideoPriceResolutions,
   serializeVideoModelPrices,
@@ -5402,6 +5440,28 @@ const editForm = reactive({
   reasoning_effort_mappings: [] as ReasoningEffortMappingRow[],
 });
 
+const editImageSizePoolDraft = reactive<Record<ImageSizePoolTier, string>>({
+  "1K": "",
+  "2K": "",
+  "4K": "",
+});
+const imageSizePoolTier: ImageSizePoolTier[] = ["1K", "2K", "4K"];
+
+const resetEditImageSizePoolDraft = () => {
+  const empty = emptyImageSizePoolView();
+  for (const tier of imageSizePoolTier) {
+    editImageSizePoolDraft[tier] = formatImageSizePoolInput(empty[tier]);
+  }
+};
+
+const applyEditImageSizePoolView = (
+  view: ReturnType<typeof normalizeImageSizePoolView>,
+) => {
+  for (const tier of imageSizePoolTier) {
+    editImageSizePoolDraft[tier] = formatImageSizePoolInput(view[tier]);
+  }
+};
+
 type ImagePricingFormState = {
   platform: GroupPlatform;
   allow_image_generation: boolean;
@@ -6052,6 +6112,15 @@ const handleEdit = async (group: AdminGroup) => {
   editForm.image_price_1k = group.image_price_1k;
   editForm.image_price_2k = group.image_price_2k;
   editForm.image_price_4k = group.image_price_4k;
+  resetEditImageSizePoolDraft();
+  if (supportsImageSizeAccountPools(group.platform)) {
+    try {
+      const pools = await adminAPI.groups.listImageSizeAccounts(group.id);
+      applyEditImageSizePoolView(normalizeImageSizePoolView(pools));
+    } catch (error) {
+      console.error("Failed to load image size account pools:", error);
+    }
+  }
   editForm.video_rate_independent = group.video_rate_independent ?? false;
   editForm.video_rate_multiplier = group.video_rate_multiplier ?? 1;
   editForm.video_price_480p = group.video_price_480p;
@@ -6154,6 +6223,7 @@ const closeEditModal = () => {
   resetMessagesDispatchFormState(editForm);
   editForm.allow_live = false;
   resetModelsListState(editModelsListState);
+  resetEditImageSizePoolDraft();
 };
 
 const handleUpdateGroup = async () => {
@@ -6279,6 +6349,20 @@ const handleUpdateGroup = async () => {
       editForm.peak_rate_multiplier,
     );
     await adminAPI.groups.update(editingGroup.value.id, payload);
+    if (
+      supportsImageSizeAccountPools(editForm.platform) &&
+      editForm.allow_image_generation
+    ) {
+      await adminAPI.groups.replaceImageSizeAccounts(
+        editingGroup.value.id,
+        toImageSizePoolPayload(editImageSizePoolDraft),
+      );
+    } else if (supportsImageSizeAccountPools(editForm.platform)) {
+      await adminAPI.groups.replaceImageSizeAccounts(
+        editingGroup.value.id,
+        toImageSizePoolPayload({ "1K": "", "2K": "", "4K": "" }),
+      );
+    }
     appStore.showSuccess(t("admin.groups.groupUpdated"));
     closeEditModal();
     loadGroups();

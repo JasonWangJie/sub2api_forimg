@@ -487,6 +487,9 @@ func (h *DurableAsyncImageHandler) invokeAsyncImageTask(parent context.Context, 
 	usageCapture := &AsyncImageUsageCapture{}
 	ctx = withAsyncImageUsageCapture(ctx, usageCapture)
 	geminiCapture := &service.GeminiImageResponseCapture{}
+	if task.RequestedImageSize != nil && strings.TrimSpace(*task.RequestedImageSize) != "" {
+		ctx = service.WithImageSizeAccountPoolTier(ctx, *task.RequestedImageSize)
+	}
 	if task.Platform == service.PlatformGemini {
 		ctx = service.WithGeminiAsyncImageGeneration(ctx)
 		if task.RequestedImageSize != nil && strings.EqualFold(strings.TrimSpace(*task.RequestedImageSize), "0.5K") {
@@ -532,6 +535,12 @@ func (h *DurableAsyncImageHandler) invokeAsyncImageTask(parent context.Context, 
 			zap.Int("status_code", recorder.Code),
 			zap.String("message", message),
 		)
+		if shouldRetryOpenAIImageURLFetchTimeout(task, recorder.Code, message) {
+			return h.retryAsyncImageForOpenAIImageURLFetch(parent, task, cfg, message)
+		}
+		if hasScheduledOpenAIImageURLFetchRetry(task) && isOpenAIImageURLFetchTimeoutFailure(recorder.Code, message) {
+			message = message + "（已自动重试 1 次仍失败）"
+		}
 		h.failAsyncImageTask(parent, task, "upstream_failed", message, false)
 		return asyncImageWorkerDisposition{}
 	}
@@ -595,6 +604,88 @@ func (h *DurableAsyncImageHandler) deferAsyncImageForLocalCapacity(
 	}
 	delay := time.Duration(cfg.RetryBackoffSeconds) * time.Second
 	if delay <= 0 {
+		delay = 30 * time.Second
+	}
+	return asyncImageWorkerDisposition{requeue: true, delay: delay}
+}
+
+const asyncImageOpenAIImageURLFetchTimeoutCode = "upstream_image_url_fetch_timeout"
+
+// isOpenAIImageURLFetchTimeoutFailure matches upstream OpenAI Images errors where
+// the provider itself timed out fetching a client-supplied image_url (~60s curl 28).
+func isOpenAIImageURLFetchTimeoutFailure(statusCode int, message string) bool {
+	if statusCode != http.StatusBadRequest {
+		return false
+	}
+	lower := strings.ToLower(message)
+	if !strings.Contains(lower, "image_url fetch failed") {
+		return false
+	}
+	return strings.Contains(lower, "curl: (28)") ||
+		strings.Contains(lower, "connection timed out") ||
+		strings.Contains(lower, "operation timed out")
+}
+
+func hasScheduledOpenAIImageURLFetchRetry(task *service.AsyncImageTask) bool {
+	if task == nil || task.ErrorCode == nil {
+		return false
+	}
+	return strings.EqualFold(strings.TrimSpace(*task.ErrorCode), asyncImageOpenAIImageURLFetchTimeoutCode)
+}
+
+func shouldRetryOpenAIImageURLFetchTimeout(task *service.AsyncImageTask, statusCode int, message string) bool {
+	if task == nil || task.Platform != service.PlatformOpenAI {
+		return false
+	}
+	if hasScheduledOpenAIImageURLFetchRetry(task) {
+		return false
+	}
+	return isOpenAIImageURLFetchTimeoutFailure(statusCode, message)
+}
+
+func (h *DurableAsyncImageHandler) retryAsyncImageForOpenAIImageURLFetch(
+	ctx context.Context,
+	task *service.AsyncImageTask,
+	cfg service.AsyncImageRuntimeConfig,
+	upstreamMessage string,
+) asyncImageWorkerDisposition {
+	if task == nil {
+		return asyncImageWorkerDisposition{}
+	}
+	progress := 0
+	code := asyncImageOpenAIImageURLFetchTimeoutCode
+	detail := asyncImageSafeError(errors.New(upstreamMessage))
+	message := "参考图 URL 拉取超时，已安排自动重试（1/1）：" + detail
+	eventPayload, _ := json.Marshal(map[string]any{
+		"message": message,
+		"retry":   1,
+		"max":     1,
+		"reason":  "openai_image_url_fetch_timeout",
+	})
+	if _, err := h.tasks.Transition(ctx, service.AsyncImageTaskTransition{
+		TaskID: task.TaskID, ExpectedVersion: task.Version,
+		FromStatuses: []string{service.AsyncImageTaskStatusInvoking},
+		ToStatus:     service.AsyncImageTaskStatusQueued, Progress: &progress,
+		ErrorCode: &code, ErrorMessage: &message,
+		IncrementRetry: true, EventType: "upstream_image_url_fetch_retry",
+		EventPayload: eventPayload,
+	}); err != nil {
+		logger.L().Warn("async_image.image_url_fetch_retry_transition_failed",
+			zap.String("task_id", task.TaskID),
+			zap.Error(err),
+		)
+		h.failAsyncImageTask(ctx, task, "upstream_failed", upstreamMessage, false)
+		return asyncImageWorkerDisposition{}
+	}
+	logger.L().Info("async_image.image_url_fetch_retry_scheduled",
+		zap.String("task_id", task.TaskID),
+		zap.String("model", task.Model),
+	)
+	delay := time.Duration(cfg.RetryBackoffSeconds) * time.Second
+	if delay <= 0 {
+		delay = 10 * time.Second
+	}
+	if delay > 30*time.Second {
 		delay = 30 * time.Second
 	}
 	return asyncImageWorkerDisposition{requeue: true, delay: delay}

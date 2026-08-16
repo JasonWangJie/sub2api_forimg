@@ -1071,7 +1071,14 @@ export default {
         batchGeminiOnlyHint: 'Batch image generation is currently available only for Gemini groups.',
         modeHint: 'By default, image billing uses image price × current effective group multiplier. Independent mode uses image price × image multiplier.',
         finalPricePreview: 'Final per-image price preview',
-        notConfigured: 'Not configured'
+        notConfigured: 'Not configured',
+        accountPoolsTitle: 'Optional resolution account pools',
+        accountPoolsHint:
+          'Optionally bind upstream accounts per 1K/2K/4K (comma-separated; order is priority). An empty tier uses the group default pool; if a configured tier has no available accounts it falls back to the default pool. Accounts may be bound independently without being in the default pool.',
+        pool1k: '1K accounts',
+        pool2k: '2K accounts',
+        pool4k: '4K accounts',
+        poolPlaceholder: 'e.g. 101, 102, 103'
       },
       videoPricing: {
         title: 'Video Generation Pricing',

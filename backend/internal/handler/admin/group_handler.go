@@ -282,6 +282,42 @@ func (h *GroupHandler) List(c *gin.Context) {
 	response.Paginated(c, outGroups, total, page, pageSize)
 }
 
+// ListImageSizeAccounts handles listing optional 1K/2K/4K image account pools for one group.
+// GET /api/v1/admin/groups/:id/image-size-accounts
+func (h *GroupHandler) ListImageSizeAccounts(c *gin.Context) {
+	groupID, ok := parsePositiveIDParam(c, "id")
+	if !ok {
+		return
+	}
+	view, err := h.adminService.ListGroupImageSizeAccounts(c.Request.Context(), groupID)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, view)
+}
+
+// ReplaceImageSizeAccounts replaces optional 1K/2K/4K image account pools for one group.
+// PUT /api/v1/admin/groups/:id/image-size-accounts
+// Body: {"1K":[{"account_id":1,"priority":1}],"2K":[],"4K":[...]}
+func (h *GroupHandler) ReplaceImageSizeAccounts(c *gin.Context) {
+	groupID, ok := parsePositiveIDParam(c, "id")
+	if !ok {
+		return
+	}
+	var bindings service.GroupImageSizeAccountBindings
+	if err := c.ShouldBindJSON(&bindings); err != nil {
+		response.BadRequest(c, "Invalid request body: "+err.Error())
+		return
+	}
+	view, err := h.adminService.ReplaceGroupImageSizeAccounts(c.Request.Context(), groupID, bindings)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, view)
+}
+
 // ListCompositeRoutes handles listing composite model routes for one group.
 // GET /api/v1/admin/groups/:id/composite-routes
 func (h *GroupHandler) ListCompositeRoutes(c *gin.Context) {

@@ -46,6 +46,7 @@ export default {
       storage_failed: 'Storage failed',
       billing_failed: 'Billing failed',
       expired: 'Expired',
+      upstream_image_url_fetch_retry: 'Reference image fetch timeout retry',
     },
     provider: {
       pending: 'Not stored',

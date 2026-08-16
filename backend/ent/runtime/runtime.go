@@ -22,6 +22,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/ent/compositemodelroute"
 	"github.com/Wei-Shaw/sub2api/ent/errorpassthroughrule"
 	"github.com/Wei-Shaw/sub2api/ent/group"
+	"github.com/Wei-Shaw/sub2api/ent/groupimagesizeaccount"
 	"github.com/Wei-Shaw/sub2api/ent/idempotencyrecord"
 	"github.com/Wei-Shaw/sub2api/ent/identityadoptiondecision"
 	"github.com/Wei-Shaw/sub2api/ent/paymentauditlog"
@@ -1219,6 +1220,20 @@ func init() {
 	groupDescProfitSafetyBuffer := groupFields[58].Descriptor()
 	// group.DefaultProfitSafetyBuffer holds the default value on creation for the profit_safety_buffer field.
 	group.DefaultProfitSafetyBuffer = groupDescProfitSafetyBuffer.Default.(float64)
+	groupimagesizeaccountFields := schema.GroupImageSizeAccount{}.Fields()
+	_ = groupimagesizeaccountFields
+	// groupimagesizeaccountDescSizeTier is the schema descriptor for size_tier field.
+	groupimagesizeaccountDescSizeTier := groupimagesizeaccountFields[1].Descriptor()
+	// groupimagesizeaccount.SizeTierValidator is a validator for the "size_tier" field. It is called by the builders before save.
+	groupimagesizeaccount.SizeTierValidator = groupimagesizeaccountDescSizeTier.Validators[0].(func(string) error)
+	// groupimagesizeaccountDescPriority is the schema descriptor for priority field.
+	groupimagesizeaccountDescPriority := groupimagesizeaccountFields[3].Descriptor()
+	// groupimagesizeaccount.DefaultPriority holds the default value on creation for the priority field.
+	groupimagesizeaccount.DefaultPriority = groupimagesizeaccountDescPriority.Default.(int)
+	// groupimagesizeaccountDescCreatedAt is the schema descriptor for created_at field.
+	groupimagesizeaccountDescCreatedAt := groupimagesizeaccountFields[4].Descriptor()
+	// groupimagesizeaccount.DefaultCreatedAt holds the default value on creation for the created_at field.
+	groupimagesizeaccount.DefaultCreatedAt = groupimagesizeaccountDescCreatedAt.Default.(func() time.Time)
 	idempotencyrecordMixin := schema.IdempotencyRecord{}.Mixin()
 	idempotencyrecordMixinFields0 := idempotencyrecordMixin[0].Fields()
 	_ = idempotencyrecordMixinFields0

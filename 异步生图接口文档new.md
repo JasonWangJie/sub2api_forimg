@@ -117,6 +117,12 @@ Idempotency-Key: oa-img-20260727-001
 
 \* JSON 图生图依赖 `image_urls` 有有效值；multipart 图生图改为上传 `image` 文件字段。参考图建议格式：PNG / JPG / WEBP。
 
+OpenAI 图生图自动重试：若上游返回 `image_url fetch failed` 且为连接超时（如 `curl: (28) Connection timed out`），系统会**自动重试 1 次**。任务详情中：
+
+- `retry_count` 递增；
+- 时间线出现事件 `upstream_image_url_fetch_retry`（文案含「已安排自动重试（1/1）」）；
+- 重试期间 `error_message` 会暂时保留超时说明；若重试仍失败，最终 `fail_reason` / `error_message` 会注明「已自动重试 1 次仍失败」。
+
 尺寸优先级：
 
 - 同时有 `aspect_ratio` 与比例形式的 `size` 时，以 `aspect_ratio` 为准。

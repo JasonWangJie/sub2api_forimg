@@ -65,9 +65,14 @@ function normalizeResult(result: ResultWire, taskID: string, arrayIndex: number)
 }
 
 function normalizeEvent(event: EventWire): AsyncImageTaskEvent {
+  const eventType = String(event.event_type || '').trim()
+  // Prefer descriptive retry event labels over the transient to_status=queued.
+  const status = eventType === 'upstream_image_url_fetch_retry'
+    ? eventType
+    : (event.status || event.to_status || event.event_type || 'queued')
   return {
     ...event,
-    status: event.status || event.to_status || event.event_type || 'queued',
+    status,
     message: event.message || event.payload?.message || event.payload?.error || null,
     created_at: event.created_at || '',
   }

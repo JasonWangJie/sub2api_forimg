@@ -166,6 +166,7 @@ func (h *OpenAIGatewayHandler) Images(c *gin.Context) {
 			routingModel,
 			failedAccountIDs,
 			parsed.RequiredCapability,
+			parsed.SizeTier,
 		)
 		if err != nil {
 			if failoverClientGone(c) {

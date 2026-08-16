@@ -6,6 +6,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	mathrand "math/rand"
@@ -99,6 +100,30 @@ func (s *GatewayService) SelectAccountForModelWithExclusions(ctx context.Context
 // metadataUserID: 用于客户端亲和调度，从中提取客户端 ID
 // sub2apiUserID: 系统用户 ID，用于二维亲和调度
 func (s *GatewayService) SelectAccountWithLoadAwareness(ctx context.Context, groupID *int64, sessionHash string, requestedModel string, excludedIDs map[int64]struct{}, metadataUserID string, sub2apiUserID int64) (*AccountSelectionResult, error) {
+	if tier, ok := ImageSizeAccountPoolTierFromContext(ctx); ok && groupID != nil && *groupID > 0 {
+		if poolStore := asImageSizeAccountPoolStore(s.accountRepo); poolStore != nil {
+			configured, cfgErr := poolStore.HasImageSizeTierConfigured(ctx, *groupID, tier)
+			if cfgErr == nil && configured {
+				poolAccounts, listErr := poolStore.ListSchedulableByGroupImageSizeTier(ctx, *groupID, tier, []string{
+					PlatformGemini, PlatformAntigravity, PlatformOpenAI,
+				})
+				if listErr == nil && len(poolAccounts) > 0 {
+					selection, err := s.selectAccountWithLoadAwarenessCore(withForcedSchedulableAccounts(ctx, poolAccounts), groupID, sessionHash, requestedModel, excludedIDs, metadataUserID, sub2apiUserID)
+					if err == nil && selection != nil && selection.Account != nil {
+						return selection, nil
+					}
+					if err != nil && !errors.Is(err, ErrNoAvailableAccounts) {
+						return selection, err
+					}
+					// Configured size pool exhausted/unavailable → fall back to default group pool.
+				}
+			}
+		}
+	}
+	return s.selectAccountWithLoadAwarenessCore(ctx, groupID, sessionHash, requestedModel, excludedIDs, metadataUserID, sub2apiUserID)
+}
+
+func (s *GatewayService) selectAccountWithLoadAwarenessCore(ctx context.Context, groupID *int64, sessionHash string, requestedModel string, excludedIDs map[int64]struct{}, metadataUserID string, sub2apiUserID int64) (*AccountSelectionResult, error) {
 	if slog.Default().Enabled(ctx, slog.LevelDebug) {
 		excludedIDsList := make([]int64, 0, len(excludedIDs))
 		for id := range excludedIDs {
@@ -958,6 +983,22 @@ func (s *GatewayService) resolvePlatform(ctx context.Context, groupID *int64, gr
 }
 
 func (s *GatewayService) listSchedulableAccounts(ctx context.Context, groupID *int64, platform string, hasForcePlatform bool) ([]Account, bool, error) {
+	if forced, ok := forcedSchedulableAccountsFromContext(ctx); ok {
+		useMixed := (platform == PlatformAnthropic || platform == PlatformGemini) && !hasForcePlatform
+		filtered := make([]Account, 0, len(forced))
+		for i := range forced {
+			acc := forced[i]
+			if !s.isAccountAllowedForPlatform(&acc, platform, useMixed) {
+				continue
+			}
+			filtered = append(filtered, acc)
+		}
+		filtered = s.filterAccountsBySchedulingThreshold(ctx, filtered)
+		if platform == PlatformGrok || strings.EqualFold(platform, PlatformGrok) {
+			filtered = s.filterGrokFreeQuotaAccountsForGateway(ctx, filtered)
+		}
+		return filtered, useMixed, nil
+	}
 	if s.schedulerSnapshot != nil {
 		accounts, useMixed, err := s.schedulerSnapshot.ListSchedulableAccounts(ctx, groupID, platform, hasForcePlatform)
 		if err == nil {

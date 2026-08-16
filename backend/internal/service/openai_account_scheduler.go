@@ -2081,16 +2081,50 @@ func (s *OpenAIGatewayService) SelectAccountWithSchedulerForImages(
 	requestedModel string,
 	excludedIDs map[int64]struct{},
 	requiredCapability OpenAIImagesCapability,
+	sizeTier ...string,
 ) (*AccountSelectionResult, OpenAIAccountScheduleDecision, error) {
-	selection, decision, err := s.selectAccountWithScheduler(ctx, groupID, "", sessionHash, requestedModel, excludedIDs, OpenAIUpstreamTransportHTTPSSE, "", requiredCapability, false, PlatformOpenAI, false, false)
-	if err == nil && selection != nil && selection.Account != nil {
-		return selection, decision, nil
+	tryWithCapabilityFallback := func(selectCtx context.Context) (*AccountSelectionResult, OpenAIAccountScheduleDecision, error) {
+		selection, decision, err := s.selectAccountWithScheduler(selectCtx, groupID, "", sessionHash, requestedModel, excludedIDs, OpenAIUpstreamTransportHTTPSSE, "", requiredCapability, false, PlatformOpenAI, false, false)
+		if err == nil && selection != nil && selection.Account != nil {
+			return selection, decision, nil
+		}
+		// 如果要求 native 能力（如指定了模型）但没有可用的 APIKey 账号，回退到 basic（OAuth 账号）
+		if requiredCapability == OpenAIImagesCapabilityNative {
+			return s.selectAccountWithScheduler(selectCtx, groupID, "", sessionHash, requestedModel, excludedIDs, OpenAIUpstreamTransportHTTPSSE, "", OpenAIImagesCapabilityBasic, false, PlatformOpenAI, false, false)
+		}
+		return selection, decision, err
 	}
-	// 如果要求 native 能力（如指定了模型）但没有可用的 APIKey 账号，回退到 basic（OAuth 账号）
-	if requiredCapability == OpenAIImagesCapabilityNative {
-		return s.selectAccountWithScheduler(ctx, groupID, "", sessionHash, requestedModel, excludedIDs, OpenAIUpstreamTransportHTTPSSE, "", OpenAIImagesCapabilityBasic, false, PlatformOpenAI, false, false)
+
+	tier := ""
+	if len(sizeTier) > 0 {
+		tier = strings.TrimSpace(sizeTier[0])
 	}
-	return selection, decision, err
+	if tier == "" {
+		if ctxTier, ok := ImageSizeAccountPoolTierFromContext(ctx); ok {
+			tier = ctxTier
+		}
+	}
+	if tier != "" {
+		tier = NormalizeImageSizePoolTier(tier)
+	}
+
+	if groupID != nil && *groupID > 0 && tier != "" {
+		if poolStore := asImageSizeAccountPoolStore(s.accountRepo); poolStore != nil {
+			configured, cfgErr := poolStore.HasImageSizeTierConfigured(ctx, *groupID, tier)
+			if cfgErr == nil && configured {
+				poolAccounts, listErr := poolStore.ListSchedulableByGroupImageSizeTier(ctx, *groupID, tier, []string{PlatformOpenAI})
+				if listErr == nil && len(poolAccounts) > 0 {
+					selection, decision, err := tryWithCapabilityFallback(withForcedSchedulableAccounts(ctx, poolAccounts))
+					if err == nil && selection != nil && selection.Account != nil {
+						return selection, decision, nil
+					}
+				}
+				// Configured size pool exhausted/unavailable → fall back to default group pool.
+			}
+		}
+	}
+
+	return tryWithCapabilityFallback(ctx)
 }
 
 // selectAccountWithScheduler wraps selectAccountWithSchedulerOnce with a

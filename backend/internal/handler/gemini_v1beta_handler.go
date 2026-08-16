@@ -404,6 +404,11 @@ func (h *GatewayHandler) GeminiV1BetaModels(c *gin.Context) {
 		ctx := service.WithSingleAccountRetry(c.Request.Context(), true, h.metadataBridgeEnabled())
 		c.Request = c.Request.WithContext(ctx)
 	}
+	if imageIntent {
+		if tier := service.ExtractImageSizePoolTierFromRequestBody(body); tier != "" {
+			c.Request = c.Request.WithContext(service.WithImageSizeAccountPoolTier(c.Request.Context(), tier))
+		}
+	}
 
 	for {
 		selection, err := h.gatewayService.SelectAccountWithLoadAwareness(c.Request.Context(), apiKey.GroupID, sessionKey, modelName, fs.FailedAccountIDs, "", int64(0)) // Gemini 不使用会话限制

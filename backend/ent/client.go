@@ -32,6 +32,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/ent/compositemodelroute"
 	"github.com/Wei-Shaw/sub2api/ent/errorpassthroughrule"
 	"github.com/Wei-Shaw/sub2api/ent/group"
+	"github.com/Wei-Shaw/sub2api/ent/groupimagesizeaccount"
 	"github.com/Wei-Shaw/sub2api/ent/idempotencyrecord"
 	"github.com/Wei-Shaw/sub2api/ent/identityadoptiondecision"
 	"github.com/Wei-Shaw/sub2api/ent/paymentauditlog"
@@ -97,6 +98,8 @@ type Client struct {
 	ErrorPassthroughRule *ErrorPassthroughRuleClient
 	// Group is the client for interacting with the Group builders.
 	Group *GroupClient
+	// GroupImageSizeAccount is the client for interacting with the GroupImageSizeAccount builders.
+	GroupImageSizeAccount *GroupImageSizeAccountClient
 	// IdempotencyRecord is the client for interacting with the IdempotencyRecord builders.
 	IdempotencyRecord *IdempotencyRecordClient
 	// IdentityAdoptionDecision is the client for interacting with the IdentityAdoptionDecision builders.
@@ -169,6 +172,7 @@ func (c *Client) init() {
 	c.CompositeModelRoute = NewCompositeModelRouteClient(c.config)
 	c.ErrorPassthroughRule = NewErrorPassthroughRuleClient(c.config)
 	c.Group = NewGroupClient(c.config)
+	c.GroupImageSizeAccount = NewGroupImageSizeAccountClient(c.config)
 	c.IdempotencyRecord = NewIdempotencyRecordClient(c.config)
 	c.IdentityAdoptionDecision = NewIdentityAdoptionDecisionClient(c.config)
 	c.PaymentAuditLog = NewPaymentAuditLogClient(c.config)
@@ -300,6 +304,7 @@ func (c *Client) Tx(ctx context.Context) (*Tx, error) {
 		CompositeModelRoute:           NewCompositeModelRouteClient(cfg),
 		ErrorPassthroughRule:          NewErrorPassthroughRuleClient(cfg),
 		Group:                         NewGroupClient(cfg),
+		GroupImageSizeAccount:         NewGroupImageSizeAccountClient(cfg),
 		IdempotencyRecord:             NewIdempotencyRecordClient(cfg),
 		IdentityAdoptionDecision:      NewIdentityAdoptionDecisionClient(cfg),
 		PaymentAuditLog:               NewPaymentAuditLogClient(cfg),
@@ -358,6 +363,7 @@ func (c *Client) BeginTx(ctx context.Context, opts *sql.TxOptions) (*Tx, error) 
 		CompositeModelRoute:           NewCompositeModelRouteClient(cfg),
 		ErrorPassthroughRule:          NewErrorPassthroughRuleClient(cfg),
 		Group:                         NewGroupClient(cfg),
+		GroupImageSizeAccount:         NewGroupImageSizeAccountClient(cfg),
 		IdempotencyRecord:             NewIdempotencyRecordClient(cfg),
 		IdentityAdoptionDecision:      NewIdentityAdoptionDecisionClient(cfg),
 		PaymentAuditLog:               NewPaymentAuditLogClient(cfg),
@@ -413,13 +419,14 @@ func (c *Client) Use(hooks ...Hook) {
 		c.AuthIdentity, c.AuthIdentityChannel, c.BatchImageEvent, c.BatchImageItem,
 		c.BatchImageJob, c.ChannelMonitor, c.ChannelMonitorDailyRollup,
 		c.ChannelMonitorHistory, c.ChannelMonitorRequestTemplate,
-		c.CompositeModelRoute, c.ErrorPassthroughRule, c.Group, c.IdempotencyRecord,
-		c.IdentityAdoptionDecision, c.PaymentAuditLog, c.PaymentOrder,
-		c.PaymentProviderInstance, c.PendingAuthSession, c.PromoCode, c.PromoCodeUsage,
-		c.Proxy, c.RedeemCode, c.SecuritySecret, c.Setting, c.SubscriptionPlan,
-		c.TLSFingerprintProfile, c.UsageCleanupTask, c.UsageLog, c.User,
-		c.UserAllowedGroup, c.UserAttributeDefinition, c.UserAttributeValue,
-		c.UserPlatformQuota, c.UserSubscription,
+		c.CompositeModelRoute, c.ErrorPassthroughRule, c.Group,
+		c.GroupImageSizeAccount, c.IdempotencyRecord, c.IdentityAdoptionDecision,
+		c.PaymentAuditLog, c.PaymentOrder, c.PaymentProviderInstance,
+		c.PendingAuthSession, c.PromoCode, c.PromoCodeUsage, c.Proxy, c.RedeemCode,
+		c.SecuritySecret, c.Setting, c.SubscriptionPlan, c.TLSFingerprintProfile,
+		c.UsageCleanupTask, c.UsageLog, c.User, c.UserAllowedGroup,
+		c.UserAttributeDefinition, c.UserAttributeValue, c.UserPlatformQuota,
+		c.UserSubscription,
 	} {
 		n.Use(hooks...)
 	}
@@ -433,13 +440,14 @@ func (c *Client) Intercept(interceptors ...Interceptor) {
 		c.AuthIdentity, c.AuthIdentityChannel, c.BatchImageEvent, c.BatchImageItem,
 		c.BatchImageJob, c.ChannelMonitor, c.ChannelMonitorDailyRollup,
 		c.ChannelMonitorHistory, c.ChannelMonitorRequestTemplate,
-		c.CompositeModelRoute, c.ErrorPassthroughRule, c.Group, c.IdempotencyRecord,
-		c.IdentityAdoptionDecision, c.PaymentAuditLog, c.PaymentOrder,
-		c.PaymentProviderInstance, c.PendingAuthSession, c.PromoCode, c.PromoCodeUsage,
-		c.Proxy, c.RedeemCode, c.SecuritySecret, c.Setting, c.SubscriptionPlan,
-		c.TLSFingerprintProfile, c.UsageCleanupTask, c.UsageLog, c.User,
-		c.UserAllowedGroup, c.UserAttributeDefinition, c.UserAttributeValue,
-		c.UserPlatformQuota, c.UserSubscription,
+		c.CompositeModelRoute, c.ErrorPassthroughRule, c.Group,
+		c.GroupImageSizeAccount, c.IdempotencyRecord, c.IdentityAdoptionDecision,
+		c.PaymentAuditLog, c.PaymentOrder, c.PaymentProviderInstance,
+		c.PendingAuthSession, c.PromoCode, c.PromoCodeUsage, c.Proxy, c.RedeemCode,
+		c.SecuritySecret, c.Setting, c.SubscriptionPlan, c.TLSFingerprintProfile,
+		c.UsageCleanupTask, c.UsageLog, c.User, c.UserAllowedGroup,
+		c.UserAttributeDefinition, c.UserAttributeValue, c.UserPlatformQuota,
+		c.UserSubscription,
 	} {
 		n.Intercept(interceptors...)
 	}
@@ -482,6 +490,8 @@ func (c *Client) Mutate(ctx context.Context, m Mutation) (Value, error) {
 		return c.ErrorPassthroughRule.mutate(ctx, m)
 	case *GroupMutation:
 		return c.Group.mutate(ctx, m)
+	case *GroupImageSizeAccountMutation:
+		return c.GroupImageSizeAccount.mutate(ctx, m)
 	case *IdempotencyRecordMutation:
 		return c.IdempotencyRecord.mutate(ctx, m)
 	case *IdentityAdoptionDecisionMutation:
@@ -3276,6 +3286,171 @@ func (c *GroupClient) mutate(ctx context.Context, m *GroupMutation) (Value, erro
 		return (&GroupDelete{config: c.config, hooks: c.Hooks(), mutation: m}).Exec(ctx)
 	default:
 		return nil, fmt.Errorf("ent: unknown Group mutation op: %q", m.Op())
+	}
+}
+
+// GroupImageSizeAccountClient is a client for the GroupImageSizeAccount schema.
+type GroupImageSizeAccountClient struct {
+	config
+}
+
+// NewGroupImageSizeAccountClient returns a client for the GroupImageSizeAccount from the given config.
+func NewGroupImageSizeAccountClient(c config) *GroupImageSizeAccountClient {
+	return &GroupImageSizeAccountClient{config: c}
+}
+
+// Use adds a list of mutation hooks to the hooks stack.
+// A call to `Use(f, g, h)` equals to `groupimagesizeaccount.Hooks(f(g(h())))`.
+func (c *GroupImageSizeAccountClient) Use(hooks ...Hook) {
+	c.hooks.GroupImageSizeAccount = append(c.hooks.GroupImageSizeAccount, hooks...)
+}
+
+// Intercept adds a list of query interceptors to the interceptors stack.
+// A call to `Intercept(f, g, h)` equals to `groupimagesizeaccount.Intercept(f(g(h())))`.
+func (c *GroupImageSizeAccountClient) Intercept(interceptors ...Interceptor) {
+	c.inters.GroupImageSizeAccount = append(c.inters.GroupImageSizeAccount, interceptors...)
+}
+
+// Create returns a builder for creating a GroupImageSizeAccount entity.
+func (c *GroupImageSizeAccountClient) Create() *GroupImageSizeAccountCreate {
+	mutation := newGroupImageSizeAccountMutation(c.config, OpCreate)
+	return &GroupImageSizeAccountCreate{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// CreateBulk returns a builder for creating a bulk of GroupImageSizeAccount entities.
+func (c *GroupImageSizeAccountClient) CreateBulk(builders ...*GroupImageSizeAccountCreate) *GroupImageSizeAccountCreateBulk {
+	return &GroupImageSizeAccountCreateBulk{config: c.config, builders: builders}
+}
+
+// MapCreateBulk creates a bulk creation builder from the given slice. For each item in the slice, the function creates
+// a builder and applies setFunc on it.
+func (c *GroupImageSizeAccountClient) MapCreateBulk(slice any, setFunc func(*GroupImageSizeAccountCreate, int)) *GroupImageSizeAccountCreateBulk {
+	rv := reflect.ValueOf(slice)
+	if rv.Kind() != reflect.Slice {
+		return &GroupImageSizeAccountCreateBulk{err: fmt.Errorf("calling to GroupImageSizeAccountClient.MapCreateBulk with wrong type %T, need slice", slice)}
+	}
+	builders := make([]*GroupImageSizeAccountCreate, rv.Len())
+	for i := 0; i < rv.Len(); i++ {
+		builders[i] = c.Create()
+		setFunc(builders[i], i)
+	}
+	return &GroupImageSizeAccountCreateBulk{config: c.config, builders: builders}
+}
+
+// Update returns an update builder for GroupImageSizeAccount.
+func (c *GroupImageSizeAccountClient) Update() *GroupImageSizeAccountUpdate {
+	mutation := newGroupImageSizeAccountMutation(c.config, OpUpdate)
+	return &GroupImageSizeAccountUpdate{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// UpdateOne returns an update builder for the given entity.
+func (c *GroupImageSizeAccountClient) UpdateOne(_m *GroupImageSizeAccount) *GroupImageSizeAccountUpdateOne {
+	mutation := newGroupImageSizeAccountMutation(c.config, OpUpdateOne, withGroupImageSizeAccount(_m))
+	return &GroupImageSizeAccountUpdateOne{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// UpdateOneID returns an update builder for the given id.
+func (c *GroupImageSizeAccountClient) UpdateOneID(id int64) *GroupImageSizeAccountUpdateOne {
+	mutation := newGroupImageSizeAccountMutation(c.config, OpUpdateOne, withGroupImageSizeAccountID(id))
+	return &GroupImageSizeAccountUpdateOne{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// Delete returns a delete builder for GroupImageSizeAccount.
+func (c *GroupImageSizeAccountClient) Delete() *GroupImageSizeAccountDelete {
+	mutation := newGroupImageSizeAccountMutation(c.config, OpDelete)
+	return &GroupImageSizeAccountDelete{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// DeleteOne returns a builder for deleting the given entity.
+func (c *GroupImageSizeAccountClient) DeleteOne(_m *GroupImageSizeAccount) *GroupImageSizeAccountDeleteOne {
+	return c.DeleteOneID(_m.ID)
+}
+
+// DeleteOneID returns a builder for deleting the given entity by its id.
+func (c *GroupImageSizeAccountClient) DeleteOneID(id int64) *GroupImageSizeAccountDeleteOne {
+	builder := c.Delete().Where(groupimagesizeaccount.ID(id))
+	builder.mutation.id = &id
+	builder.mutation.op = OpDeleteOne
+	return &GroupImageSizeAccountDeleteOne{builder}
+}
+
+// Query returns a query builder for GroupImageSizeAccount.
+func (c *GroupImageSizeAccountClient) Query() *GroupImageSizeAccountQuery {
+	return &GroupImageSizeAccountQuery{
+		config: c.config,
+		ctx:    &QueryContext{Type: TypeGroupImageSizeAccount},
+		inters: c.Interceptors(),
+	}
+}
+
+// Get returns a GroupImageSizeAccount entity by its id.
+func (c *GroupImageSizeAccountClient) Get(ctx context.Context, id int64) (*GroupImageSizeAccount, error) {
+	return c.Query().Where(groupimagesizeaccount.ID(id)).Only(ctx)
+}
+
+// GetX is like Get, but panics if an error occurs.
+func (c *GroupImageSizeAccountClient) GetX(ctx context.Context, id int64) *GroupImageSizeAccount {
+	obj, err := c.Get(ctx, id)
+	if err != nil {
+		panic(err)
+	}
+	return obj
+}
+
+// QueryAccount queries the account edge of a GroupImageSizeAccount.
+func (c *GroupImageSizeAccountClient) QueryAccount(_m *GroupImageSizeAccount) *AccountQuery {
+	query := (&AccountClient{config: c.config}).Query()
+	query.path = func(context.Context) (fromV *sql.Selector, _ error) {
+		id := _m.ID
+		step := sqlgraph.NewStep(
+			sqlgraph.From(groupimagesizeaccount.Table, groupimagesizeaccount.FieldID, id),
+			sqlgraph.To(account.Table, account.FieldID),
+			sqlgraph.Edge(sqlgraph.M2O, false, groupimagesizeaccount.AccountTable, groupimagesizeaccount.AccountColumn),
+		)
+		fromV = sqlgraph.Neighbors(_m.driver.Dialect(), step)
+		return fromV, nil
+	}
+	return query
+}
+
+// QueryGroup queries the group edge of a GroupImageSizeAccount.
+func (c *GroupImageSizeAccountClient) QueryGroup(_m *GroupImageSizeAccount) *GroupQuery {
+	query := (&GroupClient{config: c.config}).Query()
+	query.path = func(context.Context) (fromV *sql.Selector, _ error) {
+		id := _m.ID
+		step := sqlgraph.NewStep(
+			sqlgraph.From(groupimagesizeaccount.Table, groupimagesizeaccount.FieldID, id),
+			sqlgraph.To(group.Table, group.FieldID),
+			sqlgraph.Edge(sqlgraph.M2O, false, groupimagesizeaccount.GroupTable, groupimagesizeaccount.GroupColumn),
+		)
+		fromV = sqlgraph.Neighbors(_m.driver.Dialect(), step)
+		return fromV, nil
+	}
+	return query
+}
+
+// Hooks returns the client hooks.
+func (c *GroupImageSizeAccountClient) Hooks() []Hook {
+	return c.hooks.GroupImageSizeAccount
+}
+
+// Interceptors returns the client interceptors.
+func (c *GroupImageSizeAccountClient) Interceptors() []Interceptor {
+	return c.inters.GroupImageSizeAccount
+}
+
+func (c *GroupImageSizeAccountClient) mutate(ctx context.Context, m *GroupImageSizeAccountMutation) (Value, error) {
+	switch m.Op() {
+	case OpCreate:
+		return (&GroupImageSizeAccountCreate{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpUpdate:
+		return (&GroupImageSizeAccountUpdate{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpUpdateOne:
+		return (&GroupImageSizeAccountUpdateOne{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpDelete, OpDeleteOne:
+		return (&GroupImageSizeAccountDelete{config: c.config, hooks: c.Hooks(), mutation: m}).Exec(ctx)
+	default:
+		return nil, fmt.Errorf("ent: unknown GroupImageSizeAccount mutation op: %q", m.Op())
 	}
 }
 
@@ -6829,24 +7004,24 @@ type (
 		AuthIdentityChannel, BatchImageEvent, BatchImageItem, BatchImageJob,
 		ChannelMonitor, ChannelMonitorDailyRollup, ChannelMonitorHistory,
 		ChannelMonitorRequestTemplate, CompositeModelRoute, ErrorPassthroughRule,
-		Group, IdempotencyRecord, IdentityAdoptionDecision, PaymentAuditLog,
-		PaymentOrder, PaymentProviderInstance, PendingAuthSession, PromoCode,
-		PromoCodeUsage, Proxy, RedeemCode, SecuritySecret, Setting, SubscriptionPlan,
-		TLSFingerprintProfile, UsageCleanupTask, UsageLog, User, UserAllowedGroup,
-		UserAttributeDefinition, UserAttributeValue, UserPlatformQuota,
-		UserSubscription []ent.Hook
+		Group, GroupImageSizeAccount, IdempotencyRecord, IdentityAdoptionDecision,
+		PaymentAuditLog, PaymentOrder, PaymentProviderInstance, PendingAuthSession,
+		PromoCode, PromoCodeUsage, Proxy, RedeemCode, SecuritySecret, Setting,
+		SubscriptionPlan, TLSFingerprintProfile, UsageCleanupTask, UsageLog, User,
+		UserAllowedGroup, UserAttributeDefinition, UserAttributeValue,
+		UserPlatformQuota, UserSubscription []ent.Hook
 	}
 	inters struct {
 		APIKey, Account, AccountGroup, Announcement, AnnouncementRead, AuthIdentity,
 		AuthIdentityChannel, BatchImageEvent, BatchImageItem, BatchImageJob,
 		ChannelMonitor, ChannelMonitorDailyRollup, ChannelMonitorHistory,
 		ChannelMonitorRequestTemplate, CompositeModelRoute, ErrorPassthroughRule,
-		Group, IdempotencyRecord, IdentityAdoptionDecision, PaymentAuditLog,
-		PaymentOrder, PaymentProviderInstance, PendingAuthSession, PromoCode,
-		PromoCodeUsage, Proxy, RedeemCode, SecuritySecret, Setting, SubscriptionPlan,
-		TLSFingerprintProfile, UsageCleanupTask, UsageLog, User, UserAllowedGroup,
-		UserAttributeDefinition, UserAttributeValue, UserPlatformQuota,
-		UserSubscription []ent.Interceptor
+		Group, GroupImageSizeAccount, IdempotencyRecord, IdentityAdoptionDecision,
+		PaymentAuditLog, PaymentOrder, PaymentProviderInstance, PendingAuthSession,
+		PromoCode, PromoCodeUsage, Proxy, RedeemCode, SecuritySecret, Setting,
+		SubscriptionPlan, TLSFingerprintProfile, UsageCleanupTask, UsageLog, User,
+		UserAllowedGroup, UserAttributeDefinition, UserAttributeValue,
+		UserPlatformQuota, UserSubscription []ent.Interceptor
 	}
 )
 

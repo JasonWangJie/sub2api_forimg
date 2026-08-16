@@ -352,6 +352,18 @@ func (s *stubAdminService) PreviewCompositeRoute(ctx context.Context, groupID in
 	return &decision, nil
 }
 
+func (s *stubAdminService) ListGroupImageSizeAccounts(ctx context.Context, groupID int64) (service.GroupImageSizeAccountBindingsView, error) {
+	return service.GroupImageSizeAccountBindingsView{
+		service.ImageBillingSize1K: {},
+		service.ImageBillingSize2K: {},
+		service.ImageBillingSize4K: {},
+	}, nil
+}
+
+func (s *stubAdminService) ReplaceGroupImageSizeAccounts(ctx context.Context, groupID int64, bindings service.GroupImageSizeAccountBindings) (service.GroupImageSizeAccountBindingsView, error) {
+	return s.ListGroupImageSizeAccounts(ctx, groupID)
+}
+
 func (s *stubAdminService) CreateGroup(ctx context.Context, input *service.CreateGroupInput) (*service.Group, error) {
 	group := service.Group{ID: 200, Name: input.Name, Status: service.StatusActive}
 	return &group, nil

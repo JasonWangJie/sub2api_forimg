@@ -55,6 +55,38 @@ describe('async image task API', () => {
     expect(task.events?.[0]).toMatchObject({ status: 'succeeded' })
   })
 
+  it('keeps upstream image_url fetch retry events visible in the timeline', async () => {
+    client.get.mockResolvedValue({
+      data: {
+        task: {
+          task_id: 'asyncimg_retry',
+          platform: 'openai',
+          request_type: 'image_to_image',
+          model: 'gpt-image-2',
+          status: 'queued',
+          retry_count: 1,
+          error_code: 'upstream_image_url_fetch_timeout',
+          error_message: '参考图 URL 拉取超时，已安排自动重试（1/1）：image_url fetch failed',
+          created_at: '2026-07-20T00:00:00Z',
+        },
+        results: [],
+        events: [{
+          id: 2,
+          event_type: 'upstream_image_url_fetch_retry',
+          to_status: 'queued',
+          payload: { message: '参考图 URL 拉取超时，已安排自动重试（1/1）' },
+          created_at: '2026-07-20T00:01:00Z',
+        }],
+      },
+    })
+
+    const task = await asyncImageTasksAPI.user.get('asyncimg_retry')
+    expect(task.events?.[0]).toMatchObject({
+      status: 'upstream_image_url_fetch_retry',
+      message: '参考图 URL 拉取超时，已安排自动重试（1/1）',
+    })
+  })
+
   it('keeps list result summaries and stable view links from the backend contract', async () => {
     client.get.mockResolvedValue({
       data: {

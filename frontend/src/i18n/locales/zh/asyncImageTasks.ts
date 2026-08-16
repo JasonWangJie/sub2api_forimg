@@ -46,6 +46,7 @@ export default {
       storage_failed: '存储失败',
       billing_failed: '计费失败',
       expired: '已过期',
+      upstream_image_url_fetch_retry: '参考图拉取超时重试',
     },
     provider: {
       pending: '未入库',

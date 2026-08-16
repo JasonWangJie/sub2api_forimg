@@ -1276,6 +1276,21 @@ func (s *OpenAIGatewayService) selectAccountWithLoadAwareness(ctx context.Contex
 }
 
 func (s *OpenAIGatewayService) listSchedulableAccounts(ctx context.Context, groupID *int64, platform string) ([]Account, error) {
+	if forced, ok := forcedSchedulableAccountsFromContext(ctx); ok {
+		platform = normalizeOpenAICompatiblePlatform(platform)
+		filtered := make([]Account, 0, len(forced))
+		for i := range forced {
+			if normalizeOpenAICompatiblePlatform(forced[i].Platform) != platform {
+				continue
+			}
+			filtered = append(filtered, forced[i])
+		}
+		filtered = s.filterOpenAIAccountsBySchedulingThreshold(ctx, filtered)
+		if platform == PlatformGrok {
+			filtered = s.filterGrokFreeQuotaAccountsForOpenAI(ctx, filtered)
+		}
+		return filtered, nil
+	}
 	platform = normalizeOpenAICompatiblePlatform(platform)
 	if s.schedulerSnapshot != nil {
 		accounts, _, err := s.schedulerSnapshot.ListSchedulableAccounts(ctx, groupID, platform, false)

@@ -1463,10 +1463,10 @@ func (s *SchedulerSnapshotService) loadAccountsFromDB(ctx context.Context, bucke
 		groupID = 0
 	}
 
+	var accounts []Account
+	var err error
 	if useMixed {
 		platforms := []string{bucket.Platform, PlatformAntigravity}
-		var accounts []Account
-		var err error
 		if groupID > 0 {
 			accounts, err = s.accountRepo.ListSchedulableByGroupIDAndPlatforms(ctx, groupID, platforms)
 		} else if s.isRunModeSimple() {
@@ -1484,16 +1484,62 @@ func (s *SchedulerSnapshotService) loadAccountsFromDB(ctx context.Context, bucke
 			}
 			filtered = append(filtered, acc)
 		}
-		return filtered, nil
+		accounts = filtered
+	} else if groupID > 0 {
+		accounts, err = s.accountRepo.ListSchedulableByGroupIDAndPlatform(ctx, groupID, bucket.Platform)
+		if err != nil {
+			return nil, err
+		}
+	} else if s.isRunModeSimple() {
+		accounts, err = s.accountRepo.ListSchedulableByPlatform(ctx, bucket.Platform)
+		if err != nil {
+			return nil, err
+		}
+	} else {
+		accounts, err = s.accountRepo.ListSchedulableUngroupedByPlatform(ctx, bucket.Platform)
+		if err != nil {
+			return nil, err
+		}
 	}
 
-	if groupID > 0 {
-		return s.accountRepo.ListSchedulableByGroupIDAndPlatform(ctx, groupID, bucket.Platform)
+	return s.unionImageSizePoolAccounts(ctx, groupID, bucket, useMixed, accounts)
+}
+
+// unionImageSizePoolAccounts merges independently bound size-tier accounts into the
+// group snapshot so they remain visible to schedulers that read from cache buckets.
+func (s *SchedulerSnapshotService) unionImageSizePoolAccounts(ctx context.Context, groupID int64, bucket SchedulerBucket, useMixed bool, accounts []Account) ([]Account, error) {
+	if groupID <= 0 {
+		return accounts, nil
 	}
-	if s.isRunModeSimple() {
-		return s.accountRepo.ListSchedulableByPlatform(ctx, bucket.Platform)
+	poolStore := asImageSizeAccountPoolStore(s.accountRepo)
+	if poolStore == nil {
+		return accounts, nil
 	}
-	return s.accountRepo.ListSchedulableUngroupedByPlatform(ctx, bucket.Platform)
+	platforms := []string{bucket.Platform}
+	if useMixed {
+		platforms = append(platforms, PlatformAntigravity)
+	}
+	seen := make(map[int64]struct{}, len(accounts))
+	for _, acc := range accounts {
+		seen[acc.ID] = struct{}{}
+	}
+	for _, tier := range ValidImageSizeTiers() {
+		poolAccounts, err := poolStore.ListSchedulableByGroupImageSizeTier(ctx, groupID, tier, platforms)
+		if err != nil {
+			return nil, err
+		}
+		for _, acc := range poolAccounts {
+			if useMixed && acc.Platform == PlatformAntigravity && !acc.IsMixedSchedulingEnabled() {
+				continue
+			}
+			if _, ok := seen[acc.ID]; ok {
+				continue
+			}
+			seen[acc.ID] = struct{}{}
+			accounts = append(accounts, acc)
+		}
+	}
+	return accounts, nil
 }
 
 func (s *SchedulerSnapshotService) loadAccountsForRebuild(
