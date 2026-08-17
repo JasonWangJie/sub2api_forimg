@@ -2,10 +2,52 @@ package service
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 )
+
+type imageSizePoolRepositoryStub struct {
+	AccountRepository
+	configured bool
+	accounts   []Account
+	err        error
+}
+
+func (s imageSizePoolRepositoryStub) HasImageSizeTierConfigured(context.Context, int64, string) (bool, error) {
+	return s.configured, s.err
+}
+
+func (s imageSizePoolRepositoryStub) ListSchedulableByGroupImageSizeTier(context.Context, int64, string, []string) ([]Account, error) {
+	return s.accounts, s.err
+}
+
+func (s imageSizePoolRepositoryStub) ListImageSizeAccountIDsByGroupID(context.Context, int64) ([]int64, error) {
+	return nil, nil
+}
+
+type schedulerSnapshotImageSizePoolStub struct {
+	AccountRepository
+	poolCalls int
+}
+
+func (s *schedulerSnapshotImageSizePoolStub) ListSchedulableByGroupIDAndPlatform(context.Context, int64, string) ([]Account, error) {
+	return []Account{{ID: 1, Platform: PlatformOpenAI}}, nil
+}
+
+func (s *schedulerSnapshotImageSizePoolStub) ListSchedulableByGroupImageSizeTier(context.Context, int64, string, []string) ([]Account, error) {
+	s.poolCalls++
+	return []Account{{ID: 2, Platform: PlatformOpenAI}}, nil
+}
+
+func (s *schedulerSnapshotImageSizePoolStub) HasImageSizeTierConfigured(context.Context, int64, string) (bool, error) {
+	return true, nil
+}
+
+func (s *schedulerSnapshotImageSizePoolStub) ListImageSizeAccountIDsByGroupID(context.Context, int64) ([]int64, error) {
+	return []int64{2}, nil
+}
 
 func TestExtractImageSizePoolTierFromRequestBody(t *testing.T) {
 	require.Equal(t, ImageBillingSize4K, ExtractImageSizePoolTierFromRequestBody([]byte(`{"extra_body":{"google":{"image_config":{"image_size":"4K"}}}}`)))
@@ -28,6 +70,48 @@ func TestForcedSchedulableAccountsContext(t *testing.T) {
 	require.True(t, ok)
 	require.Len(t, got, 1)
 	require.Equal(t, int64(9), got[0].ID)
+}
+
+func TestForcedSchedulableAccountsRestrictSchedulingScope(t *testing.T) {
+	groupID := int64(7)
+	account := &Account{ID: 9}
+	ctx := withForcedSchedulableAccounts(context.Background(), []Account{*account})
+
+	require.True(t, (&GatewayService{}).isAccountInSchedulingScope(ctx, account, &groupID))
+	require.False(t, (&GatewayService{}).isAccountInSchedulingScope(ctx, &Account{ID: 10}, &groupID))
+	require.True(t, (&OpenAIGatewayService{}).openAIAccountMatchesSchedulingScope(ctx, account, &groupID))
+	require.False(t, (&OpenAIGatewayService{}).openAIAccountMatchesSchedulingScope(ctx, &Account{ID: 10}, &groupID))
+}
+
+func TestResolveImageSizeAccountPool(t *testing.T) {
+	accounts := []Account{{ID: 9, Platform: PlatformOpenAI}}
+	resolved, configured, err := ResolveImageSizeAccountPool(context.Background(), imageSizePoolRepositoryStub{
+		configured: true,
+		accounts:   accounts,
+	}, 7, ImageBillingSize2K, []string{PlatformOpenAI})
+	require.NoError(t, err)
+	require.True(t, configured)
+	require.Equal(t, accounts, resolved)
+
+	resolved, configured, err = ResolveImageSizeAccountPool(context.Background(), imageSizePoolRepositoryStub{}, 7, ImageBillingSize2K, nil)
+	require.NoError(t, err)
+	require.False(t, configured)
+	require.Nil(t, resolved)
+
+	_, _, err = ResolveImageSizeAccountPool(context.Background(), imageSizePoolRepositoryStub{err: errors.New("database unavailable")}, 7, ImageBillingSize2K, nil)
+	require.ErrorContains(t, err, "check image size account pool")
+}
+
+func TestSchedulerSnapshotDoesNotUnionImageSizePoolAccounts(t *testing.T) {
+	repo := &schedulerSnapshotImageSizePoolStub{}
+	svc := &SchedulerSnapshotService{accountRepo: repo}
+	accounts, err := svc.loadAccountsFromDB(context.Background(), SchedulerBucket{
+		GroupID:  7,
+		Platform: PlatformOpenAI,
+	}, false)
+	require.NoError(t, err)
+	require.Equal(t, []Account{{ID: 1, Platform: PlatformOpenAI}}, accounts)
+	require.Zero(t, repo.poolCalls)
 }
 
 func TestIsValidImageSizeTier(t *testing.T) {

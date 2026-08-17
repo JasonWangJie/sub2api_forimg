@@ -140,7 +140,7 @@ export function getAsyncImageApiDoc(locale: string, apiRoot: string) {
           { name: 'model', required: true, type: 'string', desc: 'Gemini image model mapped for the group.' },
           { name: 'prompt', required: true, type: 'string', desc: 'Text description of the image.' },
           { name: 'resolution', required: false, type: 'string', desc: '1K / 2K / 4K.' },
-          { name: 'size', required: false, type: 'string', desc: 'Aspect ratio alias: 1:1, 3:2, 16:9, … Or tier 2K when resolution is empty.' },
+          { name: 'size', required: false, type: 'string', desc: 'Aspect ratio (1:1, 3:2, 16:9) or pixel dimensions (1080x1350 maps to 4:5). Or tier 2K when resolution is empty.' },
           { name: 'aspect_ratio', required: false, type: 'string', desc: 'Same ratios as size, including auto (omits upstream ratio).' },
         ],
         bodyExample: `{
@@ -169,7 +169,7 @@ export function getAsyncImageApiDoc(locale: string, apiRoot: string) {
           { name: 'prompt', required: true, type: 'string', desc: 'Edit instruction (can refer to 图1 / 图2 order).' },
           { name: 'image_urls', required: true, type: 'string[]', desc: 'HTTPS reference image URLs (PNG / JPG / WEBP).' },
           { name: 'resolution', required: false, type: 'string', desc: '1K / 2K / 4K.' },
-          { name: 'size', required: false, type: 'string', desc: 'Aspect ratio, e.g. 3:2. Equivalent to aspect_ratio.' },
+          { name: 'size', required: false, type: 'string', desc: 'Aspect ratio (e.g. 3:2) or pixel dimensions (e.g. 1080x1350, mapped to 4:5).' },
           { name: 'aspect_ratio', required: false, type: 'string', desc: 'Optional; size is preferred by many clients. auto omits upstream ratio.' },
         ],
         bodyExample: `{
@@ -187,7 +187,7 @@ export function getAsyncImageApiDoc(locale: string, apiRoot: string) {
 }`,
         notes: [
           'image_urls order is 图1, 图2, … in the prompt.',
-          'size / aspect_ratio are optional; omit to use upstream default ratio.',
+          'size accepts a supported ratio or pixel dimensions; dimensions are reduced to a supported Gemini ratio. Omit size / aspect_ratio to use the upstream default ratio.',
           'Query: GET /v1/images/tasks_async/{id} — same path and body as OpenAI (succeeded + data[].url).',
         ],
       },
@@ -352,7 +352,7 @@ export function getAsyncImageApiDoc(locale: string, apiRoot: string) {
         { name: 'model', required: true, type: 'string', desc: '分组映射的 Gemini 图片模型。' },
         { name: 'prompt', required: true, type: 'string', desc: '图片描述提示词。' },
         { name: 'resolution', required: false, type: 'string', desc: '1K / 2K / 4K。' },
-        { name: 'size', required: false, type: 'string', desc: '比例别名：1:1、3:2、16:9 等；未传 resolution 时也可写 2K 表示清晰度。' },
+        { name: 'size', required: false, type: 'string', desc: '比例（如 1:1、3:2、16:9）或像素尺寸（如 1080x1350，会映射为 4:5）；未传 resolution 时也可写 2K 表示清晰度。' },
         { name: 'aspect_ratio', required: false, type: 'string', desc: '与 size 同系列比例，含 auto（省略上游比例，由模型决定）。' },
       ],
       bodyExample: `{
@@ -381,7 +381,7 @@ export function getAsyncImageApiDoc(locale: string, apiRoot: string) {
         { name: 'prompt', required: true, type: 'string', desc: '编辑说明（可按图1、图2 顺序引用参考图）。' },
         { name: 'image_urls', required: true, type: 'string[]', desc: '参考图公网 HTTPS URL（PNG / JPG / WEBP）。' },
         { name: 'resolution', required: false, type: 'string', desc: '1K / 2K / 4K。' },
-        { name: 'size', required: false, type: 'string', desc: '宽高比，例如 3:2；与 aspect_ratio 等价。' },
+        { name: 'size', required: false, type: 'string', desc: '宽高比（如 3:2）或像素尺寸（如 1080x1350，会映射为 4:5）。' },
         { name: 'aspect_ratio', required: false, type: 'string', desc: '可选；多数客户端优先用 size。可用 auto（省略上游比例）。' },
       ],
       bodyExample: `{
@@ -399,7 +399,7 @@ export function getAsyncImageApiDoc(locale: string, apiRoot: string) {
 }`,
       notes: [
         'image_urls 顺序对应提示词中的图1、图2…',
-        'size / aspect_ratio 可选；不传则使用上游默认比例。',
+        'size 可传受支持的比例或像素尺寸；像素尺寸会约分为 Gemini 支持的比例。不传 size / aspect_ratio 则使用上游默认比例。',
         '查询：GET /v1/images/tasks_async/{id}（与 OpenAI 相同）；成功状态为 succeeded，结果在 data[].url。',
       ],
     },

@@ -793,7 +793,7 @@ func (s *OpenAIGatewayService) tryStickySessionHit(ctx context.Context, groupID 
 		return nil
 	}
 	account = s.recheckSelectedOpenAIAccountFromDB(ctx, account, groupID, platform, requestedModel, requireCompact, requiredCapability)
-	if account == nil || !s.openAIAccountMatchesSchedulingGroup(account, groupID) {
+	if account == nil || !s.openAIAccountMatchesSchedulingScope(ctx, account, groupID) {
 		_ = s.deleteStickySessionAccountID(ctx, groupID, sessionHash)
 		return nil
 	}
@@ -1005,7 +1005,7 @@ func (s *OpenAIGatewayService) selectAccountWithLoadAwareness(ctx context.Contex
 					account = s.recheckSelectedOpenAIAccountFromDB(ctx, account, groupID, platform, requestedModel, requireCompact, requiredCapability)
 					if account == nil {
 						_ = s.deleteStickySessionAccountID(ctx, groupID, sessionHash)
-					} else if !s.openAIAccountMatchesSchedulingGroup(account, groupID) {
+					} else if !s.openAIAccountMatchesSchedulingScope(ctx, account, groupID) {
 						_ = s.deleteStickySessionAccountID(ctx, groupID, sessionHash)
 					} else if s.isOpenAIAccountRequestRuntimeBlockedForRequest(ctx, account, requestedModel) {
 						_ = s.deleteStickySessionAccountID(ctx, groupID, sessionHash)
@@ -1423,7 +1423,7 @@ func (s *OpenAIGatewayService) recheckSelectedOpenAIAccountFromDBBeforeProfit(ct
 	if err != nil || latest == nil {
 		return nil
 	}
-	if !s.openAIAccountMatchesSchedulingGroup(latest, groupID) {
+	if !s.openAIAccountMatchesSchedulingScope(ctx, latest, groupID) {
 		return nil
 	}
 	if !isOpenAICompatibleAccountEligibleForRequestBeforeProfit(ctx, latest, platform, requestedModel, requireCompact, requiredCapability) {
@@ -1451,12 +1451,21 @@ func (s *OpenAIGatewayService) openAIAccountMatchesSchedulingGroup(account *Acco
 	return openAIStickyAccountMatchesGroup(account, groupID)
 }
 
+func (s *OpenAIGatewayService) openAIAccountMatchesSchedulingScope(ctx context.Context, account *Account, groupID *int64) bool {
+	if _, forced := forcedSchedulableAccountsFromContext(ctx); forced {
+		return account != nil && forcedSchedulableAccountContains(ctx, account.ID)
+	}
+	return s.openAIAccountMatchesSchedulingGroup(account, groupID)
+}
+
 func (s *OpenAIGatewayService) getSchedulableAccount(ctx context.Context, accountID int64) (*Account, error) {
 	var (
 		account *Account
 		err     error
 	)
-	if s.schedulerSnapshot != nil {
+	if forcedAccount, forced := forcedSchedulableAccountFromContext(ctx, accountID); forced {
+		account = forcedAccount
+	} else if s.schedulerSnapshot != nil {
 		account, err = s.schedulerSnapshot.GetAccount(ctx, accountID)
 	} else {
 		account, err = s.accountRepo.GetByID(ctx, accountID)
@@ -1508,6 +1517,14 @@ func (s *OpenAIGatewayService) isOpenAIAccountBlockedBySchedulingThreshold(ctx c
 }
 
 func (s *OpenAIGatewayService) hydrateSelectedAccount(ctx context.Context, account *Account) (*Account, error) {
+	if account != nil {
+		if _, forced := forcedSchedulableAccountsFromContext(ctx); forced {
+			if forcedSchedulableAccountContains(ctx, account.ID) {
+				return account, nil
+			}
+			return nil, fmt.Errorf("selected openai account %d is outside the forced scheduling scope", account.ID)
+		}
+	}
 	if account == nil || s.schedulerSnapshot == nil {
 		return account, nil
 	}

@@ -496,7 +496,7 @@ func (s *defaultOpenAIAccountScheduler) selectBySessionHash(
 		return nil, false, nil
 	}
 	account = s.service.recheckSelectedOpenAIAccountFromDB(ctx, account, req.GroupID, req.Platform, req.RequestedModel, req.RequireCompact, req.RequiredCapability)
-	if account == nil || !s.service.openAIAccountMatchesSchedulingGroup(account, req.GroupID) || !s.isAccountTransportCompatible(account, req.RequiredTransport) {
+	if account == nil || !s.service.openAIAccountMatchesSchedulingScope(ctx, account, req.GroupID) || !s.isAccountTransportCompatible(account, req.RequiredTransport) {
 		_ = s.service.deleteStickySessionAccountID(ctx, req.GroupID, sessionHash)
 		return nil, false, nil
 	}
@@ -1247,7 +1247,7 @@ func (s *defaultOpenAIAccountScheduler) tryFallbackToWeightedSticky(
 			}
 			continue
 		}
-		if !s.service.openAIAccountMatchesSchedulingGroup(account, req.GroupID) {
+		if !s.service.openAIAccountMatchesSchedulingScope(ctx, account, req.GroupID) {
 			if accountID == req.StickyAccountID && strings.TrimSpace(req.SessionHash) != "" {
 				_ = s.service.deleteStickySessionAccountID(ctx, req.GroupID, req.SessionHash)
 			}
@@ -2109,18 +2109,15 @@ func (s *OpenAIGatewayService) SelectAccountWithSchedulerForImages(
 	}
 
 	if groupID != nil && *groupID > 0 && tier != "" {
-		if poolStore := asImageSizeAccountPoolStore(s.accountRepo); poolStore != nil {
-			configured, cfgErr := poolStore.HasImageSizeTierConfigured(ctx, *groupID, tier)
-			if cfgErr == nil && configured {
-				poolAccounts, listErr := poolStore.ListSchedulableByGroupImageSizeTier(ctx, *groupID, tier, []string{PlatformOpenAI})
-				if listErr == nil && len(poolAccounts) > 0 {
-					selection, decision, err := tryWithCapabilityFallback(withForcedSchedulableAccounts(ctx, poolAccounts))
-					if err == nil && selection != nil && selection.Account != nil {
-						return selection, decision, nil
-					}
-				}
-				// Configured size pool exhausted/unavailable → fall back to default group pool.
+		poolAccounts, configured, err := ResolveImageSizeAccountPool(ctx, s.accountRepo, *groupID, tier, []string{PlatformOpenAI})
+		if err != nil {
+			return nil, OpenAIAccountScheduleDecision{}, err
+		}
+		if configured {
+			if len(poolAccounts) == 0 {
+				return nil, OpenAIAccountScheduleDecision{}, ErrNoAvailableAccounts
 			}
+			return tryWithCapabilityFallback(withForcedSchedulableAccounts(ctx, poolAccounts))
 		}
 	}
 

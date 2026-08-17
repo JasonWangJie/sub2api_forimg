@@ -568,6 +568,28 @@ func TestImageStorageRuntimeConfigPrefersUIPublicBaseURL(t *testing.T) {
 	require.Equal(t, "https://apiimg.example.com", runtime.PublicBaseURL)
 }
 
+func TestImageStorageRuntimeConfigDoesNotUseObjectCDNAsAPIBaseURL(t *testing.T) {
+	ctx := context.Background()
+	repo := newStubSettingRepo()
+	svc := NewImageStorageSettingService(
+		repo, reversibleEncryptor{}, nil, nil,
+		config.ImageStorageConfig{},
+		config.AsyncImageConfig{PublicBaseURL: "https://api.from-config.example"},
+	)
+	payload, err := json.Marshal(ImageStorageSettings{
+		Enabled:       true,
+		Backend:       ImageStorageBackendOSS,
+		PublicBaseURL: "https://cdn.example.com",
+		AsyncImage:    AsyncImageRuntimeConfig{WorkerConcurrency: 2},
+	})
+	require.NoError(t, err)
+	require.NoError(t, repo.Set(ctx, settingKeyImageStorageConfig, string(payload)))
+
+	runtime, err := svc.RuntimeConfig(ctx)
+	require.NoError(t, err)
+	require.Empty(t, runtime.PublicBaseURL)
+}
+
 func TestWrapImageStorageSaveErrorSurfacesLocalDirectoryFailure(t *testing.T) {
 	err := wrapImageStorageSaveError(fmt.Errorf("test image storage connection before save: create local image storage root: permission denied"))
 	require.True(t, apperrors.IsBadRequest(err))

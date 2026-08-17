@@ -1502,43 +1502,6 @@ func (s *SchedulerSnapshotService) loadAccountsFromDB(ctx context.Context, bucke
 		}
 	}
 
-	return s.unionImageSizePoolAccounts(ctx, groupID, bucket, useMixed, accounts)
-}
-
-// unionImageSizePoolAccounts merges independently bound size-tier accounts into the
-// group snapshot so they remain visible to schedulers that read from cache buckets.
-func (s *SchedulerSnapshotService) unionImageSizePoolAccounts(ctx context.Context, groupID int64, bucket SchedulerBucket, useMixed bool, accounts []Account) ([]Account, error) {
-	if groupID <= 0 {
-		return accounts, nil
-	}
-	poolStore := asImageSizeAccountPoolStore(s.accountRepo)
-	if poolStore == nil {
-		return accounts, nil
-	}
-	platforms := []string{bucket.Platform}
-	if useMixed {
-		platforms = append(platforms, PlatformAntigravity)
-	}
-	seen := make(map[int64]struct{}, len(accounts))
-	for _, acc := range accounts {
-		seen[acc.ID] = struct{}{}
-	}
-	for _, tier := range ValidImageSizeTiers() {
-		poolAccounts, err := poolStore.ListSchedulableByGroupImageSizeTier(ctx, groupID, tier, platforms)
-		if err != nil {
-			return nil, err
-		}
-		for _, acc := range poolAccounts {
-			if useMixed && acc.Platform == PlatformAntigravity && !acc.IsMixedSchedulingEnabled() {
-				continue
-			}
-			if _, ok := seen[acc.ID]; ok {
-				continue
-			}
-			seen[acc.ID] = struct{}{}
-			accounts = append(accounts, acc)
-		}
-	}
 	return accounts, nil
 }
 

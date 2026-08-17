@@ -209,6 +209,7 @@ type scImageRequest struct {
 	AspectRatio string   `json:"aspect_ratio"`
 	// Size is a client-friendly alias:
 	// - ratio strings like "3:2" map to aspect_ratio
+	// - pixel dimensions like "1080x1350" map to their supported aspect ratio
 	// - tier strings like "2K" map to resolution when resolution is empty
 	Size string `json:"size"`
 }
@@ -276,24 +277,74 @@ func resolveSCGeminiDimensionAliases(resolution, aspectRatio, size string) (stri
 		}
 	default:
 		if aspectRatio == "" {
-			aspectRatio = size
+			aspectRatio = normalizeSCGeminiPixelSizeAspectRatio(size)
 		}
 	}
 	return resolution, aspectRatio
 }
 
-func normalizeAsyncGeminiDimensions(rawSize, rawRatio string, _ bool) (string, string, error) {
+// normalizeSCGeminiPixelSizeAspectRatio translates client-friendly WxH input
+// into the ratio accepted by Gemini. Gemini does not accept arbitrary pixel
+// output dimensions, so the pixel values select an aspect ratio only.
+func normalizeSCGeminiPixelSizeAspectRatio(size string) string {
+	value := strings.NewReplacer("*", "x", "X", "x", "\u00d7", "x").Replace(strings.TrimSpace(size))
+	width, height, ok := parseImageBillingDimensions(value)
+	if !ok {
+		return size
+	}
+	return canonicalAsyncGeminiAspectRatio(width, height)
+}
+
+func greatestCommonDivisor(left, right int) int {
+	for right != 0 {
+		left, right = right, left%right
+	}
+	return left
+}
+
+func canonicalAsyncGeminiAspectRatio(width, height int) string {
+	gcd := greatestCommonDivisor(width, height)
+	if gcd == 0 {
+		return ""
+	}
+	width, height = width/gcd, height/gcd
+	// Gemini names the ultrawide 7:3 ratio as 21:9. Preserve that canonical
+	// spelling so equivalent pixel sizes such as 2520x1080 are accepted.
+	if width == 7 && height == 3 {
+		return "21:9"
+	}
+	return strconv.Itoa(width) + ":" + strconv.Itoa(height)
+}
+
+func normalizeAsyncGeminiAspectRatio(raw string) string {
+	ratio := strings.ToLower(strings.TrimSpace(raw))
+	if ratio == "自动" {
+		return "auto"
+	}
+	parts := strings.Split(ratio, ":")
+	if len(parts) != 2 {
+		return ratio
+	}
+	width, widthErr := strconv.Atoi(strings.TrimSpace(parts[0]))
+	height, heightErr := strconv.Atoi(strings.TrimSpace(parts[1]))
+	if widthErr != nil || heightErr != nil || width <= 0 || height <= 0 {
+		return ratio
+	}
+	return canonicalAsyncGeminiAspectRatio(width, height)
+}
+
+func normalizeAsyncGeminiDimensions(rawSize, rawRatio string, isImageToImage bool) (string, string, error) {
 	size := strings.ToUpper(strings.TrimSpace(rawSize))
 	if size != "" && size != "0.5K" && size != "1K" && size != "2K" && size != "4K" {
 		return "", "", fmt.Errorf("unsupported_image_dimensions: unsupported image size %q", rawSize)
 	}
 
-	ratio := strings.ToLower(strings.TrimSpace(rawRatio))
-	if ratio == "自动" {
-		ratio = "auto"
-	}
+	ratio := normalizeAsyncGeminiAspectRatio(rawRatio)
 	if ratio == "auto" {
-		// auto means omit upstream aspectRatio (model/default decides), with or without refs.
+		if !isImageToImage {
+			return "", "", errors.New("unsupported_image_dimensions: aspect_ratio auto is only supported for image-to-image requests")
+		}
+		// auto means omit upstream aspectRatio and lets the edit model decide.
 		return size, "", nil
 	}
 	if ratio == "" {

@@ -73,6 +73,7 @@ type OpenAIImagesRequest struct {
 	Resolution         string
 	AspectRatio        string
 	NeedsSizeRewrite   bool
+	sizeFromAliases    bool
 	NeedsInputRewrite  bool
 	ResponseFormat     string
 	Quality            string
@@ -159,6 +160,39 @@ func (u OpenAIImagesUpload) ModerationDataURL() string {
 
 func (r *OpenAIImagesRequest) IsEdits() bool {
 	return r != nil && r.Endpoint == openAIImagesEditsEndpoint
+}
+
+// ReferenceCount counts source images only. A mask modifies a source image,
+// but is not itself a reference image for the configured input limit.
+func (r *OpenAIImagesRequest) ReferenceCount() int {
+	if r == nil {
+		return 0
+	}
+	count := len(r.Uploads)
+	for _, rawURL := range r.InputImageURLs {
+		if strings.TrimSpace(rawURL) != "" {
+			count++
+		}
+	}
+	return count
+}
+
+// ReferencedImageURLs returns persisted URL inputs that must remain owned by
+// the submitting API key for the lifetime of an asynchronous task.
+func (r *OpenAIImagesRequest) ReferencedImageURLs() []string {
+	if r == nil {
+		return nil
+	}
+	urls := make([]string, 0, len(r.InputImageURLs)+1)
+	for _, rawURL := range r.InputImageURLs {
+		if imageURL := strings.TrimSpace(rawURL); imageURL != "" {
+			urls = append(urls, imageURL)
+		}
+	}
+	if maskURL := strings.TrimSpace(r.MaskImageURL); maskURL != "" {
+		urls = append(urls, maskURL)
+	}
+	return urls
 }
 
 func (r *OpenAIImagesRequest) StickySessionSeed() string {

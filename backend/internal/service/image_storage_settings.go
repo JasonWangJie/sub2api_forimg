@@ -404,8 +404,9 @@ func (s *ImageStorageSettingService) Get(ctx context.Context) (*ImageStorageSett
 }
 
 // RuntimeConfig returns the hot asynchronous-image runtime settings.
-// Once admin image-storage settings exist, only UI values are used (empty
-// async_image.public_base_url falls back to the same form's public_base_url).
+// Once admin image-storage settings exist, only UI values are used. Local
+// storage may share the form's public_base_url with the signed download/API
+// host; OSS and superbed public URLs remain object-delivery addresses only.
 // config.yaml async_image applies only when admin settings were never saved.
 func (s *ImageStorageSettingService) RuntimeConfig(ctx context.Context) (AsyncImageRuntimeConfig, error) {
 	if s == nil {
@@ -421,7 +422,7 @@ func (s *ImageStorageSettingService) RuntimeConfig(ctx context.Context) (AsyncIm
 		out = asyncRuntimeFromConfig(s.asyncFallback)
 	} else {
 		out = settings.AsyncImage
-		if strings.TrimSpace(out.PublicBaseURL) == "" {
+		if strings.TrimSpace(out.PublicBaseURL) == "" && settings.Backend == ImageStorageBackendLocal {
 			out.PublicBaseURL = strings.TrimSpace(settings.PublicBaseURL)
 		}
 	}
@@ -752,7 +753,7 @@ func (s *ImageStorageSettingService) toImageStorageConfig(ctx context.Context, i
 			}
 		}
 		cfg.Provider = ImageStorageProviderSuperbed
-		case ImageStorageBackendLocal:
+	case ImageStorageBackendLocal:
 		cfg.Provider = ImageStorageProviderLocal
 		pricingBase := EffectivePricingDataDir(s.pricingDataDir)
 		cfg.RuntimePricingDataDir = pricingBase

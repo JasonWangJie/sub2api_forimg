@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"fmt"
 	"strings"
 
 	"github.com/tidwall/gjson"
@@ -35,6 +36,28 @@ type ImageSizeAccountPoolStore interface {
 	HasImageSizeTierConfigured(ctx context.Context, groupID int64, sizeTier string) (bool, error)
 	ListSchedulableByGroupImageSizeTier(ctx context.Context, groupID int64, sizeTier string, platforms []string) ([]Account, error)
 	ListImageSizeAccountIDsByGroupID(ctx context.Context, groupID int64) ([]int64, error)
+}
+
+// ResolveImageSizeAccountPool loads a configured tier's candidates. A missing
+// tier deliberately falls back to the default account_groups pool; a configured
+// tier must not silently do so when its lookup fails or no account is usable.
+func ResolveImageSizeAccountPool(ctx context.Context, repo AccountRepository, groupID int64, sizeTier string, platforms []string) ([]Account, bool, error) {
+	store := asImageSizeAccountPoolStore(repo)
+	if store == nil {
+		return nil, false, nil
+	}
+	configured, err := store.HasImageSizeTierConfigured(ctx, groupID, sizeTier)
+	if err != nil {
+		return nil, false, fmt.Errorf("check image size account pool: %w", err)
+	}
+	if !configured {
+		return nil, false, nil
+	}
+	accounts, err := store.ListSchedulableByGroupImageSizeTier(ctx, groupID, sizeTier, platforms)
+	if err != nil {
+		return nil, true, fmt.Errorf("list image size account pool: %w", err)
+	}
+	return accounts, true, nil
 }
 
 // ImageSizeAccountAdminStore is the optional repository surface used by admin group APIs.

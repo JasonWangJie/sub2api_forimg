@@ -235,7 +235,7 @@ Idempotency-Key: sc-t2i-20260727-001
 | `model` | string | 是 | 分组映射的 Gemini 图片模型，例如 `gemini-3-pro-image-preview` |
 | `prompt` | string | 是 | 图片描述提示词 |
 | `resolution` | string | 否 | 清晰度：`1K` / `2K` / `4K`（`0.5K` 默认拒绝） |
-| `size` | string | 否 | 宽高比别名，如 `1:1`、`2:3`、`3:2`、`3:4`、`4:3`、`4:5`、`5:4`、`9:16`、`16:9`、`21:9`；未传 `resolution` 时也可写 `2K` 表示清晰度 |
+| `size` | string | 否 | 宽高比别名，如 `1:1`、`2:3`、`3:2`、`3:4`、`4:3`、`4:5`、`5:4`、`9:16`、`16:9`、`21:9`；也可传像素尺寸，如 `1080x1350`（约分为 `4:5`）；未传 `resolution` 时也可写 `2K` 表示清晰度 |
 | `aspect_ratio` | string | 否 | 与 `size` 同义的比例字段；显式传入时优先于 `size` 的比例别名；可用 `auto` / `自动`（省略上游比例，由模型决定） |
 
 ### 4.3 请求示例
@@ -283,7 +283,7 @@ Idempotency-Key: sc-i2i-20260727-001
 | `prompt` | string | 是 | 编辑说明；可按「图1、图2…」引用 `image_urls` 顺序 |
 | `image_urls` | string[] | 是 | 参考图公网 HTTPS URL 数组（PNG / JPG / WEBP）；顺序对应提示词中的图1、图2… |
 | `resolution` | string | 否 | `1K` / `2K` / `4K` |
-| `size` | string | 否 | 宽高比，例如 `3:2`；与 `aspect_ratio` 等价；不传则用上游默认比例 |
+| `size` | string | 否 | 宽高比，例如 `3:2`；也可传像素尺寸，如 `1080x1350`（约分为 `4:5`）；与 `aspect_ratio` 等价；不传则用上游默认比例 |
 | `aspect_ratio` | string | 否 | 可选；多数客户端优先用 `size`；可用 `auto` / `自动`（由上游自动决定比例） |
 
 参考图要求：
@@ -306,7 +306,7 @@ Idempotency-Key: sc-i2i-20260727-001
 }
 ```
 
-需要指定宽高比时再加 `"size": "3:2"` 或 `"aspect_ratio": "3:2"`。
+需要指定宽高比时可加 `"size": "3:2"` 或 `"aspect_ratio": "3:2"`。也可用 `"size": "1080x1350"` 指定 `4:5` 比例；Gemini 上游按比例和 `resolution` 生成，不保证返回精确像素尺寸。
 
 ### 5.4 受理响应 `202 Accepted`
 

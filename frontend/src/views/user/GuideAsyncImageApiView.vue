@@ -95,8 +95,8 @@
                 <p class="api-lead">
                   {{
                     isEn
-                      ? 'POST generations_sc for both text-to-image and image-to-image. Use image_urls for references; size holds the aspect ratio (e.g. 3:2). Accept: HTTP 202 (same body as OpenAI async).'
-                      : '统一路径 generations_sc：文生图 / 图生图。图生图传 image_urls；size 表示宽高比（如 3:2）。受理成功：HTTP 202（与 OpenAI 异步同格式）。'
+                      ? 'POST generations_sc for both text-to-image and image-to-image. Use image_urls for references; size accepts an aspect ratio (e.g. 3:2) or pixel dimensions (e.g. 1080x1350, mapped to 4:5). Accept: HTTP 202 (same body as OpenAI async).'
+                      : '统一路径 generations_sc：文生图 / 图生图。图生图传 image_urls；size 可传宽高比（如 3:2）或像素尺寸（如 1080x1350，会映射为 4:5）。受理成功：HTTP 202（与 OpenAI 异步同格式）。'
                   }}
                 </p>
                 <AsyncImageApiEndpointCard

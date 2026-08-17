@@ -10,7 +10,6 @@ import (
 	dbaccount "github.com/Wei-Shaw/sub2api/ent/account"
 	dbgroupimagesizeaccount "github.com/Wei-Shaw/sub2api/ent/groupimagesizeaccount"
 	dbpredicate "github.com/Wei-Shaw/sub2api/ent/predicate"
-	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 )
 
@@ -179,11 +178,6 @@ func (r *accountRepository) ReplaceImageSizeAccounts(ctx context.Context, groupI
 				return err
 			}
 		}
-	}
-
-	if err := enqueueSchedulerOutbox(ctx, txClient, service.SchedulerOutboxEventGroupChanged, nil, &groupID, nil); err != nil {
-		logger.LegacyPrintf("repository.account", "[SchedulerOutbox] enqueue image size accounts failed: group=%d err=%v", groupID, err)
-		return err
 	}
 
 	if tx != nil {

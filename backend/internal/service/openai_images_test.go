@@ -106,6 +106,23 @@ func TestOpenAIImagesRequestModerationBody_JSONEditIncludesInputImageURLs(t *tes
 	require.Equal(t, []string{"https://example.com/source.png", "https://example.com/mask.png"}, input.Images)
 }
 
+func TestOpenAIImagesRequestReferencesBindSourcesAndMask(t *testing.T) {
+	parsed := &OpenAIImagesRequest{
+		InputImageURLs: []string{" https://example.com/source.png ", ""},
+		MaskImageURL:   " https://example.com/mask.png ",
+		Uploads: []OpenAIImagesUpload{
+			{FieldName: "image"},
+			{FieldName: "image[1]"},
+		},
+	}
+
+	require.Equal(t, 3, parsed.ReferenceCount())
+	require.Equal(t, []string{
+		"https://example.com/source.png",
+		"https://example.com/mask.png",
+	}, parsed.ReferencedImageURLs())
+}
+
 func TestOpenAIImagesRequestModerationBody_MultipartEditIncludesUploadsInMemory(t *testing.T) {
 	parsed := &OpenAIImagesRequest{
 		Endpoint: openAIImagesEditsEndpoint,
@@ -142,6 +159,7 @@ func TestOpenAIGatewayServiceParseOpenAIImagesRequest_NormalizesOfficialAndCusto
 
 	tests := []struct {
 		size     string
+		wantSize string
 		wantTier string
 	}{
 		{size: "1024x1024", wantTier: "1K"},
@@ -151,7 +169,7 @@ func TestOpenAIGatewayServiceParseOpenAIImagesRequest_NormalizesOfficialAndCusto
 		{size: "2048x1152", wantTier: "2K"},
 		{size: "3840x2160", wantTier: "4K"},
 		{size: "2160x3840", wantTier: "4K"},
-		{size: "1024X768", wantTier: "1K"},
+		{size: "1024X768", wantSize: "1024x768", wantTier: "1K"},
 		{size: "1280x768", wantTier: "2K"},
 		{size: "2560x1440", wantTier: "4K"},
 		{size: "2560x1600", wantTier: "4K"},
@@ -172,7 +190,11 @@ func TestOpenAIGatewayServiceParseOpenAIImagesRequest_NormalizesOfficialAndCusto
 			parsed, err := svc.ParseOpenAIImagesRequest(c, body)
 			require.NoError(t, err)
 			require.NotNil(t, parsed)
-			require.Equal(t, tt.size, parsed.Size)
+			wantSize := tt.wantSize
+			if wantSize == "" {
+				wantSize = tt.size
+			}
+			require.Equal(t, wantSize, parsed.Size)
 			require.Equal(t, tt.wantTier, parsed.SizeTier)
 		})
 	}

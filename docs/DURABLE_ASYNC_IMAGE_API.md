@@ -63,7 +63,7 @@ Content-Type: application/json
 
 ### 3.2 查询地址
 
-BB 提交响应的 `query_url` 以及所有提交响应的 `Location` 头由对外站点公开地址加固定查询路径生成。优先使用管理端「任务查询链接的站点公开地址」（空则用同表单「站点/API 公开地址」）；仅当管理端从未保存过图片存储时，才回落 `config.yaml` 的 `async_image.public_base_url`。例如：
+BB 提交响应的 `query_url` 以及所有提交响应的 `Location` 头由 `async_image.public_base_url` 加固定查询路径生成。本机目录存储时，该字段为空才回落同表单「站点/API 公开地址」；OSS / Superbed 的 `public_base_url` 是对象/CDN 根地址，不能用于任务查询。仅当管理端从未保存过图片存储时，才回落 `config.yaml` 的 `async_image.public_base_url`。例如：
 
 ```yaml
 async_image:
@@ -443,10 +443,10 @@ Idempotency-Key: sc-20260720-001
 | 字段 | 说明 |
 |---|---|
 | `resolution` | 清晰度：`1K` / `2K` / `4K`（以及受控的 `0.5K`） |
-| `size` | **推荐**：宽高比别名，如 `3:2`、`16:9`；若未传 `resolution`，也可写 `2K` 表示清晰度 |
+| `size` | **推荐**：宽高比别名，如 `3:2`、`16:9`；也可传像素尺寸，如 `1080x1350`（约分为 `4:5`）；若未传 `resolution`，也可写 `2K` 表示清晰度 |
 | `aspect_ratio` | 与 `size` 同义的比例字段；显式传入时优先于 `size` 的比例别名 |
 
-`0.5K` 限制以及 `auto`（仅图生图）规则与 BB Gemini 相同。
+`0.5K` 限制以及 `auto`（仅图生图）规则与 BB Gemini 相同。像素尺寸只用于推导 Gemini 支持的宽高比；上游会结合该比例与 `resolution` 生成，不保证返回精确像素尺寸。
 
 成功受理返回 HTTP `200`，且响应体中的 `code` 也是数字 `200`：
 

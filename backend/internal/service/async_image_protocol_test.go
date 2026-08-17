@@ -59,9 +59,8 @@ func TestParseSCGeminiImageRequestDimensions(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "0.5K", halfK.ImageSize)
 
-	autoT2I, err := ParseSCGeminiImageRequest([]byte(`{"model":"m","prompt":"p","aspect_ratio":"auto"}`), "")
-	require.NoError(t, err)
-	require.Empty(t, autoT2I.AspectRatio, "auto without refs also omits upstream ratio")
+	_, err = ParseSCGeminiImageRequest([]byte(`{"model":"m","prompt":"p","aspect_ratio":"auto"}`), "")
+	require.ErrorContains(t, err, "only supported for image-to-image")
 }
 
 func TestParseSCGeminiImageRequestSizeAlias(t *testing.T) {
@@ -96,6 +95,39 @@ func TestParseSCGeminiImageRequestSizeAlias(t *testing.T) {
       }`), "")
 	require.NoError(t, err)
 	require.Equal(t, "16:9", preferAspect.AspectRatio)
+}
+
+func TestParseSCGeminiImageRequestPixelSizeAlias(t *testing.T) {
+	for _, size := range []string{"1080x1350", "1080X1350", "1080*1350", "1080\u00d71350"} {
+		t.Run(size, func(t *testing.T) {
+			req, err := ParseSCGeminiImageRequest([]byte(`{
+        "image_urls":["https://images.example/ref.png"],
+        "model":"gemini-3-pro-image-preview",
+        "prompt":"change the background",
+        "size":"`+size+`"
+      }`), "/v1/images/generations_sc")
+			require.NoError(t, err)
+			require.Equal(t, AsyncImageKindEdit, req.Kind)
+			require.Empty(t, req.ImageSize)
+			require.Equal(t, "4:5", req.AspectRatio)
+		})
+	}
+
+	_, err := ParseSCGeminiImageRequest([]byte(`{
+      "model":"gemini-3-pro-image-preview",
+      "prompt":"change the background",
+      "size":"1000x900"
+    }`), "/v1/images/generations_sc")
+	require.ErrorContains(t, err, `unsupported aspect ratio "10:9"`)
+
+	ultrawide, err := ParseSCGeminiImageRequest([]byte(`{
+      "image_urls":["https://images.example/ref.png"],
+      "model":"gemini-3-pro-image-preview",
+      "prompt":"make it cinematic",
+      "size":"2520x1080"
+    }`), "/v1/images/generations_sc")
+	require.NoError(t, err)
+	require.Equal(t, "21:9", ultrawide.AspectRatio)
 }
 
 func TestAsyncImageReferenceDownloaderDataURI(t *testing.T) {

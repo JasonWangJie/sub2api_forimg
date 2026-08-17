@@ -34,6 +34,8 @@ func (s *adminServiceImpl) ReplaceGroupImageSizeAccounts(ctx context.Context, gr
 	if bindings == nil {
 		bindings = GroupImageSizeAccountBindings{}
 	}
+	accountIDs := make([]int64, 0)
+	seenAccountIDs := make(map[int64]struct{})
 	for tier, entries := range bindings {
 		if !IsValidImageSizeTier(tier) {
 			return nil, infraerrors.BadRequest("INVALID_IMAGE_SIZE_ACCOUNT_POOL", fmt.Sprintf("invalid image size tier %q", tier))
@@ -42,19 +44,32 @@ func (s *adminServiceImpl) ReplaceGroupImageSizeAccounts(ctx context.Context, gr
 			if entry.AccountID <= 0 {
 				return nil, infraerrors.BadRequest("INVALID_IMAGE_SIZE_ACCOUNT_POOL", fmt.Sprintf("invalid account_id for tier %s", tier))
 			}
-			account, err := s.accountRepo.GetByID(ctx, entry.AccountID)
-			if err != nil {
-				return nil, err
+			if _, seen := seenAccountIDs[entry.AccountID]; !seen {
+				seenAccountIDs[entry.AccountID] = struct{}{}
+				accountIDs = append(accountIDs, entry.AccountID)
 			}
-			if account == nil {
-				return nil, ErrAccountNotFound
-			}
-			if !accountPlatformCompatibleWithImageSizeGroup(group.Platform, account.Platform) {
-				return nil, infraerrors.BadRequest("INVALID_IMAGE_SIZE_ACCOUNT_POOL", fmt.Sprintf(
-					"account %d platform %s is not compatible with group platform %s",
-					account.ID, account.Platform, group.Platform,
-				))
-			}
+		}
+	}
+	accounts, err := s.accountRepo.GetByIDs(ctx, accountIDs)
+	if err != nil {
+		return nil, err
+	}
+	accountsByID := make(map[int64]*Account, len(accounts))
+	for _, account := range accounts {
+		if account != nil {
+			accountsByID[account.ID] = account
+		}
+	}
+	if len(accountsByID) != len(seenAccountIDs) {
+		return nil, ErrAccountNotFound
+	}
+	for _, accountID := range accountIDs {
+		account := accountsByID[accountID]
+		if !accountPlatformCompatibleWithImageSizeGroup(group.Platform, account.Platform) {
+			return nil, infraerrors.BadRequest("INVALID_IMAGE_SIZE_ACCOUNT_POOL", fmt.Sprintf(
+				"account %d platform %s is not compatible with group platform %s",
+				account.ID, account.Platform, group.Platform,
+			))
 		}
 	}
 	if err := store.ReplaceImageSizeAccounts(ctx, groupID, bindings); err != nil {

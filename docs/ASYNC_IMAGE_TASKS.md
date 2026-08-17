@@ -31,7 +31,7 @@ Because the async image storage and the database backup share one S3 client, the
 - **Signed downloads (default):** leave `local.local_url` empty; set admin **site/API public URL** (`image_storage.public_base_url`) to the HTTPS host reverse-proxied to this API (same as your site). Optionally set async runtime public base to the same value. Result URLs look like `https://site.example.com/v1/images/local/{object_key}?exp=&sig=`.
 - **Dedicated image host:** point Nginx/panel document root at the same `data_dir`, set `local.local_url` to `https://img.example.com` (no trailing slash). Result URLs become `https://img.example.com/{object_key}`. When `local_url` is set it wins over signed serve; new files are written `0755/0644` so the web user can read them. For older `0700/0600` trees run `chmod -R a+rX <data_dir>` once.
 
-**Config precedence:** once admin image-storage settings are saved, UI fields win (`public_base_url` → `async_image.public_base_url` for signed roots). `config.yaml` `async_image` is used only when admin settings were never saved.
+**Config precedence:** once admin image-storage settings are saved, UI fields win. `async_image.public_base_url` controls task query URLs; local storage may fall back to `public_base_url` for its signed-download/API host. OSS and Superbed `public_base_url` values are object/CDN roots and are never used as task query URLs. `config.yaml` `async_image` is used only when admin settings were never saved.
 
 Saving with `enabled=true` runs an upload/HEAD/read/delete probe on that directory; failures return HTTP 400 with a readable message instead of a generic `internal error`. See `wiki-new/对象存储与保留策略.md` for the Chinese ops guide.
 

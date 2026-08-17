@@ -160,6 +160,41 @@ func TestParseOpenAIImagesRequest_LegacySizeStillWorks(t *testing.T) {
 	require.False(t, parsed.NeedsSizeRewrite)
 }
 
+func TestParseOpenAIImagesRequest_ConcreteSizeIsCanonicalAndControlsBilling(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	svc := &OpenAIGatewayService{}
+	for _, rawSize := range []string{"1080X1350", "1080*1350", "1080\\u00d71350"} {
+		t.Run(rawSize, func(t *testing.T) {
+			body := []byte(`{"model":"gpt-image-2","prompt":"edit this image","resolution":"2K","size":"` + rawSize + `"}`)
+			req := httptest.NewRequest(http.MethodPost, "/v1/images/generations", bytes.NewReader(body))
+			req.Header.Set("Content-Type", "application/json")
+			rec := httptest.NewRecorder()
+			c, _ := gin.CreateTestContext(rec)
+			c.Request = req
+
+			parsed, err := svc.ParseOpenAIImagesRequest(c, body)
+			require.NoError(t, err)
+			require.Equal(t, "1080x1350", parsed.Size)
+			require.Equal(t, "2K", parsed.SizeTier)
+			require.Equal(t, "1080x1350", openAIImagesBillingInputSize(parsed))
+			require.True(t, parsed.NeedsSizeRewrite)
+
+			rewritten, _, err := rewriteOpenAIImagesDimensions(body, "application/json", parsed)
+			require.NoError(t, err)
+			require.Equal(t, "1080x1350", gjson.GetBytes(rewritten, "size").String())
+		})
+	}
+
+	matching := &OpenAIImagesRequest{Size: "4096x4096", Resolution: "4K"}
+	require.NoError(t, normalizeOpenAIImagesDimensions(matching))
+	require.Equal(t, "4K", matching.SizeTier)
+	require.Equal(t, "4096x4096", openAIImagesBillingInputSize(matching))
+
+	conflicting := &OpenAIImagesRequest{Size: "4096x4096", Resolution: "1K"}
+	err := normalizeOpenAIImagesDimensions(conflicting)
+	require.ErrorContains(t, err, "conflicts with resolution")
+}
+
 func TestImageWorkbenchCapabilitiesOpenAIExposesResolutionAspect(t *testing.T) {
 	key := imageWorkbenchTestKey(PlatformOpenAI)
 	key.Group.AllowAsyncImageGeneration = true

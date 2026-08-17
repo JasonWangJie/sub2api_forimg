@@ -162,6 +162,7 @@ func (h *DurableAsyncImageHandler) submit(c *gin.Context, protocol, expectedPlat
 	var moderationBody []byte
 	moderationProtocol := service.ContentModerationProtocolOpenAIImages
 	var inputReferenceURLs []string
+	referenceImageCount := 0
 	imageCount := 1
 	switch expectedPlatform {
 	case service.PlatformGemini:
@@ -181,6 +182,7 @@ func (h *DurableAsyncImageHandler) submit(c *gin.Context, protocol, expectedPlat
 					inputReferenceURLs = append(inputReferenceURLs, part.URL)
 				}
 			}
+			referenceImageCount = normalized.ReferenceCount()
 		}
 	case service.PlatformOpenAI:
 		if h.openAI == nil || h.openAI.gatewayService == nil {
@@ -201,6 +203,8 @@ func (h *DurableAsyncImageHandler) submit(c *gin.Context, protocol, expectedPlat
 			}
 			aspectRatio = parsed.AspectRatio
 			moderationBody = parsed.ModerationBody()
+			inputReferenceURLs = parsed.ReferencedImageURLs()
+			referenceImageCount = parsed.ReferenceCount()
 			kind = service.AsyncImageRequestTypeTextToImage
 			if parsed.IsEdits() {
 				kind = service.AsyncImageRequestTypeImageToImage
@@ -213,7 +217,7 @@ func (h *DurableAsyncImageHandler) submit(c *gin.Context, protocol, expectedPlat
 		h.writeProtocolError(c, protocol, http.StatusBadRequest, asyncImageRequestErrorCode(err), err.Error())
 		return
 	}
-	if expectedPlatform == service.PlatformGemini && payload.Normalized != nil && payload.Normalized.ReferenceCount() > runtimeCfg.MaxReferenceImages {
+	if referenceImageCount > runtimeCfg.MaxReferenceImages {
 		h.writeProtocolError(c, protocol, http.StatusBadRequest, "too_many_reference_images", "reference image count exceeds the configured limit")
 		return
 	}

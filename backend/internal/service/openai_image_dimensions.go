@@ -84,16 +84,13 @@ func normalizeOpenAIImageAspectRatio(raw string) string {
 	return left + ":" + right
 }
 
-func isOpenAIImageWxHSize(size string) bool {
-	size = strings.TrimSpace(size)
-	if size == "" {
-		return false
+func normalizeOpenAIImageWxHSize(raw string) (string, bool) {
+	size := strings.NewReplacer("*", "x", "X", "x", "\u00d7", "x").Replace(strings.TrimSpace(raw))
+	width, height, ok := parseImageBillingDimensions(size)
+	if !ok {
+		return "", false
 	}
-	if strings.EqualFold(size, "auto") {
-		return true
-	}
-	_, _, ok := parseImageBillingDimensions(size)
-	return ok
+	return fmt.Sprintf("%dx%d", width, height), true
 }
 
 // MapOpenAIImageDimensions converts resolution + aspect_ratio into the upstream
@@ -136,8 +133,8 @@ func MapOpenAIImageDimensions(resolution, aspectRatio string) (string, error) {
 //   - size as WxH / auto (legacy OpenAI Images)
 //   - size as 1K/2K/4K (treated as resolution)
 //
-// Explicit aspect_ratio wins over size-as-ratio. Legacy WxH size wins over
-// resolution mapping when size is a concrete pixel size.
+// Explicit aspect_ratio wins over size-as-ratio. A concrete WxH size is
+// authoritative and must agree with any supplied resolution tier.
 func normalizeOpenAIImagesDimensions(req *OpenAIImagesRequest) error {
 	if req == nil {
 		return nil
@@ -164,14 +161,33 @@ func normalizeOpenAIImagesDimensions(req *OpenAIImagesRequest) error {
 
 	size := strings.TrimSpace(req.Size)
 	if size != "" {
+		canonicalSize, hasPixelSize := normalizeOpenAIImageWxHSize(size)
 		switch {
-		case isOpenAIImageWxHSize(size):
-			// Legacy OpenAI Images pixel size / auto.
-			req.Size = size
+		case strings.EqualFold(size, "auto"):
+			// An explicit auto size is intentionally billed from the resulting
+			// image when it is available. Do not let a companion resolution lower
+			// the pre-selection tier while the upstream can choose a larger size.
+			req.Size = "auto"
+			req.SizeTier = ImageBillingSize2K
 			if req.Resolution != "" {
-				req.SizeTier = NormalizeImageBillingTierOrDefault(req.Resolution)
 				req.NeedsSizeRewrite = true
 			}
+			return nil
+		case hasPixelSize:
+			tier := NormalizeImageBillingTierOrDefault(canonicalSize)
+			if req.Resolution != "" && req.Resolution != "auto" && req.Resolution != tier {
+				return fmt.Errorf(
+					"unsupported_image_dimensions: size %q is %s and conflicts with resolution %q",
+					canonicalSize,
+					tier,
+					req.Resolution,
+				)
+			}
+			req.Size = canonicalSize
+			req.SizeTier = tier
+			req.NeedsSizeRewrite = canonicalSize != size || req.Resolution != ""
+			// A concrete pixel size controls upstream output, account selection,
+			// and billing. Resolution is only an alias and must agree with it.
 			return nil
 		case normalizeOpenAIImageAspectRatio(size) != "":
 			// Clients may send aspect ratio in `size` (e.g. "9:16").
@@ -213,7 +229,8 @@ func normalizeOpenAIImagesDimensions(req *OpenAIImagesRequest) error {
 	req.Size = mapped
 	req.ExplicitSize = true
 	req.NeedsSizeRewrite = true
-	if req.Resolution == "auto" {
+	req.sizeFromAliases = true
+	if req.Resolution == "auto" || req.Size == "auto" {
 		req.SizeTier = ImageBillingSize2K
 	} else {
 		req.SizeTier = NormalizeImageBillingTierOrDefault(req.Resolution)
@@ -228,6 +245,19 @@ func OpenAIImagesBillingInputSize(req *OpenAIImagesRequest) string {
 func openAIImagesBillingInputSize(req *OpenAIImagesRequest) string {
 	if req == nil {
 		return ""
+	}
+	if req.sizeFromAliases && !strings.EqualFold(strings.TrimSpace(req.Size), "auto") {
+		if resolution := strings.TrimSpace(req.Resolution); resolution != "" && resolution != "auto" {
+			return resolution
+		}
+	}
+	if size := strings.TrimSpace(req.Size); size != "" {
+		if strings.EqualFold(size, "auto") {
+			return "auto"
+		}
+		if _, ok := normalizeOpenAIImageWxHSize(size); ok {
+			return size
+		}
 	}
 	if resolution := strings.TrimSpace(req.Resolution); resolution != "" && resolution != "auto" {
 		return resolution
