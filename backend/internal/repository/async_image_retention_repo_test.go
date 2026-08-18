@@ -12,6 +12,20 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func requireAsyncImageTaskRepository(t *testing.T, db *sql.DB) *asyncImageTaskRepository {
+	t.Helper()
+	repo, ok := NewAsyncImageTaskRepository(db).(*asyncImageTaskRepository)
+	require.True(t, ok)
+	return repo
+}
+
+func requireImageLibraryRepository(t *testing.T, db *sql.DB) *imageLibraryRepository {
+	t.Helper()
+	repo, ok := NewImageLibraryRepository(db).(*imageLibraryRepository)
+	require.True(t, ok)
+	return repo
+}
+
 func TestAsyncImageInputObjectRepositoryPersistsOwnerAndStableRef(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	require.NoError(t, err)
@@ -37,7 +51,7 @@ func TestAsyncImageInputObjectRepositoryPersistsOwnerAndStableRef(t *testing.T) 
 			expiresAt, nil, now,
 		))
 
-	repo := NewAsyncImageTaskRepository(db).(*asyncImageTaskRepository)
+	repo := requireAsyncImageTaskRepository(t, db)
 	object, err := repo.RegisterAsyncImageInputObject(context.Background(), service.RegisterAsyncImageInputObjectParams{
 		UploadID: "asyncimg_upload", UserID: 10, APIKeyID: 20,
 		ObjectRef: service.ObjectRef{
@@ -69,7 +83,7 @@ func TestCompleteAsyncImageResultDeletionMarksUnreferencedStorageObjectDeleted(t
 		WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectCommit()
 
-	repo := NewAsyncImageTaskRepository(db).(*asyncImageTaskRepository)
+	repo := requireAsyncImageTaskRepository(t, db)
 	err = repo.CompleteAsyncImageResultDeletion(context.Background(), 41, claimedAt)
 	require.NoError(t, err)
 	require.NoError(t, mock.ExpectationsWereMet())
@@ -91,7 +105,7 @@ func TestCompleteAsyncImageResultDeletionRollsBackWhenObjectStateCannotPersist(t
 		WillReturnError(errors.New("database unavailable"))
 	mock.ExpectRollback()
 
-	repo := NewAsyncImageTaskRepository(db).(*asyncImageTaskRepository)
+	repo := requireAsyncImageTaskRepository(t, db)
 	err = repo.CompleteAsyncImageResultDeletion(context.Background(), 41, claimedAt)
 	require.EqualError(t, err, "database unavailable")
 	require.NoError(t, mock.ExpectationsWereMet())
@@ -113,7 +127,7 @@ func TestCompleteAsyncImageResultDeletionSupportsLegacyResultWithoutObjectID(t *
 		WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectCommit()
 
-	repo := NewAsyncImageTaskRepository(db).(*asyncImageTaskRepository)
+	repo := requireAsyncImageTaskRepository(t, db)
 	err = repo.CompleteAsyncImageResultDeletion(context.Background(), 41, claimedAt)
 	require.NoError(t, err)
 	require.NoError(t, mock.ExpectationsWereMet())
@@ -131,7 +145,7 @@ func TestCompleteAsyncImageResultDeletionRejectsLostClaim(t *testing.T) {
 		WillReturnError(sql.ErrNoRows)
 	mock.ExpectRollback()
 
-	repo := NewAsyncImageTaskRepository(db).(*asyncImageTaskRepository)
+	repo := requireAsyncImageTaskRepository(t, db)
 	err = repo.CompleteAsyncImageResultDeletion(context.Background(), 41, claimedAt)
 	require.ErrorIs(t, err, service.ErrAsyncImageInvalidTransition)
 	require.NoError(t, mock.ExpectationsWereMet())
@@ -146,7 +160,7 @@ func TestHasLiveImageObjectReferenceExcludesClaimedResultAndTask(t *testing.T) {
 		WithArgs("tencent", "images", "results/shared.png", int64(41), "asyncimg_task").
 		WillReturnRows(sqlmock.NewRows([]string{"exists"}).AddRow(true))
 
-	repo := NewAsyncImageTaskRepository(db).(*asyncImageTaskRepository)
+	repo := requireAsyncImageTaskRepository(t, db)
 	exists, err := repo.HasLiveImageObjectReference(context.Background(), service.ObjectRef{
 		Provider: "tencent", Bucket: "images", ObjectKey: "results/shared.png",
 	}, 41, "asyncimg_task")
@@ -174,7 +188,7 @@ func TestCompleteAsyncImageTaskDeletionMarksResultObjectsDeleted(t *testing.T) {
 		WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectCommit()
 
-	repo := NewAsyncImageTaskRepository(db).(*asyncImageTaskRepository)
+	repo := requireAsyncImageTaskRepository(t, db)
 	err = repo.CompleteAsyncImageTaskDeletion(context.Background(), "asyncimg_old", claimedAt)
 	require.NoError(t, err)
 	require.NoError(t, mock.ExpectationsWereMet())
@@ -194,7 +208,7 @@ func TestClaimExpiredInputsExcludesActiveTaskReferences(t *testing.T) {
 			"expires_at", "cleanup_claimed_at", "created_at",
 		}))
 
-	repo := NewAsyncImageTaskRepository(db).(*asyncImageTaskRepository)
+	repo := requireAsyncImageTaskRepository(t, db)
 	objects, err := repo.ClaimExpiredAsyncImageInputObjects(context.Background(), now, now.Add(-30*time.Minute), 25)
 	require.NoError(t, err)
 	require.Empty(t, objects)

@@ -194,7 +194,6 @@ func validateJPEGEndsAtFirstEOI(data []byte) error {
 		if data[pos] != 0xff {
 			return apperrors.BadRequest("INVALID_IMAGE", "invalid JPEG marker")
 		}
-		markerStart := pos
 		for pos < len(data) && data[pos] == 0xff {
 			pos++
 		}
@@ -248,7 +247,6 @@ func validateJPEGEndsAtFirstEOI(data []byte) error {
 				pos = next + 1
 				continue
 			}
-			pos = markerStart
 			pos = next - 1
 			break
 		}
@@ -264,17 +262,6 @@ func mimeFromFormat(format string) string {
 		return "image/webp"
 	default:
 		return "image/png"
-	}
-}
-
-func formatFromMime(mimeType string) string {
-	switch strings.ToLower(mimeType) {
-	case "image/jpeg", "image/jpg":
-		return "jpeg"
-	case "image/webp":
-		return "webp"
-	default:
-		return "png"
 	}
 }
 

@@ -75,7 +75,7 @@ func TestReserveAsyncImageUploadSerializesActiveBytesWithAdmission(t *testing.T)
 		WithArgs("asyncimg_admit", "asyncimg_upload", now).WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectCommit()
 
-	repo := NewAsyncImageTaskRepository(db).(*asyncImageTaskRepository)
+	repo := requireAsyncImageTaskRepository(t, db)
 	result, err := repo.ReserveAsyncImageUpload(context.Background(), service.ReserveAsyncImageUploadParams{
 		AdmissionID: "asyncimg_admit", ReservationID: "asyncimg_upload", UserID: 10, APIKeyID: 20,
 		RequestHash: hash, ByteSize: 200, UploadPerMinute: 20,
@@ -100,7 +100,7 @@ func TestAdmitAsyncImageUploadRejectsAtRollingLimitWithoutGrowingAttempts(t *tes
 		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(20))
 	mock.ExpectCommit()
 
-	repo := NewAsyncImageTaskRepository(db).(*asyncImageTaskRepository)
+	repo := requireAsyncImageTaskRepository(t, db)
 	_, err = repo.AdmitAsyncImageUpload(context.Background(), service.AdmitAsyncImageUploadParams{
 		AdmissionID: "asyncimg_limited", UserID: 10, APIKeyID: 20,
 		UploadPerMinute: 20, Now: now,
@@ -125,7 +125,7 @@ func TestReserveAsyncImageUploadIncludesStoredAndInflightBytes(t *testing.T) {
 		WillReturnRows(sqlmock.NewRows([]string{"stored", "reserved"}).AddRow(int64(850), int64(100)))
 	mock.ExpectCommit()
 
-	repo := NewAsyncImageTaskRepository(db).(*asyncImageTaskRepository)
+	repo := requireAsyncImageTaskRepository(t, db)
 	_, err = repo.ReserveAsyncImageUpload(context.Background(), service.ReserveAsyncImageUploadParams{
 		AdmissionID: "asyncimg_admit", ReservationID: "asyncimg_quota", UserID: 10, APIKeyID: 20,
 		RequestHash: "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
@@ -174,7 +174,7 @@ func TestReserveAsyncImageUploadReplayConsumesAdmissionAndBypassesBytes(t *testi
 	mock.ExpectExec("UPDATE async_image_upload_attempts SET reservation_id").WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectCommit()
 
-	repo := NewAsyncImageTaskRepository(db).(*asyncImageTaskRepository)
+	repo := requireAsyncImageTaskRepository(t, db)
 	result, err := repo.ReserveAsyncImageUpload(context.Background(), service.ReserveAsyncImageUploadParams{
 		AdmissionID: "asyncimg_admit", ReservationID: "ignored", UserID: 10, APIKeyID: 20, IdempotencyKey: &key,
 		RequestHash: hash, ByteSize: 12, UploadPerMinute: 20, MaxInputBytesPerKey: 1000,
@@ -205,7 +205,7 @@ func TestRegisterAsyncImageInputURLAliasRequiresOwnedLiveObject(t *testing.T) {
 		WithArgs(hash, int64(9), expiresAt).WillReturnResult(sqlmock.NewResult(1, 1))
 	mock.ExpectCommit()
 
-	repo := NewAsyncImageTaskRepository(db).(*asyncImageTaskRepository)
+	repo := requireAsyncImageTaskRepository(t, db)
 	err = repo.RegisterAsyncImageInputURLAlias(context.Background(), service.RegisterAsyncImageInputURLAliasParams{
 		InputObjectID: 9, UserID: 10, APIKeyID: 20, URLHash: hash, ExpiresAt: expiresAt,
 	})
@@ -229,7 +229,7 @@ func TestRegisterAsyncImageInputURLAliasRejectsBeyondPerObjectLimit(t *testing.T
 		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(maxAsyncImageInputURLAliases))
 	mock.ExpectRollback()
 
-	repo := NewAsyncImageTaskRepository(db).(*asyncImageTaskRepository)
+	repo := requireAsyncImageTaskRepository(t, db)
 	err = repo.RegisterAsyncImageInputURLAlias(context.Background(), service.RegisterAsyncImageInputURLAliasParams{
 		InputObjectID: 9, UserID: 10, APIKeyID: 20, URLHash: hash, ExpiresAt: expiresAt,
 	})
@@ -275,7 +275,7 @@ func TestCompleteAsyncImageUploadAtomicallyRegistersObjectAndClearsIntent(t *tes
 		WithArgs(int64(1), int64(9), expiresAt).WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectCommit()
 
-	repo := NewAsyncImageTaskRepository(db).(*asyncImageTaskRepository)
+	repo := requireAsyncImageTaskRepository(t, db)
 	object, err := repo.CompleteAsyncImageUpload(context.Background(), service.CompleteAsyncImageUploadParams{
 		ReservationID: "asyncimg_upload", UserID: 10, APIKeyID: 20, RequestHash: hash,
 		ObjectRef: ref, URLHash: urlHash, Filename: "reference.png", ExpiresAt: expiresAt,
@@ -310,7 +310,7 @@ func TestReserveAsyncImageUploadReturnsResultUnavailableForExpiredCompletedObjec
 		WillReturnRows(sqlmock.NewRows([]string{"id"}))
 	mock.ExpectRollback()
 
-	repo := NewAsyncImageTaskRepository(db).(*asyncImageTaskRepository)
+	repo := requireAsyncImageTaskRepository(t, db)
 	_, err = repo.ReserveAsyncImageUpload(context.Background(), service.ReserveAsyncImageUploadParams{
 		AdmissionID: "asyncimg_admit", ReservationID: "must-not-reuse", UserID: 10, APIKeyID: 20,
 		IdempotencyKey: &key, RequestHash: hash, ByteSize: 12, UploadPerMinute: 20,
@@ -343,7 +343,7 @@ func TestReserveAsyncImageUploadNeverClearsFailedOrphanIntent(t *testing.T) {
 			nil, 0, nil, nil,
 		))
 	mock.ExpectRollback()
-	repo := NewAsyncImageTaskRepository(db).(*asyncImageTaskRepository)
+	repo := requireAsyncImageTaskRepository(t, db)
 	_, err = repo.ReserveAsyncImageUpload(context.Background(), service.ReserveAsyncImageUploadParams{
 		AdmissionID: "asyncimg_admit", ReservationID: "must-not-reuse", UserID: 10, APIKeyID: 20,
 		IdempotencyKey: &key, RequestHash: hash, ByteSize: 12, UploadPerMinute: 20,
@@ -367,7 +367,7 @@ func TestClaimAsyncImageUploadCleanupIntentsUsesPutDeleteGrace(t *testing.T) {
 			"intent_content_type", "intent_byte_size", "intent_checksum", "cleanup_claimed_at",
 		}))
 
-	repo := NewAsyncImageTaskRepository(db).(*asyncImageTaskRepository)
+	repo := requireAsyncImageTaskRepository(t, db)
 	intents, err := repo.ClaimAsyncImageUploadCleanupIntents(context.Background(), now, staleBefore, 100)
 	require.NoError(t, err)
 	require.Empty(t, intents)
@@ -388,7 +388,7 @@ func TestCompleteAsyncImageUploadIntentDeletionRequiresTwoPasses(t *testing.T) {
 		mock.ExpectExec("UPDATE async_image_upload_reservations SET.*cleanup_delete_count=1.*cleanup_claimed_at=NULL").
 			WithArgs("asyncimg_orphan", now).WillReturnResult(sqlmock.NewResult(0, 1))
 		mock.ExpectCommit()
-		repo := NewAsyncImageTaskRepository(db).(*asyncImageTaskRepository)
+		repo := requireAsyncImageTaskRepository(t, db)
 		removed, err := repo.CompleteAsyncImageUploadIntentDeletion(context.Background(), "asyncimg_orphan", now)
 		require.NoError(t, err)
 		require.False(t, removed)
@@ -406,7 +406,7 @@ func TestCompleteAsyncImageUploadIntentDeletionRequiresTwoPasses(t *testing.T) {
 		mock.ExpectExec("DELETE FROM async_image_upload_reservations.*cleanup_delete_count=1.*last_deleted_at <= NOW\\(\\) - INTERVAL '10 minutes'").
 			WithArgs("asyncimg_orphan", now).WillReturnResult(sqlmock.NewResult(0, 1))
 		mock.ExpectCommit()
-		repo := NewAsyncImageTaskRepository(db).(*asyncImageTaskRepository)
+		repo := requireAsyncImageTaskRepository(t, db)
 		removed, err := repo.CompleteAsyncImageUploadIntentDeletion(context.Background(), "asyncimg_orphan", now)
 		require.NoError(t, err)
 		require.True(t, removed)
@@ -431,7 +431,7 @@ func TestAsyncImageUploadIntentIsPersistedBeforePutAndFailureReleasesBytes(t *te
 	mock.ExpectExec("(?s)UPDATE async_image_upload_reservations SET.*status='failed'.*WHERE reservation_id=.*status='reserved'").
 		WithArgs("asyncimg_upload", hash, "put_failed").WillReturnResult(sqlmock.NewResult(0, 1))
 
-	repo := NewAsyncImageTaskRepository(db).(*asyncImageTaskRepository)
+	repo := requireAsyncImageTaskRepository(t, db)
 	require.NoError(t, repo.SetAsyncImageUploadObjectIntent(context.Background(), service.SetAsyncImageUploadObjectIntentParams{
 		ReservationID: "asyncimg_upload", UserID: 10, APIKeyID: 20, RequestHash: hash, ObjectRef: ref,
 	}))
@@ -452,7 +452,7 @@ func TestAsyncImageInputAliasAlwaysResolvesToOwnershipCheckEvenAfterSignatureExp
 			"content_type", "byte_size", "checksum", "width", "height", "url_hash", "filename",
 			"expires_at", "cleanup_claimed_at", "created_at",
 		}))
-	repo := NewAsyncImageTaskRepository(db).(*asyncImageTaskRepository)
+	repo := requireAsyncImageTaskRepository(t, db)
 	objects, err := repo.FindAsyncImageInputObjectsByURLHashes(context.Background(), []string{
 		"7878787878787878787878787878787878787878787878787878787878787878",
 	})
@@ -482,7 +482,7 @@ func TestDeleteExpiredAsyncImageUploadStateIsGlobalAndBounded(t *testing.T) {
 	mock.ExpectQuery("(?s)stale_attempts.*attempted_at < \\$1::timestamptz - INTERVAL '5 minutes'.*LIMIT \\$2.*stale_reservations.*intent_object_key IS NULL.*LIMIT \\$2").
 		WithArgs(now, 100).
 		WillReturnRows(sqlmock.NewRows([]string{"deleted"}).AddRow(int64(2)))
-	repo := NewAsyncImageTaskRepository(db).(*asyncImageTaskRepository)
+	repo := requireAsyncImageTaskRepository(t, db)
 	deleted, err := repo.DeleteExpiredAsyncImageUploadAdmissionState(context.Background(), now, 100)
 	require.NoError(t, err)
 	require.Equal(t, int64(2), deleted)

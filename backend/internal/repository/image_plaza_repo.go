@@ -155,7 +155,7 @@ LIMIT $2 OFFSET $3`, like, pageSize, offset)
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	items := make([]service.ImagePlazaItem, 0, pageSize)
 	for rows.Next() {

@@ -11,6 +11,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -2046,10 +2047,14 @@ func configureConfigSource(setConfigFile, addConfigPath func(string)) {
 	if dataDir := strings.TrimSpace(os.Getenv("DATA_DIR")); dataDir != "" {
 		addConfigPath(dataDir)
 	}
-	addConfigPath("/app/data")
+	if runtime.GOOS != "windows" {
+		addConfigPath("/app/data")
+	}
 	addConfigPath(".")
 	addConfigPath("./config")
-	addConfigPath("/etc/sub2api")
+	if runtime.GOOS != "windows" {
+		addConfigPath("/etc/sub2api")
+	}
 }
 
 func setDefaults() {
@@ -2334,6 +2339,15 @@ func setDefaults() {
 	viper.SetDefault("image_durable_storage.oss.access_key_id", "")
 	viper.SetDefault("image_durable_storage.oss.secret_access_key", "")
 	viper.SetDefault("image_durable_storage.oss.public_base_url", "")
+	// Register nested backend-specific keys so AutomaticEnv can reach values
+	// supplied entirely through IMAGE_DURABLE_STORAGE_OSS_* variables.
+	viper.SetDefault("image_durable_storage.oss.backend", "")
+	viper.SetDefault("image_durable_storage.oss.local.data_dir", "")
+	viper.SetDefault("image_durable_storage.oss.local.local_url", "")
+	viper.SetDefault("image_durable_storage.oss.superbed.categories", "")
+	viper.SetDefault("image_durable_storage.oss.superbed.local_url", "")
+	viper.SetDefault("image_durable_storage.oss.superbed.token", "")
+	viper.SetDefault("image_durable_storage.oss.superbed.upload_url", "https://api.superbed.cn/upload")
 
 	// Durable asynchronous image task runtime. The admin setting can override
 	// this fallback at runtime without restarting the service.

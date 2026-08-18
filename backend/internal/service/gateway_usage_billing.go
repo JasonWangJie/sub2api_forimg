@@ -1041,6 +1041,8 @@ func (s *GatewayService) compositeBillableModel(ctx context.Context, apiKey *API
 // billableModelWithFallback 在选定计费模型（可能是 composite 公开别名或未定价的映射名）
 // 查不到任何价格（渠道价与全局价均无）时，按序回退到实际转发的具体模型，避免静默 $0 计费。
 // 所有候选都无价时保持原值，走既有的 warn + 零成本路径。
+//
+//nolint:unused // 兼容旧计费测试；生产路径使用 compositeBillableModel。
 func (s *GatewayService) billableModelWithFallback(ctx context.Context, apiKey *APIKey, billingModel string, fallbacks ...string) string {
 	if s.hasResolvableTokenPricing(ctx, billingModel, apiKey) {
 		return billingModel
@@ -1059,6 +1061,8 @@ func (s *GatewayService) billableModelWithFallback(ctx context.Context, apiKey *
 }
 
 // hasResolvableTokenPricing 判断模型是否能在渠道定价或全局价格表中解析出 token 价格。
+//
+//nolint:unused // 由 billableModelWithFallback 间接使用。
 func (s *GatewayService) hasResolvableTokenPricing(ctx context.Context, model string, apiKey *APIKey) bool {
 	if strings.TrimSpace(model) == "" {
 		return false
@@ -1143,6 +1147,8 @@ func (s *GatewayService) calculateImageTierCost(
 }
 
 // calculateTokenCost 计算 Token 计费：根据 opts 决定走普通/长上下文/渠道统一计费。
+//
+//nolint:unused // 保留旧调用约定，生产入口使用带错误返回的 tryCalculateTokenCost。
 func (s *GatewayService) calculateTokenCost(
 	ctx context.Context,
 	result *ForwardResult,

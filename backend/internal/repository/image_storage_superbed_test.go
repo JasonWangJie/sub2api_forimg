@@ -22,7 +22,7 @@ func TestSuperbedImageStorageUploadAndSign(t *testing.T) {
 		require.Equal(t, "album-a", r.FormValue("categories"))
 		file, header, err := r.FormFile("file")
 		require.NoError(t, err)
-		defer file.Close()
+		defer func() { _ = file.Close() }()
 		require.Equal(t, "000.png", header.Filename)
 		body, err := io.ReadAll(file)
 		require.NoError(t, err)

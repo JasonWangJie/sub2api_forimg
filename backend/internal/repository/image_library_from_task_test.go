@@ -30,7 +30,7 @@ func TestCreateAssetFromTaskLocksUnclaimedTaskAndResultAgainstRetention(t *testi
 		}))
 	mock.ExpectRollback()
 
-	repo := NewImageLibraryRepository(db).(*imageLibraryRepository)
+	repo := requireImageLibraryRepository(t, db)
 	_, reused, err := repo.CreateAssetFromTask(context.Background(), 42, "asyncimg_task", 0, nil, "", time.Now().UTC().Add(24*time.Hour), 1000, 5<<30)
 	require.Error(t, err)
 	require.False(t, reused)

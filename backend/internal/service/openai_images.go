@@ -1118,10 +1118,6 @@ func rewriteOpenAIImagesMultipartFields(body []byte, contentType string, setFiel
 	return buffer.Bytes(), writer.FormDataContentType(), nil
 }
 
-func rewriteOpenAIImagesMultipartModel(body []byte, contentType string, model string) ([]byte, string, error) {
-	return rewriteOpenAIImagesMultipartFields(body, contentType, map[string]string{"model": model}, nil)
-}
-
 func cloneMultipartHeader(src textproto.MIMEHeader) textproto.MIMEHeader {
 	dst := make(textproto.MIMEHeader, len(src))
 	for key, values := range src {

@@ -615,7 +615,7 @@ func TestOpenAIResponseFlush_NewAPIFirstDataHTTPSmoke(t *testing.T) {
 	require.NoError(t, err)
 	response, err := server.Client().Do(request)
 	require.NoError(t, err)
-	defer response.Body.Close()
+	defer func() { _ = response.Body.Close() }()
 	require.Equal(t, "text/event-stream", response.Header.Get("Content-Type"))
 	require.Equal(t, "no-cache, no-transform", response.Header.Get("Cache-Control"))
 

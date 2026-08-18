@@ -33,7 +33,7 @@ func TestDeleteLegacyPlazaForUserWithdrawsAndSoftDeletesInOneTransaction(t *test
 		WillReturnResult(sqlmock.NewResult(1, 1))
 	mock.ExpectCommit()
 
-	repo := NewImageLibraryRepository(db).(*imageLibraryRepository)
+	repo := requireImageLibraryRepository(t, db)
 	found, err := repo.DeleteLegacyPlazaForUser(context.Background(), 42, "imgpub_public", "")
 	require.NoError(t, err)
 	require.True(t, found)
@@ -51,7 +51,7 @@ func TestDeleteLegacyPlazaForUserHidesCrossUserAndMissingRecords(t *testing.T) {
 		WillReturnRows(sqlmock.NewRows([]string{"id"}))
 	mock.ExpectRollback()
 
-	repo := NewImageLibraryRepository(db).(*imageLibraryRepository)
+	repo := requireImageLibraryRepository(t, db)
 	found, err := repo.DeleteLegacyPlazaForUser(context.Background(), 42, "7", "legacy-image-plaza:7")
 	require.NoError(t, err)
 	require.False(t, found)

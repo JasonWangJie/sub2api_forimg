@@ -353,8 +353,14 @@ func (h *DurableAsyncImageHandler) checkSecurityAuditBeforeSubmit(
 }
 
 func (h *DurableAsyncImageHandler) resolveAsyncImageBillingGroup(ctx context.Context, apiKey *service.APIKey, expectedPlatform string) (*service.Group, error) {
-	if h == nil || h.apiKeys == nil {
+	if h == nil || apiKey == nil {
 		return nil, infraerrors.New(http.StatusServiceUnavailable, "async_image_unavailable", "asynchronous image generation is unavailable")
+	}
+	if h.apiKeys == nil {
+		if err := validateAsyncImageGroup(apiKey, expectedPlatform); err != nil {
+			return nil, err
+		}
+		return apiKey.Group, nil
 	}
 	return h.apiKeys.ResolveAsyncImageBillingGroup(ctx, apiKey, expectedPlatform)
 }
@@ -878,7 +884,9 @@ func asyncImageUploadFilename(raw string) string {
 		if r < 0x20 || r == 0x7f {
 			continue
 		}
-		cleaned.WriteRune(r)
+		if _, err := cleaned.WriteRune(r); err != nil {
+			return ""
+		}
 	}
 	name = strings.TrimSpace(cleaned.String())
 	if len(name) <= 255 {
@@ -889,7 +897,9 @@ func asyncImageUploadFilename(raw string) string {
 		if cleaned.Len()+len(string(r)) > 255 {
 			break
 		}
-		cleaned.WriteRune(r)
+		if _, err := cleaned.WriteRune(r); err != nil {
+			return ""
+		}
 	}
 	return strings.TrimSpace(cleaned.String())
 }

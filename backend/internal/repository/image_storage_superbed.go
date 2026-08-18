@@ -154,7 +154,7 @@ func (s *SuperbedImageStorage) SaveObject(ctx context.Context, key, contentType 
 	if err != nil {
 		return service.ObjectRef{}, fmt.Errorf("superbed upload: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	respBody, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 	if err != nil {
 		return service.ObjectRef{}, fmt.Errorf("superbed read response: %w", err)

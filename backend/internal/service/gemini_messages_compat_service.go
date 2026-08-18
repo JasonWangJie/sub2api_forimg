@@ -1590,7 +1590,7 @@ func (s *GeminiMessagesCompatService) ForwardNative(ctx context.Context, c *gin.
 
 	var usage *ClaudeUsage
 	var firstTokenMs *int
-	imageCounter := newGeminiImageOutputCounter()
+	var imageCounter *geminiImageOutputCounter
 
 	if stream {
 		streamRes, err := s.handleNativeStreamingResponse(c, resp, startTime, isOAuth)

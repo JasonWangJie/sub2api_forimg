@@ -399,7 +399,7 @@ handleSuccess:
 	var usage *ClaudeUsage
 	var firstTokenMs *int
 	var clientDisconnect bool
-	imageCounter := newGeminiImageOutputCounter()
+	var imageCounter *geminiImageOutputCounter
 
 	if stream {
 		// 客户端要求流式，直接透传

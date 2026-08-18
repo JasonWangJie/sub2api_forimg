@@ -57,7 +57,7 @@ func (h *DurableAsyncImageHandler) ServeLocalObject(c *gin.Context) {
 		c.AbortWithStatus(http.StatusNotFound)
 		return
 	}
-	defer body.Close()
+	defer func() { _ = body.Close() }()
 
 	contentType := "application/octet-stream"
 	if meta, headErr := storage.Head(c.Request.Context(), ref); headErr == nil && meta.ContentType != "" {

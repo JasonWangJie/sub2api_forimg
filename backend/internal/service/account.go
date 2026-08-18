@@ -667,7 +667,6 @@ func modelMappingSignature(rawMapping map[string]any) uint64 {
 		for index := 0; index < len(key); index++ {
 			entryHash = (entryHash ^ uint64(key[index])) * fnvPrime
 		}
-		entryHash = (entryHash ^ 0) * fnvPrime
 		if value, ok := rawValue.(string); ok {
 			for index := 0; index < len(value); index++ {
 				entryHash = (entryHash ^ uint64(value[index])) * fnvPrime

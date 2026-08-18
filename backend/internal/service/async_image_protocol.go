@@ -487,7 +487,11 @@ func (d AsyncImageReferenceDownloader) Download(ctx context.Context, rawURL stri
 		return nil, errors.New("reference image URL must be an absolute HTTPS URL or an image data URI")
 	}
 
-	transport := http.DefaultTransport.(*http.Transport).Clone()
+	baseTransport, ok := http.DefaultTransport.(*http.Transport)
+	if !ok {
+		return nil, errors.New("reference image downloader requires an HTTP transport")
+	}
+	transport := baseTransport.Clone()
 	transport.Proxy = nil
 	transport.DialContext = d.safeDialContext
 	client := &http.Client{
@@ -791,12 +795,4 @@ func AsyncImageSignedURLExpiryUnix(now time.Time, expiry time.Duration, public b
 		return 0
 	}
 	return now.Add(expiry).Unix()
-}
-
-func parsePositiveInt(raw string, fallback int) int {
-	value, err := strconv.Atoi(strings.TrimSpace(raw))
-	if err != nil || value <= 0 {
-		return fallback
-	}
-	return value
 }

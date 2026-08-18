@@ -195,14 +195,12 @@ func normalizeOpenAIImagesDimensions(req *OpenAIImagesRequest) error {
 				req.AspectRatio = normalizeOpenAIImageAspectRatio(size)
 			}
 			req.Size = ""
-			size = ""
 		case normalizeOpenAIImageResolution(size) != "" && normalizeOpenAIImageResolution(size) != "auto":
 			// Treat size="1K"/"2K"/"4K" as resolution for convenience.
 			if req.Resolution == "" {
 				req.Resolution = normalizeOpenAIImageResolution(size)
 			}
 			req.Size = ""
-			size = ""
 		default:
 			// Unknown legacy size values are owned by the upstream endpoint. Keep
 			// them intact instead of blocking passthrough. Dimension aliases stay

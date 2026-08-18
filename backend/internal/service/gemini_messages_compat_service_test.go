@@ -626,12 +626,23 @@ func TestConvertClaudeMessagesToGeminiGenerateContent_ImageURLToFileData(t *test
 
 	var got map[string]any
 	require.NoError(t, json.Unmarshal(out, &got))
-	contents := got["contents"].([]any)
-	parts := contents[0].(map[string]any)["parts"].([]any)
-	fileData := parts[0].(map[string]any)["fileData"].(map[string]any)
+	contents, ok := got["contents"].([]any)
+	require.True(t, ok)
+	require.NotEmpty(t, contents)
+	content, ok := contents[0].(map[string]any)
+	require.True(t, ok)
+	parts, ok := content["parts"].([]any)
+	require.True(t, ok)
+	require.GreaterOrEqual(t, len(parts), 2)
+	firstPart, ok := parts[0].(map[string]any)
+	require.True(t, ok)
+	fileData, ok := firstPart["fileData"].(map[string]any)
+	require.True(t, ok)
 	require.Equal(t, "https://example.com/ref.png", fileData["fileUri"])
 	require.Equal(t, "image/png", fileData["mimeType"])
-	require.Equal(t, "restyle", parts[1].(map[string]any)["text"])
+	secondPart, ok := parts[1].(map[string]any)
+	require.True(t, ok)
+	require.Equal(t, "restyle", secondPart["text"])
 }
 
 func TestEnsureGeminiFunctionCallThoughtSignatures_InsertsWhenMissing(t *testing.T) {

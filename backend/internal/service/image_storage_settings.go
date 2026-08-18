@@ -535,6 +535,7 @@ func (s *ImageStorageSettingService) Update(ctx context.Context, in ImageStorage
 	return &in, nil
 }
 
+//nolint:unused // 身份保护接口由后续部署策略启用，保留实现以兼容已生成的 Wire 图。
 type imageStorageIdentity struct {
 	Backend        string
 	Provider       string
@@ -547,6 +548,7 @@ type imageStorageIdentity struct {
 	SuperbedURL    string
 }
 
+//nolint:unused // 由可选的 ImageStorageIdentityGuard 部署策略调用。
 func (s *ImageStorageSettingService) preventStorageIdentityChange(ctx context.Context, next *ImageStorageSettings) error {
 	if s == nil || s.identityGuard == nil || next == nil {
 		return nil
@@ -579,6 +581,7 @@ func (s *ImageStorageSettingService) preventStorageIdentityChange(ctx context.Co
 	return nil
 }
 
+//nolint:unused // 仅在启用 ImageStorageIdentityGuard 时解析对象归属。
 func (s *ImageStorageSettingService) storageIdentity(ctx context.Context, settings *ImageStorageSettings) (imageStorageIdentity, error) {
 	cfg, err := s.toImageStorageConfig(ctx, settings)
 	if err != nil {
@@ -613,14 +616,15 @@ func (s *ImageStorageSettingService) storageIdentity(ctx context.Context, settin
 func (s *ImageStorageSettingService) TestConnection(ctx context.Context, in ImageStorageSettings) error {
 	normalizeImageStorageSettings(&in)
 	backend := in.Backend
-	if backend == ImageStorageBackendSuperbed {
+	switch backend {
+	case ImageStorageBackendSuperbed:
 		if in.Superbed.Token == "" {
 			old, err := s.load(ctx)
 			if err == nil && old != nil {
 				in.Superbed.Token = old.Superbed.Token
 			}
 		}
-	} else if backend == ImageStorageBackendOSS || backend == "" {
+	case ImageStorageBackendOSS, "":
 		if !in.ReuseBackupS3 && in.SecretAccessKey == "" {
 			old, err := s.load(ctx)
 			if err == nil && old != nil {

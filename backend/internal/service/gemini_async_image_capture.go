@@ -177,7 +177,7 @@ func ApplyGeminiImageConfigFromChatBody(ctx context.Context, geminiBody, chatBod
 
 func ExtractGeminiGeneratedImages(response map[string]any) ([]GeminiGeneratedImage, error) {
 	if response == nil {
-		return nil, errors.New("Gemini image response is empty")
+		return nil, errors.New("gemini image response is empty")
 	}
 	images := make([]GeminiGeneratedImage, 0, 1)
 	candidates, _ := response["candidates"].([]any)
@@ -201,7 +201,7 @@ func ExtractGeminiGeneratedImages(response map[string]any) ([]GeminiGeneratedIma
 			}
 			data, err := base64.StdEncoding.DecodeString(encoded)
 			if err != nil || len(data) == 0 {
-				return nil, errors.New("Gemini returned invalid base64 image data")
+				return nil, errors.New("gemini returned invalid base64 image data")
 			}
 			sum := sha256.Sum256(data)
 			images = append(images, GeminiGeneratedImage{
@@ -212,7 +212,7 @@ func ExtractGeminiGeneratedImages(response map[string]any) ([]GeminiGeneratedIma
 		}
 	}
 	if len(images) == 0 {
-		return nil, errors.New("Gemini response did not contain a generated image")
+		return nil, errors.New("gemini response did not contain a generated image")
 	}
 	return images, nil
 }

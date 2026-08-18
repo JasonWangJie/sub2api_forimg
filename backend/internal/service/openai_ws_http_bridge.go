@@ -504,10 +504,6 @@ func (s *OpenAIGatewayService) proxyOpenAIWSHTTPBridgeTurn(
 	return resultWithUsage(), terminalErr
 }
 
-func resolveGrokWSCacheIdentity(c *gin.Context, account *Account, seedPayload, currentPayload []byte, originalModel string) (string, error) {
-	return resolveGrokWSCacheIdentityForRequest(context.Background(), c, account, seedPayload, currentPayload, originalModel)
-}
-
 func resolveGrokWSCacheIdentityForRequest(ctx context.Context, c *gin.Context, account *Account, seedPayload, currentPayload []byte, originalModel string) (string, error) {
 	body, err := prepareOpenAIWSHTTPBridgeBody(seedPayload)
 	if err != nil {
@@ -519,10 +515,6 @@ func resolveGrokWSCacheIdentityForRequest(ctx context.Context, c *gin.Context, a
 		return "", err
 	}
 	return resolveGrokCacheIdentity(c, body, "", upstreamModel), nil
-}
-
-func resolveGrokWSUpstreamModel(account *Account, body []byte, originalModel string) string {
-	return resolveGrokWSUpstreamModelForRequest(context.Background(), account, body, originalModel)
 }
 
 func resolveGrokWSUpstreamModelForRequest(ctx context.Context, account *Account, body []byte, originalModel string) string {

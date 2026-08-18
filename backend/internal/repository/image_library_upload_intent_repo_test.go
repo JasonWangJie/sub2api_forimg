@@ -28,7 +28,7 @@ func TestPrepareLibraryUploadIntentPersistsFinalIdentityBeforeUpload(t *testing.
 		WithArgs(intent.Provider, intent.Bucket, intent.ObjectKey, intent.ContentType, intent.SizeBytes, intent.ChecksumSHA256, expiresAt).
 		WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(int64(17)))
 
-	repo := NewImageLibraryRepository(db).(*imageLibraryRepository)
+	repo := requireImageLibraryRepository(t, db)
 	id, err := repo.PrepareLibraryUploadIntent(context.Background(), intent)
 	require.NoError(t, err)
 	require.Equal(t, int64(17), id)
@@ -52,7 +52,7 @@ func TestClaimExpiredLibraryUploadIntentsReturnsReferenceDecision(t *testing.T) 
 			"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", now.Add(-time.Hour), claimedAt, false,
 		))
 
-	repo := NewImageLibraryRepository(db).(*imageLibraryRepository)
+	repo := requireImageLibraryRepository(t, db)
 	intents, err := repo.ClaimExpiredLibraryUploadIntents(context.Background(), now, now.Add(-2*time.Minute), 100)
 	require.NoError(t, err)
 	require.Len(t, intents, 1)
@@ -72,7 +72,7 @@ func TestCompleteLibraryUploadIntentRequiresOwnedRow(t *testing.T) {
 		WithArgs(int64(31)).
 		WillReturnResult(sqlmock.NewResult(0, 0))
 
-	repo := NewImageLibraryRepository(db).(*imageLibraryRepository)
+	repo := requireImageLibraryRepository(t, db)
 	require.Error(t, repo.CompleteLibraryUploadIntent(context.Background(), 31))
 	require.NoError(t, mock.ExpectationsWereMet())
 }
