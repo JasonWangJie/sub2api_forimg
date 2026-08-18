@@ -115,8 +115,8 @@ WHERE user_id=$1 AND idempotency_key=$2 AND deleted_at IS NULL`, in.UserID, *in.
 		err = tx.QueryRowContext(ctx, `
 SELECT request_hash,state,updated_at FROM image_library_import_attempts
 WHERE user_id=$1 AND idempotency_key=$2 FOR UPDATE`, in.UserID, *in.IdempotencyKey).Scan(&attemptHash, &state, &updatedAt)
-		switch {
-		case err == nil:
+		switch err {
+		case nil:
 			if attemptHash != in.RequestHash {
 				return nil, false, apperrors.Conflict("IDEMPOTENCY_CONFLICT", "Idempotency-Key was already used with a different request")
 			}
@@ -139,7 +139,7 @@ WHERE user_id=$1 AND idempotency_key=$2`, in.UserID, *in.IdempotencyKey)
 					return nil, false, err
 				}
 			}
-		case err == sql.ErrNoRows:
+		case sql.ErrNoRows:
 			_, err = tx.ExecContext(ctx, `
 INSERT INTO image_library_import_attempts(user_id,idempotency_key,request_hash)
 VALUES($1,$2,$3)`, in.UserID, *in.IdempotencyKey, in.RequestHash)
@@ -830,12 +830,13 @@ func (r *imageLibraryRepository) CreatePublication(ctx context.Context, in servi
 		moderation = "approved"
 	}
 	err = tx.QueryRowContext(ctx, `SELECT id,status FROM image_plaza_publications WHERE library_item_id=$1 AND status IN ('pending_review','published','admin_hidden') FOR UPDATE`, assetPK).Scan(&id, &activeStatus)
-	if err == nil {
+	switch err {
+	case nil:
 		if activeStatus != service.ImagePublicationPending {
 			return nil, apperrors.Conflict("ACTIVE_PUBLICATION_EXISTS", "withdraw the current publication before submitting again")
 		}
 		_, err = tx.ExecContext(ctx, `UPDATE image_plaza_publications SET public_title=$2,public_prompt=$3,share_prompt=$4,expires_at=GREATEST(expires_at,$5),updated_at=NOW() WHERE id=$1`, id, in.PublicTitle, publicPrompt, in.SharePrompt, in.ExpiresAt)
-	} else if err == sql.ErrNoRows {
+	case sql.ErrNoRows:
 		err = tx.QueryRowContext(ctx, `
 INSERT INTO image_plaza_publications (
  public_id,library_item_id,user_id,status,public_title,public_prompt,share_prompt,

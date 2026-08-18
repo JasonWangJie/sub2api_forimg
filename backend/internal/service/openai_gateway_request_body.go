@@ -335,7 +335,7 @@ func normalizeOpenAICodexCompactReasoningEffortForAccount(c *gin.Context, accoun
 	}
 
 	requestedModel := strings.TrimSpace(gjson.GetBytes(body, "model").String())
-	effectiveModel := requestedModel
+	var effectiveModel string
 	if c != nil && c.Request != nil {
 		effectiveModel = account.GetMappedModelForRequest(c.Request.Context(), requestedModel)
 	} else {

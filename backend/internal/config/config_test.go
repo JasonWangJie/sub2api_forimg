@@ -5,6 +5,7 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -322,6 +323,23 @@ func TestLoadReturnsErrorForMissingConfigFile(t *testing.T) {
 
 	_, err := Load()
 	require.ErrorContains(t, err, "read config error")
+}
+
+func TestConfigureConfigSourceUsesContainerPathsOnlyOutsideWindows(t *testing.T) {
+	var paths []string
+	configureConfigSource(func(string) {
+		t.Fatal("CONFIG_FILE must be unset for this test")
+	}, func(path string) {
+		paths = append(paths, path)
+	})
+
+	if runtime.GOOS == "windows" {
+		require.NotContains(t, paths, "/app/data")
+		require.NotContains(t, paths, "/etc/sub2api")
+		return
+	}
+	require.Contains(t, paths, "/app/data")
+	require.Contains(t, paths, "/etc/sub2api")
 }
 
 func TestLoadForBootstrapAllowsMissingJWTSecret(t *testing.T) {

@@ -26,9 +26,9 @@ func NewAdminAPIKeyHandler(adminService service.AdminService, apiKeyService *ser
 
 // AdminUpdateAPIKeyGroupRequest represents the request to update an API key.
 type AdminUpdateAPIKeyGroupRequest struct {
-	GroupID             *int64             `json:"group_id"`               // nil=不修改, 0=解绑, >0=绑定到目标分组
-	ResetRateLimitUsage *bool              `json:"reset_rate_limit_usage"` // true=重置 5h/1d/7d 限速用量
-	ImagePlatformGroups *map[string]int64  `json:"image_platform_groups"`  // nil=不修改；非 nil 整表替换
+	GroupID             *int64            `json:"group_id"`               // nil=不修改, 0=解绑, >0=绑定到目标分组
+	ResetRateLimitUsage *bool             `json:"reset_rate_limit_usage"` // true=重置 5h/1d/7d 限速用量
+	ImagePlatformGroups *map[string]int64 `json:"image_platform_groups"`  // nil=不修改；非 nil 整表替换
 }
 
 // UpdateGroup handles updating an API key's admin-managed fields.

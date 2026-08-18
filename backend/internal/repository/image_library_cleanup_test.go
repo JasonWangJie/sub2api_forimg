@@ -81,7 +81,7 @@ func TestPrepareExpiredCleanupBatchMarksPublicationExpiredAndAppendsEvent(t *tes
 		WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectCommit()
 
-	repo := NewImageLibraryRepository(db).(*imageLibraryRepository)
+	repo := requireImageLibraryRepository(t, db)
 	batch, err := repo.PrepareCleanupBatch(context.Background(), 9, 4, "expired", json.RawMessage(`{}`), 100)
 	require.NoError(t, err)
 	require.Equal(t, int64(1), batch.MatchedItems)
@@ -106,7 +106,7 @@ func TestPrepareOutboxCleanupProtectsActivePublicationObject(t *testing.T) {
 		WillReturnRows(sqlmock.NewRows([]string{"provider", "bucket", "object_key", "content_type", "byte_size", "checksum_sha256", "width", "height"}))
 	mock.ExpectCommit()
 
-	repo := NewImageLibraryRepository(db).(*imageLibraryRepository)
+	repo := requireImageLibraryRepository(t, db)
 	objects, err := repo.PrepareOutboxCleanup(context.Background(), 17)
 	require.NoError(t, err)
 	require.Empty(t, objects)

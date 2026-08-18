@@ -229,7 +229,7 @@ func mergeImageWorkbenchAsyncEndpoints(out *ImageWorkbenchCapabilities, groups [
 			hasOpenAI = true
 		}
 	}
-	if !(hasGemini && hasOpenAI) {
+	if !hasGemini || !hasOpenAI {
 		return
 	}
 	// Dual-use keys expose both async surfaces while keeping the preferred platform/protocol.

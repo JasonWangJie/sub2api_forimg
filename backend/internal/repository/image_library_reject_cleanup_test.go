@@ -58,7 +58,7 @@ func TestTransitionPublicationRejectDeletesRealtimeImportAndEnqueuesCleanup(t *t
 		))
 	mock.ExpectCommit()
 
-	repo := NewImageLibraryRepository(db).(*imageLibraryRepository)
+	repo := requireImageLibraryRepository(t, db)
 	publication, err := repo.TransitionPublication(context.Background(), 1, "imgpub_1", "reject", "nsfw", retention)
 	require.NoError(t, err)
 	require.Equal(t, service.ImagePublicationRejected, publication.Status)
@@ -100,7 +100,7 @@ func TestTransitionPublicationRejectKeepsAsyncTaskLibraryItem(t *testing.T) {
 		))
 	mock.ExpectCommit()
 
-	repo := NewImageLibraryRepository(db).(*imageLibraryRepository)
+	repo := requireImageLibraryRepository(t, db)
 	publication, err := repo.TransitionPublication(context.Background(), 1, "imgpub_2", "reject", "bad", retention)
 	require.NoError(t, err)
 	require.Equal(t, service.ImagePublicationRejected, publication.Status)

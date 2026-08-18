@@ -522,7 +522,7 @@ func (s *GatewayService) buildCountTokensRequest(ctx context.Context, c *gin.Con
 	}
 
 	// 账号级兼容模式忽略下游指纹头；OAuth 路径保持既有 count_tokens 行为。
-	if !(account.IsAnthropicClaudeCodeMimicEnabled() && mimicClaudeCode) {
+	if !account.IsAnthropicClaudeCodeMimicEnabled() || !mimicClaudeCode {
 		for key, values := range clientHeaders {
 			lowerKey := strings.ToLower(key)
 			if allowedHeaders[lowerKey] {

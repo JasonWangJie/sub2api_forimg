@@ -234,7 +234,7 @@ func TestOpenAIStreamingPassthroughEarlyFlushesCreatedBeforeSemanticOutput(t *te
 			-1,
 			config.GatewayConfig{OpenAIEarlyFlushCreated: true},
 			func(c *gin.Context) {
-				streamWriter = c.Writer.(*passthroughFlushTestWriter)
+				streamWriter, _ = c.Writer.(*passthroughFlushTestWriter)
 				close(writerReady)
 			},
 		)
@@ -243,6 +243,7 @@ func TestOpenAIStreamingPassthroughEarlyFlushesCreatedBeforeSemanticOutput(t *te
 	}()
 
 	<-writerReady
+	require.NotNil(t, streamWriter)
 	select {
 	case <-createdBoundaryWaiting:
 	case <-time.After(3 * time.Second):

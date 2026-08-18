@@ -265,7 +265,7 @@ func (h *ImageLibraryHandler) View(c *gin.Context) {
 		return
 	}
 	if reader != nil {
-		defer reader.Close()
+		defer func() { _ = reader.Close() }()
 		writeImageObjectStream(c, reader, contentType)
 		return
 	}
@@ -517,7 +517,7 @@ func (h *ImageLibraryHandler) AdminView(c *gin.Context) {
 		return
 	}
 	if reader != nil {
-		defer reader.Close()
+		defer func() { _ = reader.Close() }()
 		writeImageObjectStream(c, reader, contentType)
 		return
 	}
@@ -557,7 +557,7 @@ func (h *ImageLibraryHandler) AdminViewPublication(c *gin.Context) {
 		return
 	}
 	if reader != nil {
-		defer reader.Close()
+		defer func() { _ = reader.Close() }()
 		writeImageObjectStream(c, reader, contentType)
 		return
 	}

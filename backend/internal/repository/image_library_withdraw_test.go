@@ -24,7 +24,7 @@ func TestWithdrawPublicationCannotOverrideAdminHiddenState(t *testing.T) {
 		WillReturnRows(sqlmock.NewRows([]string{"id", "status"}))
 	mock.ExpectRollback()
 
-	repo := NewImageLibraryRepository(db).(*imageLibraryRepository)
+	repo := requireImageLibraryRepository(t, db)
 	err = repo.WithdrawPublication(context.Background(), 42, "img_hidden")
 	require.ErrorIs(t, err, service.ErrImagePublicationNotFound)
 	require.NoError(t, mock.ExpectationsWereMet())
@@ -44,7 +44,7 @@ func TestDeleteForUserCannotDeleteAdminHiddenPublication(t *testing.T) {
 		WillReturnRows(sqlmock.NewRows([]string{"exists"}).AddRow(true))
 	mock.ExpectRollback()
 
-	repo := NewImageLibraryRepository(db).(*imageLibraryRepository)
+	repo := requireImageLibraryRepository(t, db)
 	err = repo.DeleteForUser(context.Background(), 42, "img_hidden")
 	require.Equal(t, "ADMIN_HIDDEN_PUBLICATION_LOCKED", infraerrors.Reason(err))
 	require.NoError(t, mock.ExpectationsWereMet())

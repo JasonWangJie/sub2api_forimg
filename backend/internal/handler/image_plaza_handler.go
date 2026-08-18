@@ -221,7 +221,7 @@ func (h *ImagePlazaHandler) Content(c *gin.Context) {
 			return
 		}
 		if reader != nil {
-			defer reader.Close()
+			defer func() { _ = reader.Close() }()
 			writePublishedPlazaImageStream(c, reader, contentType)
 			return
 		}

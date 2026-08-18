@@ -284,7 +284,7 @@ func TestAsyncImageTaskRepositoryBackfillsOnlyMissingLibraryArchiveOutbox(t *tes
 		WithArgs(200).
 		WillReturnResult(sqlmock.NewResult(0, 2))
 
-	repo := NewAsyncImageTaskRepository(db).(*asyncImageTaskRepository)
+	repo := requireAsyncImageTaskRepository(t, db)
 	count, err := repo.EnqueueMissingAsyncImageLibraryArchives(context.Background(), 200)
 	require.NoError(t, err)
 	require.Equal(t, int64(2), count)
@@ -301,7 +301,7 @@ func TestAsyncImageTaskRepositoryTerminalOutboxRetainsFailureWithoutRequeue(t *t
 		WithArgs(int64(7), completedAt, "image quota exceeded", "claim-7").
 		WillReturnResult(sqlmock.NewResult(0, 1))
 
-	repo := NewAsyncImageTaskRepository(db).(*asyncImageTaskRepository)
+	repo := requireAsyncImageTaskRepository(t, db)
 	err = repo.MarkAsyncImageOutboxTerminal(context.Background(), 7, "claim-7", completedAt, "image quota exceeded")
 	require.NoError(t, err)
 	require.NoError(t, mock.ExpectationsWereMet())

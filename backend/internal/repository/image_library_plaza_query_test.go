@@ -23,7 +23,7 @@ func TestListPublishedAppliesFiltersOffsetAndOldestCursorDirection(t *testing.T)
 		WithArgs(int64(42), "gemini", "gemini-image", "16:9", "%city%", cursorTime, int64(9), 2).
 		WillReturnRows(sqlmock.NewRows([]string{"id"}))
 
-	repo := NewImageLibraryRepository(db).(*imageLibraryRepository)
+	repo := requireImageLibraryRepository(t, db)
 	result, err := repo.ListPublished(context.Background(), 42, service.ImagePublicationListParams{
 		Platform: "gemini", Model: "gemini-image", AspectRatio: "16:9", Query: "city",
 		Sort: "oldest", Cursor: &service.ImageLibraryCursor{CreatedAt: cursorTime, ID: 9}, Limit: 2,
@@ -45,7 +45,7 @@ func TestListPublicationsAdminUsesCreatedAtForOldestCursorAndAllFilters(t *testi
 		WithArgs("openai", "gpt-image-2", "1:1", "%portrait%", cursorTime, int64(21), service.ImagePublicationPending, 3).
 		WillReturnRows(sqlmock.NewRows([]string{"id"}))
 
-	repo := NewImageLibraryRepository(db).(*imageLibraryRepository)
+	repo := requireImageLibraryRepository(t, db)
 	items, err := repo.ListPublicationsAdmin(context.Background(), service.ImagePublicationListParams{
 		Status: service.ImagePublicationPending, Platform: "openai", Model: "gpt-image-2",
 		AspectRatio: "1:1", Query: "portrait", Sort: "oldest",

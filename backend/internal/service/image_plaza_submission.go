@@ -11,11 +11,11 @@ import (
 )
 
 const (
-	ImageSubmissionPendingReview      = "pending_review"
+	ImageSubmissionPendingReview       = "pending_review"
 	ImageSubmissionApprovedPendingSync = "approved_pending_sync"
-	ImageSubmissionRejected           = "rejected"
-	ImageSubmissionWithdrawn          = "withdrawn"
-	ImageSubmissionSynced             = "synced"
+	ImageSubmissionRejected            = "rejected"
+	ImageSubmissionWithdrawn           = "withdrawn"
+	ImageSubmissionSynced              = "synced"
 )
 
 type ImagePlazaSubmissionRequest struct {

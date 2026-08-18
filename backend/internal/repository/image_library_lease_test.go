@@ -24,7 +24,7 @@ func TestClaimCleanupJobIssuesNewLeaseVersion(t *testing.T) {
 			"scanned_count", "deleted_count", "deleted_bytes", "last_error", "created_at",
 		}).AddRow(int64(9), nil, "expired", []byte(`{}`), "running", int64(4), int64(0), int64(0), int64(0), nil, now))
 
-	repo := NewImageLibraryRepository(db).(*imageLibraryRepository)
+	repo := requireImageLibraryRepository(t, db)
 	job, err := repo.ClaimCleanupJob(context.Background(), now.Add(-2*time.Minute))
 	require.NoError(t, err)
 	require.Equal(t, int64(4), job.LeaseVersion)
@@ -43,7 +43,7 @@ func TestCleanupJobHeartbeatAndFinishAreFenced(t *testing.T) {
 		WithArgs(int64(9), int64(4), "succeeded", nil).
 		WillReturnResult(sqlmock.NewResult(0, 0))
 
-	repo := NewImageLibraryRepository(db).(*imageLibraryRepository)
+	repo := requireImageLibraryRepository(t, db)
 	alive, err := repo.HeartbeatCleanupJob(context.Background(), 9, 4)
 	require.NoError(t, err)
 	require.False(t, alive)
@@ -61,7 +61,7 @@ func TestOutboxCompletionUsesAttemptsAsFencingToken(t *testing.T) {
 		WithArgs(int64(12), 3).
 		WillReturnResult(sqlmock.NewResult(0, 0))
 
-	repo := NewImageLibraryRepository(db).(*imageLibraryRepository)
+	repo := requireImageLibraryRepository(t, db)
 	err = repo.CompleteLibraryOutbox(context.Background(), 12, 3)
 	require.ErrorIs(t, err, service.ErrImageLibraryLeaseLost)
 	require.NoError(t, mock.ExpectationsWereMet())
@@ -79,7 +79,7 @@ func TestClaimStaleCleanupObjectsReactivatesReferencedObjects(t *testing.T) {
 			"provider", "bucket", "object_key", "content_type", "byte_size", "checksum_sha256", "width", "height",
 		}).AddRow("aliyun", "images", "library/orphan.png", "image/png", int64(123), "checksum", 10, 20))
 
-	repo := NewImageLibraryRepository(db).(*imageLibraryRepository)
+	repo := requireImageLibraryRepository(t, db)
 	objects, err := repo.ClaimStaleCleanupObjects(context.Background(), staleBefore, 25)
 	require.NoError(t, err)
 	require.Len(t, objects, 1)
@@ -102,7 +102,7 @@ func TestCompleteCleanupObjectRollsBackForRecoverableRetryWhenJobUpdateFails(t *
 		WillReturnError(errors.New("database unavailable"))
 	mock.ExpectRollback()
 
-	repo := NewImageLibraryRepository(db).(*imageLibraryRepository)
+	repo := requireImageLibraryRepository(t, db)
 	err = repo.CompleteCleanupObject(context.Background(), 9, 4, ref)
 	require.EqualError(t, err, "database unavailable")
 	require.NoError(t, mock.ExpectationsWereMet())

@@ -293,10 +293,6 @@ func (s *SettingService) SetBillingSettingInvalidation(invalidation BillingSetti
 	}
 }
 
-func (s *SettingService) publishBillingChargeMultiplier(ctx context.Context, value float64) {
-	s.publishBillingChargePolicy(ctx, value, true, nil)
-}
-
 func (s *SettingService) publishBillingChargePolicy(ctx context.Context, value float64, allGroups bool, groupIDs []int64) {
 	if s == nil || s.billingSettingInvalidation == nil {
 		return
