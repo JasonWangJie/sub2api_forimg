@@ -819,6 +819,8 @@ func asyncImageFailureMessage(task *service.AsyncImageTask) string {
 			return "image billing confirmation failed"
 		case "eligibility_failed":
 			return "image generation eligibility changed before execution"
+		case "local_capacity_exhausted":
+			return "image generation could not be scheduled because no account capacity became available"
 		case "upstream_failed", "gateway_unavailable":
 			return "upstream image generation failed"
 		case "execution_timeout":

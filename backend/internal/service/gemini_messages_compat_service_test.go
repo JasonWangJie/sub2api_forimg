@@ -19,10 +19,11 @@ import (
 )
 
 type geminiCompatHTTPUpstreamStub struct {
-	response *http.Response
-	err      error
-	calls    int
-	lastReq  *http.Request
+	response        *http.Response
+	responseFactory func() *http.Response
+	err             error
+	calls           int
+	lastReq         *http.Request
 }
 
 func (s *geminiCompatHTTPUpstreamStub) Do(req *http.Request, proxyURL string, accountID int64, accountConcurrency int) (*http.Response, error) {
@@ -30,6 +31,9 @@ func (s *geminiCompatHTTPUpstreamStub) Do(req *http.Request, proxyURL string, ac
 	s.lastReq = req
 	if s.err != nil {
 		return nil, s.err
+	}
+	if s.responseFactory != nil {
+		return s.responseFactory(), nil
 	}
 	if s.response == nil {
 		return nil, fmt.Errorf("missing stub response")
@@ -115,6 +119,48 @@ func TestGeminiForwardAsChatCompletions_OAuthRoutesToGeminiAndReturnsChatFormat(
 	require.Equal(t, float64(7), usage["prompt_tokens"])
 	require.Equal(t, float64(3), usage["completion_tokens"])
 	require.Equal(t, float64(10), usage["total_tokens"])
+}
+
+func TestGeminiForwardAsChatCompletionsAsyncImageRetriesPrimaryFiveTimesAndAlternateOnce(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	newUpstream := func() *geminiCompatHTTPUpstreamStub {
+		return &geminiCompatHTTPUpstreamStub{responseFactory: func() *http.Response {
+			return &http.Response{
+				StatusCode: http.StatusServiceUnavailable,
+				Header:     http.Header{"Content-Type": []string{"application/json"}},
+				Body:       io.NopCloser(strings.NewReader(`{"error":{"message":"capacity exhausted"}}`)),
+			}
+		}}
+	}
+	account := &Account{
+		ID:          102,
+		Platform:    PlatformGemini,
+		Type:        AccountTypeAPIKey,
+		Concurrency: 1,
+		Credentials: map[string]any{"api_key": "gemini-api-key"},
+	}
+	body := []byte(`{"model":"gemini-2.5-flash","messages":[{"role":"user","content":"draw a skyline"}]}`)
+	run := func(t *testing.T, ctx context.Context, expectedCalls int) {
+		httpStub := newUpstream()
+		svc := &GeminiMessagesCompatService{httpUpstream: httpStub, cfg: &config.Config{}}
+		recorder := httptest.NewRecorder()
+		c, _ := gin.CreateTestContext(recorder)
+		c.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", bytes.NewReader(body))
+
+		_, err := svc.ForwardAsChatCompletions(ctx, c, account, body)
+
+		var failoverErr *UpstreamFailoverError
+		require.ErrorAs(t, err, &failoverErr)
+		require.Equal(t, http.StatusServiceUnavailable, failoverErr.StatusCode)
+		require.False(t, failoverErr.RetryableOnSameAccount)
+		require.Equal(t, expectedCalls, httpStub.calls)
+	}
+
+	asyncCtx := WithGeminiAsyncImageGeneration(context.Background())
+	t.Run("primary account", func(t *testing.T) { run(t, asyncCtx, 5) })
+	t.Run("alternate account", func(t *testing.T) {
+		run(t, WithAccountSwitchCount(asyncCtx, 1, false), 1)
+	})
 }
 
 func TestGeminiForwardAsChatCompletions_StreamsOpenAIChunksFromGeminiSSE(t *testing.T) {

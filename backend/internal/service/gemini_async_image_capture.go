@@ -58,6 +58,12 @@ func hasGeminiAsyncImageGeneration(ctx context.Context) bool {
 	return enabled
 }
 
+// IsGeminiAsyncImageGeneration reports whether a request belongs to the durable
+// image worker. Handlers use it to avoid retrying an already-failed account.
+func IsGeminiAsyncImageGeneration(ctx context.Context) bool {
+	return hasGeminiAsyncImageGeneration(ctx)
+}
+
 // WithGeminiHalfKCapability marks an internal worker request as eligible to
 // forward Gemini's optional 0.5K image size. The marker lives only in the Go
 // context so downstream JSON cannot grant itself this capability.

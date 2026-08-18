@@ -153,7 +153,7 @@ func TestDurableAsyncImageWorkerDefersLocalCapacityWithoutFailingTask(t *testing
 	repo := &asyncImageLocalCapacityRepoStub{}
 	worker := &DurableAsyncImageHandler{tasks: service.NewAsyncImageTaskService(repo)}
 	task := &service.AsyncImageTask{
-		TaskID: "asyncimg_capacity", Status: service.AsyncImageTaskStatusInvoking, Version: 7,
+		TaskID: "asyncimg_capacity", Status: service.AsyncImageTaskStatusInvoking, Version: 7, RetryCount: 1,
 	}
 
 	disposition := worker.deferAsyncImageForLocalCapacity(context.Background(), task, service.AsyncImageRuntimeConfig{RetryBackoffSeconds: 12})
@@ -162,6 +162,28 @@ func TestDurableAsyncImageWorkerDefersLocalCapacityWithoutFailingTask(t *testing
 	require.Equal(t, service.AsyncImageTaskStatusQueued, repo.transition.ToStatus)
 	require.True(t, repo.transition.IncrementRetry)
 	require.True(t, repo.transition.ClearError)
+}
+
+func TestDurableAsyncImageWorkerFailsAfterFifthLocalCapacityAttempt(t *testing.T) {
+	repo := &asyncImageLocalCapacityRepoStub{}
+	worker := &DurableAsyncImageHandler{tasks: service.NewAsyncImageTaskService(repo)}
+	task := &service.AsyncImageTask{
+		TaskID: "asyncimg_capacity_exhausted", Status: service.AsyncImageTaskStatusInvoking, Version: 9, RetryCount: 4,
+	}
+
+	disposition := worker.deferAsyncImageForLocalCapacity(context.Background(), task, service.AsyncImageRuntimeConfig{RetryBackoffSeconds: 12})
+
+	require.False(t, disposition.requeue)
+	require.Zero(t, disposition.delay)
+	require.Equal(t, service.AsyncImageTaskStatusFailed, repo.transition.ToStatus)
+	require.Equal(t, []string{service.AsyncImageTaskStatusInvoking}, repo.transition.FromStatuses)
+	require.NotNil(t, repo.transition.ErrorCode)
+	require.Equal(t, "local_capacity_exhausted", *repo.transition.ErrorCode)
+	require.NotNil(t, repo.transition.ErrorMessage)
+	require.Contains(t, *repo.transition.ErrorMessage, "after 5 attempts")
+	require.True(t, repo.transition.IncrementRetry)
+	require.NotNil(t, repo.transition.FinishedAt)
+	require.True(t, repo.transition.ClearRequestPayload)
 }
 
 func TestAsyncImageInvocationHeartbeatFreshUsesDatabaseLeaseWindow(t *testing.T) {

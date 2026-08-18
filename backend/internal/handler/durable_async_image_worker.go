@@ -45,6 +45,8 @@ var asyncImageExecutableStatuses = []string{
 	service.AsyncImageTaskStatusBillingFailed,
 }
 
+const asyncImageMaxLocalCapacityAttempts = 5
+
 func (h *DurableAsyncImageHandler) startRuntime(ctx context.Context) {
 	cfg, err := h.storage.RuntimeConfig(ctx)
 	if err != nil {
@@ -591,6 +593,16 @@ func (h *DurableAsyncImageHandler) deferAsyncImageForLocalCapacity(
 	cfg service.AsyncImageRuntimeConfig,
 ) asyncImageWorkerDisposition {
 	if task == nil {
+		return asyncImageWorkerDisposition{}
+	}
+	if task.RetryCount+1 >= asyncImageMaxLocalCapacityAttempts {
+		h.failAsyncImageTask(
+			ctx,
+			task,
+			"local_capacity_exhausted",
+			fmt.Sprintf("image generation could not be scheduled after %d attempts because no account capacity was available", asyncImageMaxLocalCapacityAttempts),
+			true,
+		)
 		return asyncImageWorkerDisposition{}
 	}
 	progress := 0

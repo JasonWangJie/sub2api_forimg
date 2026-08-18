@@ -5,6 +5,7 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/Wei-Shaw/sub2api/internal/pkg/ctxkey"
 	"github.com/stretchr/testify/require"
 )
 
@@ -133,4 +134,29 @@ func TestOpenAIListSchedulableAccountsHonorsForcedSizePool(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, accounts, 1)
 	require.Equal(t, int64(9), accounts[0].ID)
+}
+
+func TestGatewayImageSizePoolHonorsPriorityAndFailoverExclusions(t *testing.T) {
+	groupID := int64(7)
+	repo := imageSizePoolRepositoryStub{
+		configured: true,
+		accounts: []Account{
+			{ID: 6, Platform: PlatformGemini, Status: StatusActive, Schedulable: true, Priority: 2, Concurrency: 1},
+			{ID: 3, Platform: PlatformGemini, Status: StatusActive, Schedulable: true, Priority: 1, Concurrency: 1},
+		},
+	}
+	svc := &GatewayService{accountRepo: repo}
+	group := &Group{ID: groupID, Platform: PlatformGemini, Status: StatusActive, Hydrated: true}
+	ctx := context.WithValue(context.Background(), ctxkey.Group, group)
+	ctx = WithImageSizeAccountPoolTier(ctx, ImageBillingSize2K)
+
+	selection, err := svc.SelectAccountWithLoadAwareness(ctx, &groupID, "", "", nil, "", 0)
+	require.NoError(t, err)
+	require.Equal(t, int64(3), selection.Account.ID)
+	selection.ReleaseFunc()
+
+	selection, err = svc.SelectAccountWithLoadAwareness(ctx, &groupID, "", "", map[int64]struct{}{3: {}}, "", 0)
+	require.NoError(t, err)
+	require.Equal(t, int64(6), selection.Account.ID)
+	selection.ReleaseFunc()
 }

@@ -156,7 +156,12 @@ func (h *GatewayHandler) ChatCompletions(c *gin.Context) {
 	sessionHash := h.gatewayService.GenerateSessionHash(parsedReq)
 	groupPlatform := effectiveAPIKeyPlatform(c, apiKey)
 	selectionSessionHash := sessionHash
-	if groupPlatform == service.PlatformGemini && selectionSessionHash != "" {
+	asyncImageGeneration := service.IsGeminiAsyncImageGeneration(c.Request.Context())
+	if asyncImageGeneration {
+		// A durable image task must reconsider the complete size-tier pool on
+		// every attempt instead of waiting on a sticky account.
+		selectionSessionHash = ""
+	} else if groupPlatform == service.PlatformGemini && selectionSessionHash != "" {
 		selectionSessionHash = "gemini:" + selectionSessionHash
 	}
 	// Attach image size-tier pool hint for Gemini image requests only.
@@ -171,7 +176,11 @@ func (h *GatewayHandler) ChatCompletions(c *gin.Context) {
 	// 3. Account selection + failover loop
 	fs := NewFailoverState(h.maxAccountSwitches, false)
 	if groupPlatform == service.PlatformGemini {
-		fs = NewFailoverState(h.maxAccountSwitchesGemini, false)
+		maxSwitches := h.maxAccountSwitchesGemini
+		if asyncImageGeneration {
+			maxSwitches = 1
+		}
+		fs = NewFailoverState(maxSwitches, false)
 	}
 
 	for {
@@ -190,6 +199,14 @@ func (h *GatewayHandler) ChatCompletions(c *gin.Context) {
 					message = "No available accounts: " + err.Error()
 				}
 				h.chatCompletionsErrorResponse(c, cls.Status, cls.ErrType, message)
+				return
+			}
+			if service.IsGeminiAsyncImageGeneration(c.Request.Context()) {
+				if fs.LastFailoverErr != nil {
+					h.handleCCFailoverExhausted(c, fs.LastFailoverErr, streamStarted)
+				} else {
+					h.chatCompletionsErrorResponse(c, http.StatusBadGateway, "server_error", "All available accounts exhausted")
+				}
 				return
 			}
 			action := fs.HandleSelectionExhausted(c.Request.Context())
@@ -273,6 +290,10 @@ func (h *GatewayHandler) ChatCompletions(c *gin.Context) {
 		}
 		var result *service.ForwardResult
 		setActualUpstreamEndpoint(c, "")
+		forwardCtx := c.Request.Context()
+		if asyncImageGeneration && fs.SwitchCount > 0 {
+			forwardCtx = service.WithAccountSwitchCount(forwardCtx, fs.SwitchCount, false)
+		}
 		if account.Platform == service.PlatformGemini {
 			if h.geminiCompatService == nil {
 				h.chatCompletionsErrorResponse(c, http.StatusBadGateway, "upstream_error", "Gemini compatibility service is not configured")
@@ -281,7 +302,7 @@ func (h *GatewayHandler) ChatCompletions(c *gin.Context) {
 				}
 				return
 			}
-			result, err = h.geminiCompatService.ForwardAsChatCompletions(c.Request.Context(), c, account, forwardBody)
+			result, err = h.geminiCompatService.ForwardAsChatCompletions(forwardCtx, c, account, forwardBody)
 		} else if shouldUseAntigravityCompat(account) {
 			if h.antigravityGatewayService == nil {
 				h.chatCompletionsErrorResponse(c, http.StatusBadGateway, "upstream_error", "Antigravity compatibility service is not configured")

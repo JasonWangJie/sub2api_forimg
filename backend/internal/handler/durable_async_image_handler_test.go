@@ -158,3 +158,11 @@ func TestAsyncImageFailureMessageExecutionTimeout(t *testing.T) {
 		ErrorCode: &code,
 	}))
 }
+
+func TestAsyncImageFailureMessageLocalCapacityExhausted(t *testing.T) {
+	code := "local_capacity_exhausted"
+	require.Equal(t, "image generation could not be scheduled because no account capacity became available", asyncImageFailureMessage(&service.AsyncImageTask{
+		Status:    service.AsyncImageTaskStatusFailed,
+		ErrorCode: &code,
+	}))
+}
