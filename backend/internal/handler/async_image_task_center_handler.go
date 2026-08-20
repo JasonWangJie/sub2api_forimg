@@ -32,18 +32,72 @@ type asyncImageTaskStorageAccess interface {
 	RuntimeConfig(context.Context) (service.AsyncImageRuntimeConfig, error)
 }
 
+// asyncImageTaskCenterCatalog resolves display names for admin task-center views.
+type asyncImageTaskCenterCatalog interface {
+	GetUser(ctx context.Context, id int64) (*service.User, error)
+	GetAPIKey(ctx context.Context, id int64) (*service.APIKey, error)
+	GetGroup(ctx context.Context, id int64) (*service.Group, error)
+	GetAccount(ctx context.Context, id int64) (*service.Account, error)
+}
+
+type asyncImageTaskCenterServiceCatalog struct {
+	users    *service.UserService
+	apiKeys  *service.APIKeyService
+	accounts *service.AccountService
+}
+
+func (c *asyncImageTaskCenterServiceCatalog) GetUser(ctx context.Context, id int64) (*service.User, error) {
+	if c == nil || c.users == nil || id <= 0 {
+		return nil, service.ErrUserNotFound
+	}
+	return c.users.GetByID(ctx, id)
+}
+
+func (c *asyncImageTaskCenterServiceCatalog) GetAPIKey(ctx context.Context, id int64) (*service.APIKey, error) {
+	if c == nil || c.apiKeys == nil || id <= 0 {
+		return nil, service.ErrAPIKeyNotFound
+	}
+	// Prefer include-deleted so historical tasks still show the original key name.
+	if key, err := c.apiKeys.GetByIDForPreparedBilling(ctx, id); err == nil && key != nil {
+		return key, nil
+	}
+	return c.apiKeys.GetByID(ctx, id)
+}
+
+func (c *asyncImageTaskCenterServiceCatalog) GetGroup(ctx context.Context, id int64) (*service.Group, error) {
+	if c == nil || c.apiKeys == nil || id <= 0 {
+		return nil, service.ErrGroupNotFound
+	}
+	return c.apiKeys.GetGroupByID(ctx, id)
+}
+
+func (c *asyncImageTaskCenterServiceCatalog) GetAccount(ctx context.Context, id int64) (*service.Account, error) {
+	if c == nil || c.accounts == nil || id <= 0 {
+		return nil, service.ErrAccountNotFound
+	}
+	return c.accounts.GetByID(ctx, id)
+}
+
 // AsyncImageTaskCenterHandler serves the authenticated site task center. It is
 // intentionally separate from the BB/SC downstream protocol handlers.
 type AsyncImageTaskCenterHandler struct {
-	tasks   asyncImageTaskCenterService
-	storage asyncImageTaskStorageAccess
+	tasks    asyncImageTaskCenterService
+	storage  asyncImageTaskStorageAccess
+	catalog  asyncImageTaskCenterCatalog
 }
 
 func NewAsyncImageTaskCenterHandler(
 	tasks *service.AsyncImageTaskService,
 	storage *service.ImageStorageSettingService,
+	users *service.UserService,
+	apiKeys *service.APIKeyService,
+	accounts *service.AccountService,
 ) *AsyncImageTaskCenterHandler {
-	return &AsyncImageTaskCenterHandler{tasks: tasks, storage: storage}
+	return &AsyncImageTaskCenterHandler{
+		tasks:   tasks,
+		storage: storage,
+		catalog: &asyncImageTaskCenterServiceCatalog{users: users, apiKeys: apiKeys, accounts: accounts},
+	}
 }
 
 func (h *AsyncImageTaskCenterHandler) ListForUser(c *gin.Context) {
@@ -174,9 +228,13 @@ type asyncImageTaskCenterView struct {
 	ID                  string     `json:"id"`
 	TaskID              string     `json:"task_id"`
 	UserID              *int64     `json:"user_id,omitempty"`
+	UserEmail           string     `json:"user_email,omitempty"`
 	APIKeyID            int64      `json:"api_key_id"`
+	APIKeyName          string     `json:"api_key_name,omitempty"`
 	GroupID             int64      `json:"group_id"`
+	GroupName           string     `json:"group_name,omitempty"`
 	AccountID           *int64     `json:"account_id,omitempty"`
+	AccountName         string     `json:"account_name,omitempty"`
 	Protocol            string     `json:"protocol"`
 	Platform            string     `json:"platform"`
 	RequestType         string     `json:"request_type"`
@@ -249,12 +307,16 @@ type asyncImageTaskDetailsView struct {
 
 func (h *AsyncImageTaskCenterHandler) listViews(ctx context.Context, tasks []*service.AsyncImageTask, admin bool) ([]asyncImageTaskCenterView, error) {
 	out := make([]asyncImageTaskCenterView, 0, len(tasks))
+	names := h.newRoutingNameCache()
 	for _, task := range tasks {
 		results, err := h.tasks.ListResults(ctx, task.TaskID)
 		if err != nil {
 			return nil, err
 		}
 		view := newAsyncImageTaskCenterView(task, results, admin)
+		if admin {
+			h.attachAsyncImageRoutingNames(ctx, &view, task, names)
+		}
 		if len(results) > 0 {
 			previews, err := h.resultViews(ctx, task, results[:1], admin)
 			if err != nil {
@@ -290,8 +352,12 @@ func (h *AsyncImageTaskCenterHandler) detailView(ctx context.Context, details *s
 			Message: asyncImageEventMessage(event.Payload), CreatedAt: event.CreatedAt,
 		})
 	}
+	taskView := newAsyncImageTaskCenterView(details.Task, details.Results, admin)
+	if admin {
+		h.attachAsyncImageRoutingNames(ctx, &taskView, details.Task, h.newRoutingNameCache())
+	}
 	return &asyncImageTaskDetailsView{
-		Task:    newAsyncImageTaskCenterView(details.Task, details.Results, admin),
+		Task:    taskView,
 		Results: results,
 		Events:  events,
 	}, nil
@@ -335,6 +401,109 @@ func newAsyncImageTaskCenterView(task *service.AsyncImageTask, results []service
 		UpstreamSucceededAt: task.UpstreamSucceededAt, FinishedAt: task.FinishedAt,
 		ExpiresAt: task.ExpiresAt, CreatedAt: task.CreatedAt, UpdatedAt: task.UpdatedAt,
 	}
+}
+
+type asyncImageRoutingNameCache struct {
+	users    map[int64]string
+	apiKeys  map[int64]string
+	groups   map[int64]string
+	accounts map[int64]string
+}
+
+func (h *AsyncImageTaskCenterHandler) newRoutingNameCache() *asyncImageRoutingNameCache {
+	return &asyncImageRoutingNameCache{
+		users:    map[int64]string{},
+		apiKeys:  map[int64]string{},
+		groups:   map[int64]string{},
+		accounts: map[int64]string{},
+	}
+}
+
+func (h *AsyncImageTaskCenterHandler) attachAsyncImageRoutingNames(
+	ctx context.Context,
+	view *asyncImageTaskCenterView,
+	task *service.AsyncImageTask,
+	cache *asyncImageRoutingNameCache,
+) {
+	if h == nil || view == nil || task == nil || h.catalog == nil {
+		return
+	}
+	if cache == nil {
+		cache = h.newRoutingNameCache()
+	}
+	view.UserEmail = h.resolveAsyncImageUserDisplay(ctx, task.UserID, cache)
+	view.APIKeyName = h.resolveAsyncImageAPIKeyName(ctx, task.APIKeyID, cache)
+	view.GroupName = h.resolveAsyncImageGroupName(ctx, task.GroupID, cache)
+	if task.AccountID != nil {
+		view.AccountName = h.resolveAsyncImageAccountName(ctx, *task.AccountID, cache)
+	}
+}
+
+func (h *AsyncImageTaskCenterHandler) resolveAsyncImageUserDisplay(ctx context.Context, id int64, cache *asyncImageRoutingNameCache) string {
+	if id <= 0 {
+		return ""
+	}
+	if name, ok := cache.users[id]; ok {
+		return name
+	}
+	user, err := h.catalog.GetUser(ctx, id)
+	name := ""
+	if err == nil && user != nil {
+		name = strings.TrimSpace(user.Username)
+		if name == "" {
+			name = strings.TrimSpace(user.Email)
+		}
+	}
+	cache.users[id] = name
+	return name
+}
+
+func (h *AsyncImageTaskCenterHandler) resolveAsyncImageAPIKeyName(ctx context.Context, id int64, cache *asyncImageRoutingNameCache) string {
+	if id <= 0 {
+		return ""
+	}
+	if name, ok := cache.apiKeys[id]; ok {
+		return name
+	}
+	key, err := h.catalog.GetAPIKey(ctx, id)
+	name := ""
+	if err == nil && key != nil {
+		name = strings.TrimSpace(key.Name)
+	}
+	cache.apiKeys[id] = name
+	return name
+}
+
+func (h *AsyncImageTaskCenterHandler) resolveAsyncImageGroupName(ctx context.Context, id int64, cache *asyncImageRoutingNameCache) string {
+	if id <= 0 {
+		return ""
+	}
+	if name, ok := cache.groups[id]; ok {
+		return name
+	}
+	group, err := h.catalog.GetGroup(ctx, id)
+	name := ""
+	if err == nil && group != nil {
+		name = strings.TrimSpace(group.Name)
+	}
+	cache.groups[id] = name
+	return name
+}
+
+func (h *AsyncImageTaskCenterHandler) resolveAsyncImageAccountName(ctx context.Context, id int64, cache *asyncImageRoutingNameCache) string {
+	if id <= 0 {
+		return ""
+	}
+	if name, ok := cache.accounts[id]; ok {
+		return name
+	}
+	account, err := h.catalog.GetAccount(ctx, id)
+	name := ""
+	if err == nil && account != nil {
+		name = strings.TrimSpace(account.Name)
+	}
+	cache.accounts[id] = name
+	return name
 }
 
 func (h *AsyncImageTaskCenterHandler) resultViews(ctx context.Context, task *service.AsyncImageTask, results []service.AsyncImageResult, admin bool) ([]asyncImageTaskResultView, error) {

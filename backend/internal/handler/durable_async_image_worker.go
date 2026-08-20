@@ -1357,8 +1357,23 @@ func formatAsyncImageUpstreamFailure(statusCode int, body []byte) string {
 	if len(runes) > 320 {
 		detail = string(runes[:320]) + "..."
 	}
+	prefix := asyncImageUpstreamFailurePrefix(detail)
 	if statusCode <= 0 {
-		return "upstream image generation failed: empty gateway response (" + detail + ")"
+		return prefix + "：网关无有效响应（" + detail + "）"
 	}
-	return fmt.Sprintf("upstream image generation failed (HTTP %d): %s", statusCode, detail)
+	return fmt.Sprintf("%s（HTTP %d）：%s", prefix, statusCode, detail)
+}
+
+func asyncImageUpstreamFailurePrefix(detail string) string {
+	lower := strings.ToLower(detail)
+	switch {
+	case strings.Contains(lower, "prompt is required"),
+		strings.Contains(lower, "non-empty text prompt"),
+		strings.Contains(lower, "invalid prompt"),
+		strings.Contains(lower, "prompt required"),
+		strings.Contains(lower, "empty prompt"):
+		return "提示词无效"
+	default:
+		return "上游生图失败"
+	}
 }

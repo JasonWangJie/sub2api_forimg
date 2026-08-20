@@ -16,7 +16,7 @@ func TestAsyncImageExecutionTimeoutDefaultsToTwentyMinutes(t *testing.T) {
 }
 
 func TestIsOpenAIImageURLFetchTimeoutFailure(t *testing.T) {
-	msg := "upstream image generation failed (HTTP 400): image_url fetch failed: Failed to perform, curl: (28) Connection timed out after 60002 milliseconds. See https://cdn.example/a.png first for more details."
+	msg := "上游生图失败（HTTP 400）：image_url fetch failed: Failed to perform, curl: (28) Connection timed out after 60002 milliseconds. See https://cdn.example/a.png first for more details."
 	require.True(t, isOpenAIImageURLFetchTimeoutFailure(http.StatusBadRequest, msg))
 	require.True(t, isOpenAIImageURLFetchTimeoutFailure(http.StatusBadRequest, "image_url fetch failed: connection timed out after 60001 milliseconds"))
 	require.False(t, isOpenAIImageURLFetchTimeoutFailure(http.StatusBadGateway, msg))
@@ -24,8 +24,19 @@ func TestIsOpenAIImageURLFetchTimeoutFailure(t *testing.T) {
 	require.False(t, isOpenAIImageURLFetchTimeoutFailure(http.StatusBadRequest, "All available accounts exhausted"))
 }
 
+func TestFormatAsyncImageUpstreamFailureUsesChinesePrefix(t *testing.T) {
+	msg := formatAsyncImageUpstreamFailure(http.StatusBadRequest, []byte(`{"error":{"message":"prompt is required"}}`))
+	require.Equal(t, "提示词无效（HTTP 400）：prompt is required", msg)
+
+	generic := formatAsyncImageUpstreamFailure(http.StatusBadGateway, []byte(`{"error":{"message":"upstream overloaded"}}`))
+	require.Equal(t, "上游生图失败（HTTP 502）：upstream overloaded", generic)
+
+	empty := formatAsyncImageUpstreamFailure(0, nil)
+	require.Equal(t, "上游生图失败：网关无有效响应（no upstream error body）", empty)
+}
+
 func TestShouldRetryOpenAIImageURLFetchTimeoutOnce(t *testing.T) {
-	msg := "upstream image generation failed (HTTP 400): image_url fetch failed: curl: (28) Connection timed out after 60002 milliseconds"
+	msg := "上游生图失败（HTTP 400）：image_url fetch failed: curl: (28) Connection timed out after 60002 milliseconds"
 	task := &service.AsyncImageTask{Platform: service.PlatformOpenAI}
 	require.True(t, shouldRetryOpenAIImageURLFetchTimeout(task, http.StatusBadRequest, msg))
 

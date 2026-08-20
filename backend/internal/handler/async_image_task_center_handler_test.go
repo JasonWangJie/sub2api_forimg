@@ -80,6 +80,41 @@ type asyncImageDurableStorageStub struct {
 	signCalls int
 }
 
+type asyncImageTaskCenterCatalogStub struct {
+	users    map[int64]*service.User
+	apiKeys  map[int64]*service.APIKey
+	groups   map[int64]*service.Group
+	accounts map[int64]*service.Account
+}
+
+func (s *asyncImageTaskCenterCatalogStub) GetUser(_ context.Context, id int64) (*service.User, error) {
+	if user, ok := s.users[id]; ok {
+		return user, nil
+	}
+	return nil, service.ErrUserNotFound
+}
+
+func (s *asyncImageTaskCenterCatalogStub) GetAPIKey(_ context.Context, id int64) (*service.APIKey, error) {
+	if key, ok := s.apiKeys[id]; ok {
+		return key, nil
+	}
+	return nil, service.ErrAPIKeyNotFound
+}
+
+func (s *asyncImageTaskCenterCatalogStub) GetGroup(_ context.Context, id int64) (*service.Group, error) {
+	if group, ok := s.groups[id]; ok {
+		return group, nil
+	}
+	return nil, service.ErrGroupNotFound
+}
+
+func (s *asyncImageTaskCenterCatalogStub) GetAccount(_ context.Context, id int64) (*service.Account, error) {
+	if account, ok := s.accounts[id]; ok {
+		return account, nil
+	}
+	return nil, service.ErrAccountNotFound
+}
+
 func (s *asyncImageDurableStorageStub) Save(context.Context, string, string, []byte) (string, error) {
 	return s.access.URL, nil
 }
@@ -207,6 +242,46 @@ func TestAsyncImageTaskCenterDetailRedactsAndDoesNotExposeObjectIdentity(t *test
 	require.Contains(t, body, "access_token=***")
 	require.NotContains(t, body, "view_url")
 	require.NotContains(t, body, "preview_url")
+}
+
+func TestAsyncImageTaskCenterAdminDetailIncludesRoutingNames(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	now := time.Now().UTC()
+	task := &service.AsyncImageTask{
+		TaskID: "asyncimg_names", UserID: 2, APIKeyID: 5, GroupID: 2,
+		AccountID: int64PointerForAsyncImageTaskTest(9), Protocol: service.AsyncImageProtocolBB,
+		Platform: service.PlatformOpenAI, RequestType: service.AsyncImageRequestTypeTextToImage,
+		Model: "gpt-image-2", Status: service.AsyncImageTaskStatusFailed,
+		BillingStatus: service.AsyncImageBillingStatusNotBillable,
+		SubmittedAt: now, CreatedAt: now, UpdatedAt: now,
+	}
+	tasks := &asyncImageTaskCenterServiceStub{details: &service.AsyncImageTaskDetails{Task: task}}
+	h := &AsyncImageTaskCenterHandler{
+		tasks: tasks,
+		catalog: &asyncImageTaskCenterCatalogStub{
+			users:    map[int64]*service.User{2: {ID: 2, Username: "alice", Email: "alice@example.com"}},
+			apiKeys:  map[int64]*service.APIKey{5: {ID: 5, Name: "workbench-key"}},
+			groups:   map[int64]*service.Group{2: {ID: 2, Name: "openai-image"}},
+			accounts: map[int64]*service.Account{9: {ID: 9, Name: "openai-prod-1"}},
+		},
+	}
+
+	router := gin.New()
+	router.GET("/api/v1/admin/async-image-tasks/:task_id", h.GetForAdmin)
+	recorder := httptest.NewRecorder()
+	router.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/api/v1/admin/async-image-tasks/asyncimg_names", nil))
+
+	require.Equal(t, http.StatusOK, recorder.Code)
+	var envelope struct {
+		Data struct {
+			Task map[string]any `json:"task"`
+		} `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(recorder.Body.Bytes(), &envelope))
+	require.Equal(t, "alice", envelope.Data.Task["user_email"])
+	require.Equal(t, "workbench-key", envelope.Data.Task["api_key_name"])
+	require.Equal(t, "openai-image", envelope.Data.Task["group_name"])
+	require.Equal(t, "openai-prod-1", envelope.Data.Task["account_name"])
 }
 
 func TestAsyncImageTaskCenterAdminResumeRejectsNonPostProcessingState(t *testing.T) {
