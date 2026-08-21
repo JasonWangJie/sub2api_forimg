@@ -22,12 +22,26 @@ func TestMapOpenAIImageDimensions(t *testing.T) {
 		{resolution: "1K", aspectRatio: "3:2", wantSize: "1536x1024"},
 		{resolution: "1K", aspectRatio: "16:9", wantSize: "1536x1024"},
 		{resolution: "1K", aspectRatio: "2:3", wantSize: "1024x1536"},
+		{resolution: "1K", aspectRatio: "4:5", wantSize: "1024x1280"},
+		{resolution: "1K", aspectRatio: "5:4", wantSize: "1280x1024"},
+		{resolution: "1K", aspectRatio: "4:3", wantSize: "1360x1024"},
+		{resolution: "1K", aspectRatio: "3:4", wantSize: "1024x1360"},
+		{resolution: "1K", aspectRatio: "21:9", wantSize: "2384x1024"},
+		{resolution: "1K", aspectRatio: "9:21", wantSize: "1024x2384"},
+		{resolution: "1K", aspectRatio: "2:1", wantSize: "2048x1024"},
+		{resolution: "1K", aspectRatio: "1:2", wantSize: "1024x2048"},
 		{resolution: "1K", aspectRatio: "", wantSize: "1024x1024"},
 		{resolution: "2K", aspectRatio: "16:9", wantSize: "2048x1152"},
 		{resolution: "2K", aspectRatio: "9:16", wantSize: "1152x2048"},
+		{resolution: "2K", aspectRatio: "4:3", wantSize: "2048x1536"},
+		{resolution: "2K", aspectRatio: "21:9", wantSize: "2048x880"},
+		{resolution: "2K", aspectRatio: "2:1", wantSize: "2048x1024"},
 		{resolution: "4K", aspectRatio: "1:1", wantSize: "4096x4096"},
 		{resolution: "4K", aspectRatio: "16:9", wantSize: "4096x2304"},
 		{resolution: "4K", aspectRatio: "9:16", wantSize: "2304x4096"},
+		{resolution: "4K", aspectRatio: "5:4", wantSize: "4096x3272"},
+		{resolution: "4K", aspectRatio: "9:21", wantSize: "1752x4096"},
+		{resolution: "4K", aspectRatio: "1:2", wantSize: "2048x4096"},
 		{resolution: "auto", aspectRatio: "1:1", wantSize: "auto"},
 		{resolution: "1K", aspectRatio: "auto", wantSize: "auto"},
 		{resolution: "2K", aspectRatio: "auto", wantSize: "auto"},
@@ -42,8 +56,29 @@ func TestMapOpenAIImageDimensions(t *testing.T) {
 
 	_, err := MapOpenAIImageDimensions("8K", "1:1")
 	require.Error(t, err)
-	_, err = MapOpenAIImageDimensions("1K", "21:9")
+	_, err = MapOpenAIImageDimensions("1K", "7:3")
 	require.Error(t, err)
+}
+
+func TestParseOpenAIImagesRequest_WideAspectRatioKeepsExplicitBillingTier(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	svc := &OpenAIGatewayService{}
+	body := []byte(`{"model":"gpt-image-2","prompt":"draw a cat","resolution":"1K","aspect_ratio":"2:1"}`)
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/images/generations", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = req
+
+	parsed, err := svc.ParseOpenAIImagesRequest(c, body)
+	require.NoError(t, err)
+	require.Equal(t, "2048x1024", parsed.Size)
+	require.Equal(t, "1K", parsed.SizeTier)
+	require.Equal(t, "1K", openAIImagesBillingInputSize(parsed))
+
+	resolved := ResolveImageBillingSize(openAIImagesBillingInputSize(parsed), []string{parsed.Size})
+	require.Equal(t, ImageBillingSize1K, resolved.BillingSize)
 }
 
 func TestParseOpenAIImagesRequest_ResolutionAspectRatio(t *testing.T) {
@@ -206,5 +241,8 @@ func TestImageWorkbenchCapabilitiesOpenAIExposesResolutionAspect(t *testing.T) {
 	got, err := svc.GetCapabilities(context.Background(), 7, 10)
 	require.NoError(t, err)
 	require.Equal(t, []string{"1K", "2K", "4K"}, got.ImageSizes)
-	require.Equal(t, []string{"auto", "1:1", "3:2", "2:3", "16:9", "9:16"}, got.AspectRatios)
+	require.Equal(t, []string{
+		"auto", "1:1", "2:3", "3:2", "4:5", "5:4", "4:3", "3:4",
+		"16:9", "9:16", "21:9", "9:21", "2:1", "1:2",
+	}, got.AspectRatios)
 }

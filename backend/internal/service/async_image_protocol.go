@@ -138,7 +138,6 @@ func ParseBBGeminiImageRequest(body []byte, sourcePath string) (*AsyncImageNorma
 	size, ratio, err := normalizeAsyncGeminiDimensions(
 		in.ExtraBody.Google.ImageConfig.ImageSize,
 		in.ExtraBody.Google.ImageConfig.AspectRatio,
-		countAsyncImageReferences(parts) > 0,
 	)
 	if err != nil {
 		return nil, err
@@ -241,7 +240,7 @@ func ParseSCGeminiImageRequest(body []byte, sourcePath string) (*AsyncImageNorma
 	parts = append(parts, AsyncImageInputPart{Type: "text", Text: prompt})
 
 	resolution, aspectRatio := resolveSCGeminiDimensionAliases(in.Resolution, in.AspectRatio, in.Size)
-	size, ratio, err := normalizeAsyncGeminiDimensions(resolution, aspectRatio, len(in.ImageURLs) > 0)
+	size, ratio, err := normalizeAsyncGeminiDimensions(resolution, aspectRatio)
 	if err != nil {
 		return nil, err
 	}
@@ -313,6 +312,10 @@ func canonicalAsyncGeminiAspectRatio(width, height int) string {
 	if width == 7 && height == 3 {
 		return "21:9"
 	}
+	// Symmetric ultra-tall: 3:7 → 9:21.
+	if width == 3 && height == 7 {
+		return "9:21"
+	}
 	return strconv.Itoa(width) + ":" + strconv.Itoa(height)
 }
 
@@ -333,7 +336,7 @@ func normalizeAsyncGeminiAspectRatio(raw string) string {
 	return canonicalAsyncGeminiAspectRatio(width, height)
 }
 
-func normalizeAsyncGeminiDimensions(rawSize, rawRatio string, isImageToImage bool) (string, string, error) {
+func normalizeAsyncGeminiDimensions(rawSize, rawRatio string) (string, string, error) {
 	size := strings.ToUpper(strings.TrimSpace(rawSize))
 	if size != "" && size != "0.5K" && size != "1K" && size != "2K" && size != "4K" {
 		return "", "", fmt.Errorf("unsupported_image_dimensions: unsupported image size %q", rawSize)
@@ -341,10 +344,7 @@ func normalizeAsyncGeminiDimensions(rawSize, rawRatio string, isImageToImage boo
 
 	ratio := normalizeAsyncGeminiAspectRatio(rawRatio)
 	if ratio == "auto" {
-		if !isImageToImage {
-			return "", "", errors.New("unsupported_image_dimensions: aspect_ratio auto is only supported for image-to-image requests")
-		}
-		// auto means omit upstream aspectRatio and lets the edit model decide.
+		// auto means omit upstream aspectRatio and lets the model decide.
 		return size, "", nil
 	}
 	if ratio == "" {
@@ -352,7 +352,7 @@ func normalizeAsyncGeminiDimensions(rawSize, rawRatio string, isImageToImage boo
 	}
 	allowed := map[string]struct{}{
 		"1:1": {}, "2:3": {}, "3:2": {}, "3:4": {}, "4:3": {},
-		"4:5": {}, "5:4": {}, "9:16": {}, "16:9": {}, "21:9": {},
+		"4:5": {}, "5:4": {}, "9:16": {}, "16:9": {}, "21:9": {}, "9:21": {},
 	}
 	if _, ok := allowed[ratio]; !ok {
 		return "", "", fmt.Errorf("unsupported_image_dimensions: unsupported aspect ratio %q", rawRatio)

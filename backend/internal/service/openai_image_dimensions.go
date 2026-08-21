@@ -23,6 +23,14 @@ var openAIImageSizeByResolutionAspect = map[string]map[string]string{
 		"2:3":  "1024x1536",
 		"16:9": "1536x1024",
 		"9:16": "1024x1536",
+		"5:4":  "1280x1024",
+		"4:5":  "1024x1280",
+		"4:3":  "1360x1024",
+		"3:4":  "1024x1360",
+		"21:9": "2384x1024",
+		"9:21": "1024x2384",
+		"2:1":  "2048x1024",
+		"1:2":  "1024x2048",
 	},
 	"2K": {
 		"1:1":  "2048x2048",
@@ -30,6 +38,14 @@ var openAIImageSizeByResolutionAspect = map[string]map[string]string{
 		"2:3":  "1152x2048",
 		"16:9": "2048x1152",
 		"9:16": "1152x2048",
+		"5:4":  "2048x1632",
+		"4:5":  "1632x2048",
+		"4:3":  "2048x1536",
+		"3:4":  "1536x2048",
+		"21:9": "2048x880",
+		"9:21": "880x2048",
+		"2:1":  "2048x1024",
+		"1:2":  "1024x2048",
 	},
 	"4K": {
 		"1:1":  "4096x4096",
@@ -37,6 +53,14 @@ var openAIImageSizeByResolutionAspect = map[string]map[string]string{
 		"2:3":  "2304x4096",
 		"16:9": "4096x2304",
 		"9:16": "2304x4096",
+		"5:4":  "4096x3272",
+		"4:5":  "3272x4096",
+		"4:3":  "4096x3072",
+		"3:4":  "3072x4096",
+		"21:9": "4096x1752",
+		"9:21": "1752x4096",
+		"2:1":  "4096x2048",
+		"1:2":  "2048x4096",
 	},
 }
 
@@ -45,7 +69,10 @@ func openAIImageWorkbenchResolutions() []string {
 }
 
 func openAIImageWorkbenchAspectRatios() []string {
-	return []string{"auto", "1:1", "3:2", "2:3", "16:9", "9:16"}
+	return []string{
+		"auto", "1:1", "2:3", "3:2", "4:5", "5:4", "4:3", "3:4",
+		"16:9", "9:16", "21:9", "9:21", "2:1", "1:2",
+	}
 }
 
 func normalizeOpenAIImageResolution(raw string) string {

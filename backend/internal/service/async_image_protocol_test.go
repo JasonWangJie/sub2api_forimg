@@ -59,8 +59,15 @@ func TestParseSCGeminiImageRequestDimensions(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "0.5K", halfK.ImageSize)
 
-	_, err = ParseSCGeminiImageRequest([]byte(`{"model":"m","prompt":"p","aspect_ratio":"auto"}`), "")
-	require.ErrorContains(t, err, "only supported for image-to-image")
+	textAuto, err := ParseSCGeminiImageRequest([]byte(`{"model":"m","prompt":"p","aspect_ratio":"auto"}`), "")
+	require.NoError(t, err)
+	require.Equal(t, AsyncImageKindText, textAuto.Kind)
+	require.Empty(t, textAuto.AspectRatio)
+
+	tall, err := ParseSCGeminiImageRequest([]byte(`{"model":"m","prompt":"p","aspect_ratio":"9:21","resolution":"1K"}`), "")
+	require.NoError(t, err)
+	require.Equal(t, "9:21", tall.AspectRatio)
+	require.Equal(t, "1K", tall.ImageSize)
 }
 
 func TestParseSCGeminiImageRequestSizeAlias(t *testing.T) {
@@ -128,6 +135,14 @@ func TestParseSCGeminiImageRequestPixelSizeAlias(t *testing.T) {
     }`), "/v1/images/generations_sc")
 	require.NoError(t, err)
 	require.Equal(t, "21:9", ultrawide.AspectRatio)
+
+	ultratall, err := ParseSCGeminiImageRequest([]byte(`{
+      "model":"gemini-3-pro-image-preview",
+      "prompt":"make it tall",
+      "size":"1080x2520"
+    }`), "/v1/images/generations_sc")
+	require.NoError(t, err)
+	require.Equal(t, "9:21", ultratall.AspectRatio)
 }
 
 func TestAsyncImageReferenceDownloaderDataURI(t *testing.T) {

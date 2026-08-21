@@ -182,8 +182,8 @@ BB Gemini 参数约束：
 | `messages` | 至少一条；本接口只接受 `role: "user"`。 |
 | `content` | 非空字符串，或只包含 `text` / `image_url` 的非空数组；必须包含非空文本提示。 |
 | `image_size` | 可省略，或为 `1K`、`2K`、`4K`。`0.5K` 默认拒绝；仅当模型命中 `async_image.gemini_half_k_models` 的精确名称或末尾 `*` 前缀规则时透传。计费仍使用现有分组档位：Worker 以实际输出宽高定档，合法 `0.5K` 产物归入最低的 `1K` 档，不会回退为 `2K`。 |
-| `aspect_ratio` | 可省略，或为 `1:1`、`2:3`、`3:2`、`3:4`、`4:3`、`4:5`、`5:4`、`9:16`、`16:9`、`21:9`。 |
-| `auto` / `自动` | 只在至少有一张参考图时有效；系统通过省略上游比例让 Gemini 自动决定。文生图传该值返回 `400`。 |
+| `aspect_ratio` | 可省略，或为 `auto`、`1:1`、`2:3`、`3:2`、`4:5`、`5:4`、`4:3`、`3:4`、`16:9`、`9:16`、`21:9`、`9:21`。 |
+| `auto` / `自动` | 文生图与图生图均可用；系统通过省略上游比例让 Gemini 自动决定。 |
 
 系统把 `image_size` / `aspect_ratio` 映射为 Gemini `generationConfig.imageConfig`，强制 `stream=false`，并要求上游返回 `TEXT` 与 `IMAGE`。HTTPS 参考图以 Gemini `fileData.fileUri` 透传（由上游拉取，本机不再下载转 base64）；`data:` URI 仍转换为 `inlineData`。返回中的所有 `inlineData` 图片都会进入同一任务结果。
 
@@ -205,7 +205,7 @@ BB Gemini 参数约束：
 
 OpenAI `_oa` 接口复用现有 OpenAI Images 解析、模型映射、内容审核、账号选择、故障切换、并发和计费链路。`model`、`prompt`、`n`、`quality`、`background`、`output_format`、`output_compression`、`response_format`、`moderation`、`style` 等既有原生参数按模型能力继续兼容；`stream` 必须为 `false` 或省略。
 
-尺寸推荐传 `resolution`（`1K`/`2K`/`4K`）+ `aspect_ratio`（`1:1`/`3:2`/`2:3`/`16:9`/`9:16`）。`size` 兼容：
+尺寸推荐传 `resolution`（`1K`/`2K`/`4K`）+ `aspect_ratio`（`auto`/`1:1`/`2:3`/`3:2`/`4:5`/`5:4`/`4:3`/`3:4`/`16:9`/`9:16`/`21:9`/`9:21`/`2:1`/`1:2`）。计费按显式档位，不因宽比例映射 WxH 抬档。`size` 兼容：
 
 - 比例字符串（如 `9:16`），等价于 `aspect_ratio`
 - 旧版 WxH（如 `1024x1024`）或 `auto`
@@ -446,7 +446,7 @@ Idempotency-Key: sc-20260720-001
 | `size` | **推荐**：宽高比别名，如 `3:2`、`16:9`；也可传像素尺寸，如 `1080x1350`（约分为 `4:5`）；若未传 `resolution`，也可写 `2K` 表示清晰度 |
 | `aspect_ratio` | 与 `size` 同义的比例字段；显式传入时优先于 `size` 的比例别名 |
 
-`0.5K` 限制以及 `auto`（仅图生图）规则与 BB Gemini 相同。像素尺寸只用于推导 Gemini 支持的宽高比；上游会结合该比例与 `resolution` 生成，不保证返回精确像素尺寸。
+`0.5K` 限制以及 `auto`（文生图与图生图均可）规则与 BB Gemini 相同。像素尺寸只用于推导 Gemini 支持的宽高比；上游会结合该比例与 `resolution` 生成，不保证返回精确像素尺寸。
 
 成功受理返回 HTTP `200`，且响应体中的 `code` 也是数字 `200`：
 

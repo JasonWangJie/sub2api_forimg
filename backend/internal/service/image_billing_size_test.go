@@ -86,6 +86,19 @@ func TestResolveImageBillingSizeExplicitTierWinsOverOutputPixels(t *testing.T) {
 	require.Equal(t, ImageSizeSourceInput, got.Source)
 	require.Equal(t, map[string]int{ImageBillingSize1K: 1}, got.Breakdown)
 
+	// OpenAI 1K 2:1 / 21:9 map to long-edge ≥2048; explicit tier must not upgrade.
+	got = ResolveImageBillingSize("1K", []string{"2048x1024"})
+	require.Equal(t, ImageBillingSize1K, got.BillingSize)
+	require.Equal(t, ImageSizeSourceInput, got.Source)
+	require.Equal(t, map[string]int{ImageBillingSize1K: 1}, got.Breakdown)
+
+	got = ResolveImageBillingSize("1K", []string{"2384x1024"})
+	require.Equal(t, ImageBillingSize1K, got.BillingSize)
+	require.Equal(t, ImageSizeSourceInput, got.Source)
+
+	got = ResolveImageBillingSize("2K", []string{"2048x880"})
+	require.Equal(t, ImageBillingSize2K, got.BillingSize)
+
 	got = ResolveImageBillingSize("2K", []string{"2048x1152"})
 	require.Equal(t, ImageBillingSize2K, got.BillingSize)
 
@@ -102,6 +115,11 @@ func TestResolveImageBillingSizeExplicitTierWinsOverOutputPixels(t *testing.T) {
 	require.Equal(t, ImageBillingSize1K, got.BillingSize)
 	require.Equal(t, ImageSizeSourceInput, got.Source)
 	require.Equal(t, map[string]int{ImageBillingSize1K: 2}, got.Breakdown)
+
+	// Gemini 9:21 at 1K stretches the long edge; short-edge + explicit tier stay 1K.
+	got = ResolveGeminiImageBillingSize("1K", []string{"672x1536"})
+	require.Equal(t, ImageBillingSize1K, got.BillingSize)
+	require.Equal(t, ImageSizeSourceInput, got.Source)
 }
 
 func TestApplyForwardImageBillingResolutionUsesGeminiShortEdge(t *testing.T) {
