@@ -258,13 +258,91 @@
                 <label class="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">{{ t('admin.backup.imageStorage.billingRetryAttempts') }}</label>
                 <input v-model.number="imageStorageForm.async_image.billing_retry_attempts" type="number" min="1" class="input w-full" />
               </div>
+              <div class="md:col-span-2 lg:col-span-3">
+                <h5 class="text-xs font-semibold text-gray-700 dark:text-gray-300">{{ t('admin.backup.imageStorage.referenceTransportTitle') }}</h5>
+              </div>
+              <div>
+                <label class="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">{{ t('admin.backup.imageStorage.openaiReferenceTransportMode') }}</label>
+                <select v-model="imageStorageForm.async_image.openai_reference_transport_mode" class="input w-full">
+                  <option value="passthrough">{{ t('admin.backup.imageStorage.referenceTransportPassthrough') }}</option>
+                  <option value="local">{{ t('admin.backup.imageStorage.referenceTransportLocalMultipart') }}</option>
+                  <option value="passthrough_fallback_local">{{ t('admin.backup.imageStorage.referenceTransportFallbackMultipart') }}</option>
+                </select>
+                <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">{{ t('admin.backup.imageStorage.openaiReferenceTransportHint') }}</p>
+              </div>
+              <div>
+                <label class="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">{{ t('admin.backup.imageStorage.geminiReferenceTransportMode') }}</label>
+                <select v-model="imageStorageForm.async_image.gemini_reference_transport_mode" class="input w-full">
+                  <option value="passthrough">{{ t('admin.backup.imageStorage.referenceTransportPassthrough') }}</option>
+                  <option value="local">{{ t('admin.backup.imageStorage.referenceTransportLocalInlineData') }}</option>
+                  <option value="passthrough_fallback_local">{{ t('admin.backup.imageStorage.referenceTransportFallbackInlineData') }}</option>
+                </select>
+                <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">{{ t('admin.backup.imageStorage.geminiReferenceTransportHint') }}</p>
+              </div>
+              <div class="md:col-span-2 lg:col-span-3">
+                <h5 class="text-xs font-semibold text-gray-700 dark:text-gray-300">{{ t('admin.backup.imageStorage.referenceRetryTitle') }}</h5>
+              </div>
+              <div>
+                <label class="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">{{ t('admin.backup.imageStorage.retryMaxAttempts') }}</label>
+                <input v-model.number="imageStorageForm.async_image.reference_fetch_max_retries" type="number" min="0" max="5" class="input w-full" />
+              </div>
+              <div>
+                <label class="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">{{ t('admin.backup.imageStorage.retryBaseSeconds') }}</label>
+                <input v-model.number="imageStorageForm.async_image.reference_fetch_retry_base_seconds" type="number" min="1" class="input w-full" />
+              </div>
+              <div>
+                <label class="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">{{ t('admin.backup.imageStorage.retryMaxSeconds') }}</label>
+                <input v-model.number="imageStorageForm.async_image.reference_fetch_retry_max_seconds" type="number" min="1" class="input w-full" />
+              </div>
+              <div class="md:col-span-2 lg:col-span-3">
+                <h5 class="text-xs font-semibold text-gray-700 dark:text-gray-300">{{ t('admin.backup.imageStorage.upstreamRetryTitle') }}</h5>
+              </div>
+              <div>
+                <label class="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">{{ t('admin.backup.imageStorage.retryMaxAttempts') }}</label>
+                <input v-model.number="imageStorageForm.async_image.upstream_transient_max_retries" type="number" min="0" max="6" class="input w-full" />
+              </div>
+              <div>
+                <label class="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">{{ t('admin.backup.imageStorage.retryBaseSeconds') }}</label>
+                <input v-model.number="imageStorageForm.async_image.upstream_transient_retry_base_seconds" type="number" min="1" class="input w-full" />
+              </div>
+              <div>
+                <label class="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">{{ t('admin.backup.imageStorage.retryMaxSeconds') }}</label>
+                <input v-model.number="imageStorageForm.async_image.upstream_transient_retry_max_seconds" type="number" min="1" class="input w-full" />
+              </div>
+              <div class="md:col-span-2 lg:col-span-3">
+                <h5 class="text-xs font-semibold text-gray-700 dark:text-gray-300">{{ t('admin.backup.imageStorage.capacityRetryTitle') }}</h5>
+              </div>
+              <div>
+                <label class="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">{{ t('admin.backup.imageStorage.retryMaxAttempts') }}</label>
+                <input v-model.number="imageStorageForm.async_image.capacity_max_retries" type="number" min="0" max="10" class="input w-full" />
+              </div>
+              <div>
+                <label class="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">{{ t('admin.backup.imageStorage.retryBaseSeconds') }}</label>
+                <input v-model.number="imageStorageForm.async_image.capacity_retry_base_seconds" type="number" min="1" class="input w-full" />
+              </div>
+              <div>
+                <label class="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">{{ t('admin.backup.imageStorage.retryMaxSeconds') }}</label>
+                <input v-model.number="imageStorageForm.async_image.capacity_retry_max_seconds" type="number" min="1" class="input w-full" />
+              </div>
+              <div>
+                <label class="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">{{ t('admin.backup.imageStorage.totalMaxRetries') }}</label>
+                <input v-model.number="imageStorageForm.async_image.total_max_retries" type="number" min="0" max="32" class="input w-full" />
+              </div>
+              <div>
+                <label class="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">{{ t('admin.backup.imageStorage.retryJitterPercent') }}</label>
+                <input v-model.number="imageStorageForm.async_image.retry_jitter_percent" type="number" min="0" max="50" class="input w-full" />
+              </div>
+              <div>
+                <label class="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">{{ t('admin.backup.imageStorage.retryAfterMaxSeconds') }}</label>
+                <input v-model.number="imageStorageForm.async_image.retry_after_max_seconds" type="number" min="1" max="3600" class="input w-full" />
+              </div>
               <div>
                 <label class="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">{{ t('admin.backup.imageStorage.downloadMaxBytes') }}</label>
                 <input v-model.number="imageStorageForm.async_image.download_max_bytes" type="number" min="1048576" max="67108864" step="1048576" class="input w-full" />
               </div>
               <div>
                 <label class="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">{{ t('admin.backup.imageStorage.downloadMaxPixels') }}</label>
-                <input v-model.number="imageStorageForm.async_image.download_max_pixels" type="number" min="1000000" max="80000000" step="1000000" class="input w-full" />
+                <input v-model.number="imageStorageForm.async_image.download_max_pixels" type="number" :min="ASYNC_IMAGE_DOWNLOAD_PIXEL_LIMITS.min" :max="ASYNC_IMAGE_DOWNLOAD_PIXEL_LIMITS.max" step="1000000" class="input w-full" />
               </div>
               <div>
                 <label class="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">{{ t('admin.backup.imageStorage.maxReferenceImages') }}</label>
@@ -642,6 +720,10 @@ import type {
 } from '@/api/admin/backup'
 import { useStepUp, isStepUpBlocked, isStepUpCancelled, stepUpBlockReason } from '@/composables/useStepUp'
 import TotpStepUpDialog from '@/components/auth/TotpStepUpDialog.vue'
+import {
+  ASYNC_IMAGE_DOWNLOAD_PIXEL_LIMITS,
+  ASYNC_IMAGE_REFERENCE_RETRY_DEFAULTS,
+} from './asyncImageRuntimeConfig'
 
 const { t } = useI18n()
 const appStore = useAppStore()
@@ -704,12 +786,12 @@ const imageStorageForm = ref<ImageStorageConfig>({
     worker_concurrency: 4,
     worker_lease_seconds: 120,
     recovery_interval_seconds: 30,
-    execution_timeout_seconds: 900,
+    execution_timeout_seconds: 1200,
     storage_retry_attempts: 5,
     billing_retry_attempts: 10,
     retry_backoff_seconds: 30,
+    ...ASYNC_IMAGE_REFERENCE_RETRY_DEFAULTS,
     download_max_bytes: 33554432,
-    download_max_pixels: 40000000,
     max_reference_images: 8,
     max_reference_total_bytes: 67108864,
     max_reference_total_pixels: 80000000,

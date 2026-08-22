@@ -156,22 +156,27 @@ func TestDurableAsyncImageWorkerDefersLocalCapacityWithoutFailingTask(t *testing
 		TaskID: "asyncimg_capacity", Status: service.AsyncImageTaskStatusInvoking, Version: 7, RetryCount: 1,
 	}
 
-	disposition := worker.deferAsyncImageForLocalCapacity(context.Background(), task, service.AsyncImageRuntimeConfig{RetryBackoffSeconds: 12})
+	disposition := worker.deferAsyncImageForLocalCapacity(context.Background(), task, service.AsyncImageRuntimeConfig{
+		CapacityMaxRetries: 5, TotalMaxRetries: 16,
+		CapacityRetryBaseSeconds: 12, CapacityRetryMaxSeconds: 300, RetryAfterMaxSeconds: 900,
+	})
 	require.True(t, disposition.requeue)
 	require.Equal(t, 12*time.Second, disposition.delay)
 	require.Equal(t, service.AsyncImageTaskStatusQueued, repo.transition.ToStatus)
-	require.True(t, repo.transition.IncrementRetry)
-	require.True(t, repo.transition.ClearError)
+	require.True(t, repo.transition.IncrementCapacityRetry)
 }
 
 func TestDurableAsyncImageWorkerFailsAfterFifthLocalCapacityAttempt(t *testing.T) {
 	repo := &asyncImageLocalCapacityRepoStub{}
 	worker := &DurableAsyncImageHandler{tasks: service.NewAsyncImageTaskService(repo)}
 	task := &service.AsyncImageTask{
-		TaskID: "asyncimg_capacity_exhausted", Status: service.AsyncImageTaskStatusInvoking, Version: 9, RetryCount: 4,
+		TaskID: "asyncimg_capacity_exhausted", Status: service.AsyncImageTaskStatusInvoking, Version: 9,
+		RetryCount: 5, CapacityRetryCount: 5,
 	}
 
-	disposition := worker.deferAsyncImageForLocalCapacity(context.Background(), task, service.AsyncImageRuntimeConfig{RetryBackoffSeconds: 12})
+	disposition := worker.deferAsyncImageForLocalCapacity(context.Background(), task, service.AsyncImageRuntimeConfig{
+		CapacityMaxRetries: 5, TotalMaxRetries: 16,
+	})
 
 	require.False(t, disposition.requeue)
 	require.Zero(t, disposition.delay)
@@ -180,10 +185,32 @@ func TestDurableAsyncImageWorkerFailsAfterFifthLocalCapacityAttempt(t *testing.T
 	require.NotNil(t, repo.transition.ErrorCode)
 	require.Equal(t, "local_capacity_exhausted", *repo.transition.ErrorCode)
 	require.NotNil(t, repo.transition.ErrorMessage)
-	require.Contains(t, *repo.transition.ErrorMessage, "after 5 attempts")
-	require.True(t, repo.transition.IncrementRetry)
+	require.Contains(t, *repo.transition.ErrorMessage, "after 5 retries")
+	require.False(t, repo.transition.IncrementRetry)
 	require.NotNil(t, repo.transition.FinishedAt)
 	require.True(t, repo.transition.ClearRequestPayload)
+}
+
+func TestDurableAsyncImageWorkerPersistsHybridFallbackStage(t *testing.T) {
+	repo := &asyncImageLocalCapacityRepoStub{}
+	worker := &DurableAsyncImageHandler{tasks: service.NewAsyncImageTaskService(repo)}
+	hybrid := service.AsyncImageReferenceTransportPassthroughFallbackLocal
+	task := &service.AsyncImageTask{
+		TaskID: "asyncimg_fallback", Status: service.AsyncImageTaskStatusInvoking, Version: 4,
+		ReferenceTransport: &hybrid,
+	}
+	cfg := testAsyncImageRetryConfig()
+	cfg.RetryJitterPercent = 0
+
+	disposition := worker.retryAsyncImageUpstreamReferenceFetch(
+		context.Background(), task, cfg, "image_url fetch failed: curl: (28)", 0,
+	)
+
+	require.True(t, disposition.requeue)
+	require.Equal(t, 15*time.Second, disposition.delay)
+	require.True(t, repo.transition.IncrementReferenceRetry)
+	require.NotNil(t, repo.transition.ReferenceTransport)
+	require.Equal(t, service.AsyncImageReferenceTransportLocal, *repo.transition.ReferenceTransport)
 }
 
 func TestAsyncImageInvocationHeartbeatFreshUsesDatabaseLeaseWindow(t *testing.T) {

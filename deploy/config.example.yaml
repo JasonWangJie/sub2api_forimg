@@ -1501,7 +1501,7 @@ image_durable_storage:
 # Durable Async Image Runtime (持久化异步生图运行参数)
 # =============================================================================
 # 后台保存的异步生图设置优先于本段；所有字段也可用 ASYNC_IMAGE_* 环境变量覆盖。
-# 设为 0 或负数会回退到括号中的安全默认值。
+# 未配置字段会回退到括号中的安全默认值；三类最大重试次数和总上限允许设为 0 以禁用。
 async_image:
   # 对外 API 根地址，例如 https://apiimg.example.com；可含部署前缀，不要以 / 结尾。
   # 用于生成 BB query_url 与 Location；留空时返回 /v1/... 相对路径。
@@ -1522,12 +1522,32 @@ async_image:
   storage_retry_attempts: 5
   # 已固定账单命令的同步扣费最大尝试次数（默认 10）；不会重复生成图片或重复扣费。
   billing_retry_attempts: 10
-  # 存储或计费失败后的重试间隔，单位秒（默认 30）。
+  # 仅用于存储或计费失败的重试间隔，单位秒（默认 30）。
   retry_backoff_seconds: 30
+  # OpenAI 参考图策略：passthrough、local、passthrough_fallback_local。
+  openai_reference_transport_mode: passthrough_fallback_local
+  # Gemini 参考图策略；local 会在本服务下载并转换为 inlineData。
+  gemini_reference_transport_mode: passthrough
+  # 本地或上游参考图抓取失败的额外重试次数及指数退避（默认 2 次，15/30 秒，最大 60 秒）。
+  reference_fetch_max_retries: 2
+  reference_fetch_retry_base_seconds: 15
+  reference_fetch_retry_max_seconds: 60
+  # 收到明确 5xx 临时失败响应后的额外重试次数及指数退避。
+  upstream_transient_max_retries: 3
+  upstream_transient_retry_base_seconds: 15
+  upstream_transient_retry_max_seconds: 60
+  # HTTP 429、账号池或模型容量不足的额外重试次数及长退避。
+  capacity_max_retries: 5
+  capacity_retry_base_seconds: 30
+  capacity_retry_max_seconds: 300
+  # 所有生成前重试的总上限、抖动百分比和 Retry-After 接受上限。
+  total_max_retries: 16
+  retry_jitter_percent: 20
+  retry_after_max_seconds: 900
   # 单张远程参考图和 SC 上传文件的最大字节数（默认 32 MiB）。
   download_max_bytes: 33554432
-  # 单张参考图完整解码后的最大像素数（默认 4000 万）。
-  download_max_pixels: 40000000
+  # 单张参考图完整解码后的最大像素数（默认及硬上限 8000 万，最小 100 万）。
+  download_max_pixels: 80000000
   # 单个生成任务最多接受的参考图数量（默认 8）。
   max_reference_images: 8
   # 单个生成任务全部参考图的总字节预算（默认 64 MiB）。

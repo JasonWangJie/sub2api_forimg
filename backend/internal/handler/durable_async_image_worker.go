@@ -7,8 +7,14 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
+	"math/rand"
+	"mime"
+	"mime/multipart"
+	"net"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"time"
 
@@ -45,7 +51,11 @@ var asyncImageExecutableStatuses = []string{
 	service.AsyncImageTaskStatusBillingFailed,
 }
 
-const asyncImageMaxLocalCapacityAttempts = 5
+const (
+	asyncImageCapacityRetryCode          = "capacity_retry"
+	asyncImageReferenceFetchRetryCode    = "reference_fetch_retry"
+	asyncImageUpstreamTransientRetryCode = "upstream_transient_retry"
+)
 
 func (h *DurableAsyncImageHandler) startRuntime(ctx context.Context) {
 	cfg, err := h.storage.RuntimeConfig(ctx)
@@ -399,11 +409,17 @@ func (h *DurableAsyncImageHandler) processAsyncImageTask(parent context.Context,
 	switch task.Status {
 	case service.AsyncImageTaskStatusQueued:
 		startedAt, progress := time.Now().UTC(), 10
+		var referenceTransport *string
+		if task.ReferenceTransport == nil {
+			mode := asyncImageReferenceTransport(task, cfg)
+			referenceTransport = &mode
+		}
 		task, err = h.tasks.Transition(parent, service.AsyncImageTaskTransition{
 			TaskID: task.TaskID, ExpectedVersion: task.Version,
 			FromStatuses: []string{service.AsyncImageTaskStatusQueued},
 			ToStatus:     service.AsyncImageTaskStatusInvoking,
-			Progress:     &progress, StartedAt: &startedAt, EventType: "invocation_started",
+			Progress:     &progress, StartedAt: &startedAt, ReferenceTransport: referenceTransport,
+			EventType: "invocation_started",
 		})
 		if err != nil {
 			return asyncImageWorkerDisposition{requeue: true, delay: 3 * time.Second}
@@ -473,6 +489,9 @@ func (h *DurableAsyncImageHandler) invokeAsyncImageTask(parent context.Context, 
 	defer cancel()
 	body, path, contentType, err := h.buildAsyncImageUpstreamRequest(executionCtx, task, payload, cfg, storage)
 	if err != nil {
+		if shouldRetryAsyncImageReferenceFetch(task, cfg, err) {
+			return h.retryAsyncImageReferenceFetch(parent, task, cfg, err)
+		}
 		h.failAsyncImageTask(parent, task, "invalid_reference_image", asyncImageSafeError(err), false)
 		return asyncImageWorkerDisposition{}
 	}
@@ -530,6 +549,7 @@ func (h *DurableAsyncImageHandler) invokeAsyncImageTask(parent context.Context, 
 	}
 	if recorder.Code < http.StatusOK || recorder.Code >= http.StatusMultipleChoices {
 		message := formatAsyncImageUpstreamFailure(recorder.Code, recorder.Body.Bytes())
+		retryAfter := service.ParseAsyncImageRetryAfter(recorder.Header().Get("Retry-After"), time.Now())
 		logger.L().Warn("async_image.upstream_failed",
 			zap.String("task_id", task.TaskID),
 			zap.String("platform", task.Platform),
@@ -537,11 +557,22 @@ func (h *DurableAsyncImageHandler) invokeAsyncImageTask(parent context.Context, 
 			zap.Int("status_code", recorder.Code),
 			zap.String("message", message),
 		)
-		if shouldRetryOpenAIImageURLFetchTimeout(task, recorder.Code, message) {
-			return h.retryAsyncImageForOpenAIImageURLFetch(parent, task, cfg, message)
+		if isAsyncImageAmbiguousUpstreamFailure(recorder.Code, message) {
+			h.markAsyncImageExecutionUnknown(parent, task, message)
+			return asyncImageWorkerDisposition{}
 		}
-		if hasScheduledOpenAIImageURLFetchRetry(task) && isOpenAIImageURLFetchTimeoutFailure(recorder.Code, message) {
-			message = message + "（已自动重试 1 次仍失败）"
+		if shouldRetryAsyncImageUpstreamReferenceFetch(task, cfg, recorder.Code, message) {
+			return h.retryAsyncImageUpstreamReferenceFetch(parent, task, cfg, message, retryAfter)
+		}
+		if isAsyncImageCapacityFailure(recorder.Code, message) {
+			if shouldRetryAsyncImageCapacity(task, cfg, recorder.Code, message) {
+				return h.retryAsyncImageCapacity(parent, task, cfg, message, retryAfter, "upstream_capacity")
+			}
+			h.failAsyncImageTask(parent, task, "upstream_capacity_exhausted", message, false)
+			return asyncImageWorkerDisposition{}
+		}
+		if shouldRetryAsyncImageUpstreamTransient(task, cfg, recorder.Code, message) {
+			return h.retryAsyncImageUpstreamTransient(parent, task, cfg, message, retryAfter)
 		}
 		h.failAsyncImageTask(parent, task, "upstream_failed", message, false)
 		return asyncImageWorkerDisposition{}
@@ -595,111 +626,297 @@ func (h *DurableAsyncImageHandler) deferAsyncImageForLocalCapacity(
 	if task == nil {
 		return asyncImageWorkerDisposition{}
 	}
-	if task.RetryCount+1 >= asyncImageMaxLocalCapacityAttempts {
+	if !canRetryAsyncImage(task, task.CapacityRetryCount, cfg.CapacityMaxRetries, cfg.TotalMaxRetries) {
 		h.failAsyncImageTask(
 			ctx,
 			task,
 			"local_capacity_exhausted",
-			fmt.Sprintf("image generation could not be scheduled after %d attempts because no account capacity was available", asyncImageMaxLocalCapacityAttempts),
-			true,
+			fmt.Sprintf("image generation could not be scheduled after %d retries because no account capacity was available", task.CapacityRetryCount),
+			false,
 		)
 		return asyncImageWorkerDisposition{}
 	}
-	progress := 0
-	if _, err := h.tasks.Transition(ctx, service.AsyncImageTaskTransition{
-		TaskID: task.TaskID, ExpectedVersion: task.Version,
-		FromStatuses: []string{service.AsyncImageTaskStatusInvoking},
-		ToStatus:     service.AsyncImageTaskStatusQueued, Progress: &progress,
-		IncrementRetry: true, ClearError: true, EventType: "local_capacity_deferred",
-	}); err != nil {
-		return asyncImageWorkerDisposition{}
-	}
-	delay := time.Duration(cfg.RetryBackoffSeconds) * time.Second
-	if delay <= 0 {
-		delay = 30 * time.Second
-	}
-	return asyncImageWorkerDisposition{requeue: true, delay: delay}
+	return h.retryAsyncImageCapacity(ctx, task, cfg, "no local account capacity was available", 0, "local_capacity")
 }
 
-const asyncImageOpenAIImageURLFetchTimeoutCode = "upstream_image_url_fetch_timeout"
+func canRetryAsyncImage(task *service.AsyncImageTask, categoryCount, categoryMax, totalMax int) bool {
+	return task != nil && categoryCount < categoryMax && task.RetryCount < totalMax
+}
 
-// isOpenAIImageURLFetchTimeoutFailure matches upstream OpenAI Images errors where
-// the provider itself timed out fetching a client-supplied image_url (~60s curl 28).
-func isOpenAIImageURLFetchTimeoutFailure(statusCode int, message string) bool {
-	if statusCode != http.StatusBadRequest {
+func isRetryableAsyncImageReferenceFetchError(err error) bool {
+	if err == nil {
+		return false
+	}
+	var downloadErr *service.AsyncImageReferenceDownloadError
+	if errors.As(err, &downloadErr) {
+		switch downloadErr.StatusCode {
+		case http.StatusRequestTimeout, http.StatusTooEarly, http.StatusTooManyRequests,
+			http.StatusInternalServerError, http.StatusBadGateway, http.StatusServiceUnavailable,
+			http.StatusGatewayTimeout, 522, 524:
+			return true
+		}
+		if downloadErr.StatusCode > 0 {
+			return false
+		}
+	}
+	if errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) || errors.Is(err, context.DeadlineExceeded) {
+		return true
+	}
+	var networkErr net.Error
+	if errors.As(err, &networkErr) && networkErr.Timeout() {
+		return true
+	}
+	var dnsErr *net.DNSError
+	if errors.As(err, &dnsErr) && (dnsErr.IsTemporary || dnsErr.IsTimeout) {
+		return true
+	}
+	lower := strings.ToLower(err.Error())
+	for _, fragment := range []string{
+		"unexpected eof", "connection reset", "connection refused", "broken pipe",
+		"tls handshake timeout", "context deadline exceeded", "i/o timeout",
+		"temporary failure in name resolution", "server misbehaving",
+	} {
+		if strings.Contains(lower, fragment) {
+			return true
+		}
+	}
+	return false
+}
+
+func shouldRetryAsyncImageReferenceFetch(task *service.AsyncImageTask, cfg service.AsyncImageRuntimeConfig, err error) bool {
+	return isRetryableAsyncImageReferenceFetchError(err) &&
+		canRetryAsyncImage(task, task.ReferenceRetryCount, cfg.ReferenceFetchMaxRetries, cfg.TotalMaxRetries)
+}
+
+func isAsyncImageExplicitReferenceFetchFailure(message string) bool {
+	lower := strings.ToLower(message)
+	for _, permanent := range []string{
+		"http 401", "http 403", "http 404", "401 unauthorized", "403 forbidden", "404 not found",
+		"image_too_many_pixels", "exceeds the configured", "invalid image", "corrupt image",
+	} {
+		if strings.Contains(lower, permanent) {
+			return false
+		}
+	}
+	for _, fragment := range []string{
+		"image_url fetch failed", "image url fetch failed", "failed to fetch image",
+		"failed to download image", "download reference image", "fetch reference image",
+		"could not fetch image", "unable to fetch image", "fileuri fetch failed",
+	} {
+		if strings.Contains(lower, fragment) {
+			return true
+		}
+	}
+	return false
+}
+
+func isAsyncImageMultipartRequiredFailure(message string) bool {
+	return strings.Contains(strings.ToLower(message), "requires multipart/form-data")
+}
+
+func shouldRetryAsyncImageUpstreamReferenceFetch(task *service.AsyncImageTask, cfg service.AsyncImageRuntimeConfig, _ int, message string) bool {
+	if task == nil || task.RequestType != service.AsyncImageRequestTypeImageToImage ||
+		!canRetryAsyncImage(task, task.ReferenceRetryCount, cfg.ReferenceFetchMaxRetries, cfg.TotalMaxRetries) {
+		return false
+	}
+	mode := asyncImageReferenceTransport(task, cfg)
+	if isAsyncImageMultipartRequiredFailure(message) {
+		return task.Platform == service.PlatformOpenAI && mode == service.AsyncImageReferenceTransportPassthroughFallbackLocal
+	}
+	return mode != service.AsyncImageReferenceTransportLocal && isAsyncImageExplicitReferenceFetchFailure(message)
+}
+
+func isAsyncImageCapacityFailure(statusCode int, message string) bool {
+	if statusCode == http.StatusTooManyRequests {
+		return true
+	}
+	lower := strings.ToLower(message)
+	for _, fragment := range []string{
+		"all available accounts exhausted", "errnoavailableaccounts", "errnoavailablecompactaccounts",
+		"model capacity exhausted", "no account capacity", "capacity temporarily unavailable",
+	} {
+		if strings.Contains(lower, fragment) {
+			return true
+		}
+	}
+	return false
+}
+
+func shouldRetryAsyncImageCapacity(task *service.AsyncImageTask, cfg service.AsyncImageRuntimeConfig, statusCode int, message string) bool {
+	return isAsyncImageCapacityFailure(statusCode, message) &&
+		canRetryAsyncImage(task, task.CapacityRetryCount, cfg.CapacityMaxRetries, cfg.TotalMaxRetries)
+}
+
+func isAsyncImageAmbiguousUpstreamFailure(statusCode int, message string) bool {
+	if statusCode != http.StatusBadGateway && statusCode != http.StatusGatewayTimeout {
 		return false
 	}
 	lower := strings.ToLower(message)
-	if !strings.Contains(lower, "image_url fetch failed") {
-		return false
+	for _, fragment := range []string{
+		"unexpected eof", " eof", "connection reset", "connection refused", "broken pipe",
+		"tls handshake timeout", "context deadline exceeded", "i/o timeout",
+	} {
+		if strings.Contains(lower, fragment) {
+			return true
+		}
 	}
-	return strings.Contains(lower, "curl: (28)") ||
-		strings.Contains(lower, "connection timed out") ||
-		strings.Contains(lower, "operation timed out")
+	return false
 }
 
-func hasScheduledOpenAIImageURLFetchRetry(task *service.AsyncImageTask) bool {
-	if task == nil || task.ErrorCode == nil {
+func isAsyncImageUpstreamTransientFailure(statusCode int, message string) bool {
+	switch statusCode {
+	case http.StatusInternalServerError, http.StatusBadGateway, http.StatusServiceUnavailable, http.StatusGatewayTimeout, 529:
+	default:
 		return false
 	}
-	return strings.EqualFold(strings.TrimSpace(*task.ErrorCode), asyncImageOpenAIImageURLFetchTimeoutCode)
+	lower := strings.ToLower(message)
+	for _, permanent := range []string{
+		"authentication failed", "permission denied", "invalid api key", "requires multipart/form-data",
+		"access forbidden", "not authorized", "invalid credential", "credentials are invalid",
+		"prompt is required", "invalid request", "image_too_many_pixels", "quota exceeded",
+	} {
+		if strings.Contains(lower, permanent) {
+			return false
+		}
+	}
+	return true
 }
 
-func shouldRetryOpenAIImageURLFetchTimeout(task *service.AsyncImageTask, statusCode int, message string) bool {
-	if task == nil || task.Platform != service.PlatformOpenAI {
-		return false
-	}
-	if hasScheduledOpenAIImageURLFetchRetry(task) {
-		return false
-	}
-	return isOpenAIImageURLFetchTimeoutFailure(statusCode, message)
+func shouldRetryAsyncImageUpstreamTransient(task *service.AsyncImageTask, cfg service.AsyncImageRuntimeConfig, statusCode int, message string) bool {
+	return isAsyncImageUpstreamTransientFailure(statusCode, message) &&
+		canRetryAsyncImage(task, task.UpstreamRetryCount, cfg.UpstreamTransientMaxRetries, cfg.TotalMaxRetries)
 }
 
-func (h *DurableAsyncImageHandler) retryAsyncImageForOpenAIImageURLFetch(
-	ctx context.Context,
-	task *service.AsyncImageTask,
-	cfg service.AsyncImageRuntimeConfig,
-	upstreamMessage string,
-) asyncImageWorkerDisposition {
+var asyncImageRetryRandom = rand.Float64
+
+func asyncImageRetryDelay(attempt, baseSeconds, maxSeconds, jitterPercent, retryAfterMaxSeconds int, retryAfter time.Duration) time.Duration {
+	if attempt < 1 {
+		attempt = 1
+	}
+	if baseSeconds < 1 {
+		baseSeconds = 1
+	}
+	if maxSeconds < baseSeconds {
+		maxSeconds = baseSeconds
+	}
+	if retryAfterMaxSeconds < 1 {
+		retryAfterMaxSeconds = 1
+	}
+	maxRetryAfter := time.Duration(retryAfterMaxSeconds) * time.Second
+	if retryAfter > 0 {
+		delay := min(retryAfter, maxRetryAfter)
+		if jitterPercent > 0 {
+			delay += time.Duration(float64(delay) * asyncImageRetryRandom() * float64(jitterPercent) / 100)
+		}
+		return min(delay, maxRetryAfter)
+	}
+	delay := time.Duration(baseSeconds) * time.Second
+	maximum := time.Duration(maxSeconds) * time.Second
+	for n := 1; n < attempt && delay < maximum; n++ {
+		if delay > maximum/2 {
+			delay = maximum
+		} else {
+			delay *= 2
+		}
+	}
+	if jitterPercent > 0 {
+		factor := 1 + (asyncImageRetryRandom()*2-1)*float64(jitterPercent)/100
+		delay = time.Duration(float64(delay) * factor)
+	}
+	if delay < time.Second {
+		delay = time.Second
+	}
+	return min(delay, maximum)
+}
+
+func asyncImageReferenceRetryAfter(err error) time.Duration {
+	var downloadErr *service.AsyncImageReferenceDownloadError
+	if errors.As(err, &downloadErr) {
+		return downloadErr.RetryAfter
+	}
+	return 0
+}
+
+func (h *DurableAsyncImageHandler) retryAsyncImageReferenceFetch(ctx context.Context, task *service.AsyncImageTask, cfg service.AsyncImageRuntimeConfig, cause error) asyncImageWorkerDisposition {
+	return h.scheduleAsyncImageReferenceRetry(ctx, task, cfg, asyncImageSafeError(cause), asyncImageReferenceRetryAfter(cause), false)
+}
+
+func (h *DurableAsyncImageHandler) retryAsyncImageUpstreamReferenceFetch(ctx context.Context, task *service.AsyncImageTask, cfg service.AsyncImageRuntimeConfig, message string, retryAfter time.Duration) asyncImageWorkerDisposition {
+	fallbackLocal := asyncImageReferenceTransport(task, cfg) == service.AsyncImageReferenceTransportPassthroughFallbackLocal
+	return h.scheduleAsyncImageReferenceRetry(ctx, task, cfg, message, retryAfter, fallbackLocal)
+}
+
+func (h *DurableAsyncImageHandler) scheduleAsyncImageReferenceRetry(ctx context.Context, task *service.AsyncImageTask, cfg service.AsyncImageRuntimeConfig, detail string, retryAfter time.Duration, fallbackLocal bool) asyncImageWorkerDisposition {
 	if task == nil {
 		return asyncImageWorkerDisposition{}
 	}
+	attempt := task.ReferenceRetryCount + 1
+	code := asyncImageReferenceFetchRetryCode
+	message := fmt.Sprintf("reference image fetch failed; scheduled retry %d/%d: %s", attempt, cfg.ReferenceFetchMaxRetries, asyncImageSafeError(errors.New(detail)))
 	progress := 0
-	code := asyncImageOpenAIImageURLFetchTimeoutCode
-	detail := asyncImageSafeError(errors.New(upstreamMessage))
-	message := "参考图 URL 拉取超时，已安排自动重试（1/1）：" + detail
-	eventPayload, _ := json.Marshal(map[string]any{
-		"message": message,
-		"retry":   1,
-		"max":     1,
-		"reason":  "openai_image_url_fetch_timeout",
-	})
-	if _, err := h.tasks.Transition(ctx, service.AsyncImageTaskTransition{
+	transition := service.AsyncImageTaskTransition{
 		TaskID: task.TaskID, ExpectedVersion: task.Version,
-		FromStatuses: []string{service.AsyncImageTaskStatusInvoking},
-		ToStatus:     service.AsyncImageTaskStatusQueued, Progress: &progress,
-		ErrorCode: &code, ErrorMessage: &message,
-		IncrementRetry: true, EventType: "upstream_image_url_fetch_retry",
-		EventPayload: eventPayload,
-	}); err != nil {
-		logger.L().Warn("async_image.image_url_fetch_retry_transition_failed",
-			zap.String("task_id", task.TaskID),
-			zap.Error(err),
-		)
-		h.failAsyncImageTask(ctx, task, "upstream_failed", upstreamMessage, false)
+		FromStatuses: []string{service.AsyncImageTaskStatusInvoking}, ToStatus: service.AsyncImageTaskStatusQueued,
+		Progress: &progress, ErrorCode: &code, ErrorMessage: &message,
+		IncrementReferenceRetry: true, EventType: "reference_image_fetch_retry",
+	}
+	if fallbackLocal {
+		mode := service.AsyncImageReferenceTransportLocal
+		transition.ReferenceTransport = &mode
+	}
+	transition.EventPayload, _ = json.Marshal(map[string]any{"retry": attempt, "max": cfg.ReferenceFetchMaxRetries, "fallback_local": fallbackLocal})
+	if _, err := h.tasks.Transition(ctx, transition); err != nil {
+		logger.L().Warn("async_image.reference_retry_transition_failed", zap.String("task_id", task.TaskID), zap.Error(err))
 		return asyncImageWorkerDisposition{}
 	}
-	logger.L().Info("async_image.image_url_fetch_retry_scheduled",
-		zap.String("task_id", task.TaskID),
-		zap.String("model", task.Model),
+	delay := asyncImageRetryDelay(
+		attempt, cfg.ReferenceFetchRetryBaseSeconds, cfg.ReferenceFetchRetryMaxSeconds,
+		cfg.RetryJitterPercent, cfg.RetryAfterMaxSeconds, retryAfter,
 	)
-	delay := time.Duration(cfg.RetryBackoffSeconds) * time.Second
-	if delay <= 0 {
-		delay = 10 * time.Second
+	return asyncImageWorkerDisposition{requeue: true, delay: delay}
+}
+
+func (h *DurableAsyncImageHandler) retryAsyncImageCapacity(ctx context.Context, task *service.AsyncImageTask, cfg service.AsyncImageRuntimeConfig, detail string, retryAfter time.Duration, reason string) asyncImageWorkerDisposition {
+	attempt := task.CapacityRetryCount + 1
+	code := asyncImageCapacityRetryCode
+	message := fmt.Sprintf("image generation capacity unavailable; scheduled retry %d/%d: %s", attempt, cfg.CapacityMaxRetries, asyncImageSafeError(errors.New(detail)))
+	progress := 0
+	eventPayload, _ := json.Marshal(map[string]any{"retry": attempt, "max": cfg.CapacityMaxRetries, "reason": reason})
+	if _, err := h.tasks.Transition(ctx, service.AsyncImageTaskTransition{
+		TaskID: task.TaskID, ExpectedVersion: task.Version,
+		FromStatuses: []string{service.AsyncImageTaskStatusInvoking}, ToStatus: service.AsyncImageTaskStatusQueued,
+		Progress: &progress, ErrorCode: &code, ErrorMessage: &message,
+		IncrementCapacityRetry: true, EventType: "capacity_retry", EventPayload: eventPayload,
+	}); err != nil {
+		logger.L().Warn("async_image.capacity_retry_transition_failed", zap.String("task_id", task.TaskID), zap.Error(err))
+		return asyncImageWorkerDisposition{}
 	}
-	if delay > 30*time.Second {
-		delay = 30 * time.Second
+	delay := asyncImageRetryDelay(
+		attempt, cfg.CapacityRetryBaseSeconds, cfg.CapacityRetryMaxSeconds,
+		cfg.RetryJitterPercent, cfg.RetryAfterMaxSeconds, retryAfter,
+	)
+	return asyncImageWorkerDisposition{requeue: true, delay: delay}
+}
+
+func (h *DurableAsyncImageHandler) retryAsyncImageUpstreamTransient(ctx context.Context, task *service.AsyncImageTask, cfg service.AsyncImageRuntimeConfig, detail string, retryAfter time.Duration) asyncImageWorkerDisposition {
+	attempt := task.UpstreamRetryCount + 1
+	code := asyncImageUpstreamTransientRetryCode
+	message := fmt.Sprintf("upstream image service temporarily unavailable; scheduled retry %d/%d: %s", attempt, cfg.UpstreamTransientMaxRetries, asyncImageSafeError(errors.New(detail)))
+	progress := 0
+	eventPayload, _ := json.Marshal(map[string]any{"retry": attempt, "max": cfg.UpstreamTransientMaxRetries})
+	if _, err := h.tasks.Transition(ctx, service.AsyncImageTaskTransition{
+		TaskID: task.TaskID, ExpectedVersion: task.Version,
+		FromStatuses: []string{service.AsyncImageTaskStatusInvoking}, ToStatus: service.AsyncImageTaskStatusQueued,
+		Progress: &progress, ErrorCode: &code, ErrorMessage: &message,
+		IncrementUpstreamRetry: true, EventType: "upstream_transient_retry", EventPayload: eventPayload,
+	}); err != nil {
+		logger.L().Warn("async_image.upstream_retry_transition_failed", zap.String("task_id", task.TaskID), zap.Error(err))
+		return asyncImageWorkerDisposition{}
 	}
+	delay := asyncImageRetryDelay(
+		attempt, cfg.UpstreamTransientRetryBaseSeconds, cfg.UpstreamTransientRetryMaxSeconds,
+		cfg.RetryJitterPercent, cfg.RetryAfterMaxSeconds, retryAfter,
+	)
 	return asyncImageWorkerDisposition{requeue: true, delay: delay}
 }
 
@@ -753,7 +970,16 @@ func (h *DurableAsyncImageHandler) buildAsyncImageUpstreamRequest(
 		if strings.TrimSpace(contentType) == "" {
 			contentType = "application/json"
 		}
-		return append([]byte(nil), payload.Body...), path, contentType, nil
+		if isMultipartContentType(contentType) {
+			return append([]byte(nil), payload.Body...), path, contentType, nil
+		}
+		mode := asyncImageReferenceTransport(task, cfg)
+		downloadRemote := mode == service.AsyncImageReferenceTransportLocal || asyncOpenAIRequestHasDataURI(payload.Body)
+		body, preparedLocal, err := h.prepareAsyncOpenAIReferenceImagesForTransport(ctx, payload.Body, cfg, downloadRemote)
+		if err == nil && preparedLocal && task.RequestType == service.AsyncImageRequestTypeImageToImage {
+			body, contentType, err = buildAsyncOpenAIEditMultipart(body, contentType)
+		}
+		return body, path, contentType, err
 	}
 	if payload.Normalized == nil {
 		return nil, "", "", errors.New("normalized Gemini image request is missing")
@@ -771,8 +997,294 @@ func (h *DurableAsyncImageHandler) buildAsyncImageUpstreamRequest(
 			MaxTotalPixels: cfg.MaxReferenceTotalPixels,
 		},
 	}
-	body, err := service.BuildGeminiAsyncChatBody(ctx, payload.Normalized, downloader)
+	body, err := service.BuildGeminiAsyncChatBodyWithTransport(ctx, payload.Normalized, downloader, asyncImageReferenceTransport(task, cfg))
 	return body, EndpointChatCompletions, "application/json", err
+}
+
+func asyncImageReferenceTransport(task *service.AsyncImageTask, cfg service.AsyncImageRuntimeConfig) string {
+	if task != nil && task.ReferenceTransport != nil {
+		mode := strings.ToLower(strings.TrimSpace(*task.ReferenceTransport))
+		switch mode {
+		case service.AsyncImageReferenceTransportPassthrough, service.AsyncImageReferenceTransportLocal, service.AsyncImageReferenceTransportPassthroughFallbackLocal:
+			return mode
+		}
+	}
+	if task != nil && task.Platform == service.PlatformGemini {
+		return cfg.GeminiReferenceTransportMode
+	}
+	return cfg.OpenAIReferenceTransportMode
+}
+
+func asyncOpenAIRequestHasDataURI(body []byte) bool {
+	return bytes.Contains(bytes.ToLower(body), []byte(`data:image/`))
+}
+
+func isMultipartContentType(contentType string) bool {
+	mediaType, _, err := mime.ParseMediaType(strings.TrimSpace(contentType))
+	return err == nil && strings.EqualFold(mediaType, "multipart/form-data")
+}
+
+// OpenAI's native /images/edits contract is multipart. Async JSON compatibility
+// requests are converted here after remote references have been inlined.
+func buildAsyncOpenAIEditMultipart(body []byte, contentType string) ([]byte, string, error) {
+	if isMultipartContentType(contentType) {
+		return body, contentType, nil
+	}
+	var root map[string]any
+	if err := json.Unmarshal(body, &root); err != nil {
+		return body, contentType, nil
+	}
+	var out bytes.Buffer
+	w := multipart.NewWriter(&out)
+	writeField := func(name, value string) error { return w.WriteField(name, value) }
+	imageIndex := 0
+	unsupportedReference := false
+	writeDataImage := func(field, raw string) error {
+		raw = strings.TrimSpace(raw)
+		if raw == "" {
+			return nil
+		}
+		if !strings.HasPrefix(strings.ToLower(raw), "data:") {
+			unsupportedReference = true
+			return nil
+		}
+		comma := strings.IndexByte(raw, ',')
+		if comma < 0 {
+			return fmt.Errorf("invalid data URI for %s", field)
+		}
+		meta := raw[:comma]
+		mediaType := "image/png"
+		if semi := strings.IndexByte(meta, ';'); semi > len("data:") {
+			mediaType = strings.TrimPrefix(meta[:semi], "data:")
+		}
+		data, err := base64.StdEncoding.DecodeString(raw[comma+1:])
+		if err != nil {
+			return fmt.Errorf("decode %s: %w", field, err)
+		}
+		ext := strings.TrimPrefix(strings.ToLower(mediaType), "image/")
+		if ext == "" {
+			ext = "png"
+		}
+		part, err := w.CreateFormFile(field, fmt.Sprintf("image-%d.%s", imageIndex, ext))
+		if err != nil {
+			return err
+		}
+		imageIndex++
+		_, err = part.Write(data)
+		return err
+	}
+	var referenceValues func(any) []string
+	referenceValues = func(value any) []string {
+		switch item := value.(type) {
+		case string:
+			return []string{item}
+		case []any:
+			out := make([]string, 0, len(item))
+			for _, child := range item {
+				out = append(out, referenceValues(child)...)
+			}
+			return out
+		case map[string]any:
+			if nested, ok := item["image_url"]; ok {
+				return referenceValues(nested)
+			}
+			if nested, ok := item["url"]; ok {
+				return referenceValues(nested)
+			}
+		}
+		return nil
+	}
+	addReference := func(raw string) error { return writeDataImage("image", raw) }
+	for _, key := range []string{"image_urls", "images", "image"} {
+		for _, raw := range referenceValues(root[key]) {
+			if err := addReference(raw); err != nil {
+				return nil, "", err
+			}
+		}
+	}
+	for _, raw := range referenceValues(root["mask"]) {
+		if err := writeDataImage("mask", raw); err != nil {
+			return nil, "", err
+		}
+		break
+	}
+	if imageIndex == 0 {
+		return body, contentType, nil
+	}
+	if unsupportedReference {
+		return body, contentType, nil
+	}
+	for key, value := range root {
+		if key == "image" || key == "images" || key == "image_urls" || key == "mask" {
+			continue
+		}
+		var scalar string
+		switch typed := value.(type) {
+		case string:
+			scalar = typed
+		case bool:
+			scalar = strconv.FormatBool(typed)
+		case float64:
+			scalar = strconv.FormatFloat(typed, 'f', -1, 64)
+		default:
+			continue
+		}
+		if err := writeField(key, scalar); err != nil {
+			return nil, "", err
+		}
+	}
+	if err := w.Close(); err != nil {
+		return nil, "", err
+	}
+	return out.Bytes(), w.FormDataContentType(), nil
+}
+
+// prepareAsyncOpenAIReferenceImages is retained for tests and callers that
+// explicitly request local preparation of every reference.
+func (h *DurableAsyncImageHandler) prepareAsyncOpenAIReferenceImages(ctx context.Context, body []byte, cfg service.AsyncImageRuntimeConfig) ([]byte, error) {
+	prepared, _, err := h.prepareAsyncOpenAIReferenceImagesForTransport(ctx, body, cfg, true)
+	return prepared, err
+}
+
+func (h *DurableAsyncImageHandler) prepareAsyncOpenAIReferenceImagesForTransport(ctx context.Context, body []byte, cfg service.AsyncImageRuntimeConfig, downloadRemote bool) ([]byte, bool, error) {
+	var root any
+	if err := json.Unmarshal(body, &root); err != nil {
+		// Multipart requests are already uploaded bytes and do not contain
+		// provider-fetchable image_url fields in the JSON body.
+		return append([]byte(nil), body...), false, nil
+	}
+	downloader := service.AsyncImageReferenceDownloader{
+		MaxBytes: cfg.DownloadMaxBytes, MaxPixels: cfg.DownloadMaxPixels,
+		Timeout:      time.Duration(cfg.DownloadTimeoutSeconds) * time.Second,
+		MaxRedirects: cfg.DownloadMaxRedirects,
+		Budget: &service.AsyncImageReferenceBudget{
+			MaxImages: cfg.MaxReferenceImages, MaxTotalBytes: cfg.MaxReferenceTotalBytes,
+			MaxTotalPixels: cfg.MaxReferenceTotalPixels,
+		},
+	}
+	changed, err := inlineAsyncOpenAIReferencesWithTransport(ctx, &root, downloader, downloadRemote)
+	if err != nil {
+		return nil, false, err
+	}
+	if !changed {
+		return append([]byte(nil), body...), false, nil
+	}
+	rewritten, err := json.Marshal(root)
+	if err != nil {
+		return nil, false, fmt.Errorf("marshal prepared OpenAI image request: %w", err)
+	}
+	return rewritten, true, nil
+}
+
+func inlineAsyncOpenAIReferences(ctx context.Context, value *any, downloader service.AsyncImageReferenceDownloader) (bool, error) {
+	return inlineAsyncOpenAIReferencesWithTransport(ctx, value, downloader, true)
+}
+
+func inlineAsyncOpenAIReferencesWithTransport(ctx context.Context, value *any, downloader service.AsyncImageReferenceDownloader, downloadRemote bool) (bool, error) {
+	if value == nil || *value == nil {
+		return false, nil
+	}
+	changed := false
+	switch node := (*value).(type) {
+	case map[string]any:
+		for key, child := range node {
+			var rewriteChanged bool
+			var err error
+			switch key {
+			case "image_url":
+				child, rewriteChanged, err = inlineAsyncOpenAIImageURLValue(ctx, child, downloader, downloadRemote)
+			case "image_urls":
+				child, rewriteChanged, err = inlineAsyncOpenAIImageURLList(ctx, child, downloader, downloadRemote)
+			}
+			if err != nil {
+				return false, err
+			}
+			if rewriteChanged {
+				node[key] = child
+				changed = true
+			}
+			childChanged, err := inlineAsyncOpenAIReferencesWithTransport(ctx, &child, downloader, downloadRemote)
+			if err != nil {
+				return false, err
+			}
+			if childChanged {
+				node[key] = child
+				changed = true
+			}
+		}
+	case []any:
+		for i := range node {
+			child := node[i]
+			childChanged, err := inlineAsyncOpenAIReferencesWithTransport(ctx, &child, downloader, downloadRemote)
+			if err != nil {
+				return false, err
+			}
+			if childChanged {
+				node[i] = child
+				changed = true
+			}
+		}
+	}
+	return changed, nil
+}
+
+func inlineAsyncOpenAIImageURLValue(ctx context.Context, value any, downloader service.AsyncImageReferenceDownloader, downloadRemote bool) (any, bool, error) {
+	switch node := value.(type) {
+	case string:
+		prepared, changed, err := inlineAsyncOpenAIImageURL(ctx, node, downloader, downloadRemote)
+		return prepared, changed, err
+	case map[string]any:
+		rawURL, ok := node["url"].(string)
+		if !ok {
+			return value, false, nil
+		}
+		prepared, changed, err := inlineAsyncOpenAIImageURL(ctx, rawURL, downloader, downloadRemote)
+		if err != nil || !changed {
+			return value, false, err
+		}
+		node["url"] = prepared
+		return node, true, nil
+	default:
+		return value, false, nil
+	}
+}
+
+func inlineAsyncOpenAIImageURLList(ctx context.Context, value any, downloader service.AsyncImageReferenceDownloader, downloadRemote bool) (any, bool, error) {
+	values, ok := value.([]any)
+	if !ok {
+		return value, false, nil
+	}
+	changed := false
+	for i, raw := range values {
+		prepared, itemChanged, err := inlineAsyncOpenAIImageURLValue(ctx, raw, downloader, downloadRemote)
+		if err != nil {
+			return value, false, err
+		}
+		if itemChanged {
+			values[i] = prepared
+			changed = true
+		}
+	}
+	return values, changed, nil
+}
+
+func inlineAsyncOpenAIImageURL(ctx context.Context, raw string, downloader service.AsyncImageReferenceDownloader, downloadRemote bool) (string, bool, error) {
+	raw = strings.TrimSpace(raw)
+	lower := strings.ToLower(raw)
+	if strings.HasPrefix(lower, "https://") && !downloadRemote {
+		if err := downloader.ValidatePassthroughURL(raw); err != nil {
+			return "", false, fmt.Errorf("validate OpenAI reference image: %w", err)
+		}
+		return raw, false, nil
+	}
+	if !strings.HasPrefix(lower, "https://") && !strings.HasPrefix(lower, "data:") {
+		return "", false, errors.New("OpenAI reference image must be an absolute HTTPS URL or an image data URI")
+	}
+	ref, err := downloader.Download(ctx, raw)
+	if err != nil {
+		return "", false, fmt.Errorf("download OpenAI reference image: %w", err)
+	}
+	return "data:" + ref.MIMEType + ";base64," + base64.StdEncoding.EncodeToString(ref.Data), true, nil
 }
 
 func (h *DurableAsyncImageHandler) captureAsyncImageInvocation(

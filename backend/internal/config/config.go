@@ -345,31 +345,45 @@ func (c *ImageDurableStorageConfig) NormalizedBackend() string {
 // AsyncImageConfig is the file/environment fallback for the durable async
 // image runtime. A database-backed admin setting takes precedence once saved.
 type AsyncImageConfig struct {
-	PublicBaseURL           string   `mapstructure:"public_base_url"`
-	WorkerConcurrency       int      `mapstructure:"worker_concurrency"`
-	WorkerLeaseSeconds      int      `mapstructure:"worker_lease_seconds"`
-	RecoveryIntervalSeconds int      `mapstructure:"recovery_interval_seconds"`
-	ExecutionTimeoutSeconds int      `mapstructure:"execution_timeout_seconds"`
-	StorageRetryAttempts    int      `mapstructure:"storage_retry_attempts"`
-	BillingRetryAttempts    int      `mapstructure:"billing_retry_attempts"`
-	RetryBackoffSeconds     int      `mapstructure:"retry_backoff_seconds"`
-	DownloadMaxBytes        int64    `mapstructure:"download_max_bytes"`
-	DownloadMaxPixels       int64    `mapstructure:"download_max_pixels"`
-	MaxReferenceImages      int      `mapstructure:"max_reference_images"`
-	MaxReferenceTotalBytes  int64    `mapstructure:"max_reference_total_bytes"`
-	MaxReferenceTotalPixels int64    `mapstructure:"max_reference_total_pixels"`
-	DownloadTimeoutSeconds  int      `mapstructure:"download_timeout_seconds"`
-	DownloadMaxRedirects    int      `mapstructure:"download_max_redirects"`
-	UploadTimeoutSeconds    int      `mapstructure:"upload_timeout_seconds"`
-	UploadPerMinute         int      `mapstructure:"upload_per_minute"`
-	MaxInputBytesPerKey     int64    `mapstructure:"max_input_bytes_per_key"`
-	SignedURLExpirySeconds  int      `mapstructure:"signed_url_expiry_seconds"`
-	InputRetentionHours     int      `mapstructure:"input_retention_hours"`
-	TaskRetentionDays       int      `mapstructure:"task_retention_days"`
-	ResultRetentionDays     int      `mapstructure:"result_retention_days"`
-	GeminiHalfKModels       []string `mapstructure:"gemini_half_k_models"`
-	PromptPreviewEnabled    bool     `mapstructure:"prompt_preview_enabled"`
-	PromptPreviewMaxChars   int      `mapstructure:"prompt_preview_max_chars"`
+	PublicBaseURL                     string   `mapstructure:"public_base_url"`
+	WorkerConcurrency                 int      `mapstructure:"worker_concurrency"`
+	WorkerLeaseSeconds                int      `mapstructure:"worker_lease_seconds"`
+	RecoveryIntervalSeconds           int      `mapstructure:"recovery_interval_seconds"`
+	ExecutionTimeoutSeconds           int      `mapstructure:"execution_timeout_seconds"`
+	StorageRetryAttempts              int      `mapstructure:"storage_retry_attempts"`
+	BillingRetryAttempts              int      `mapstructure:"billing_retry_attempts"`
+	RetryBackoffSeconds               int      `mapstructure:"retry_backoff_seconds"`
+	OpenAIReferenceTransportMode      string   `mapstructure:"openai_reference_transport_mode"`
+	GeminiReferenceTransportMode      string   `mapstructure:"gemini_reference_transport_mode"`
+	ReferenceFetchMaxRetries          int      `mapstructure:"reference_fetch_max_retries"`
+	ReferenceFetchRetryBaseSeconds    int      `mapstructure:"reference_fetch_retry_base_seconds"`
+	ReferenceFetchRetryMaxSeconds     int      `mapstructure:"reference_fetch_retry_max_seconds"`
+	UpstreamTransientMaxRetries       int      `mapstructure:"upstream_transient_max_retries"`
+	UpstreamTransientRetryBaseSeconds int      `mapstructure:"upstream_transient_retry_base_seconds"`
+	UpstreamTransientRetryMaxSeconds  int      `mapstructure:"upstream_transient_retry_max_seconds"`
+	CapacityMaxRetries                int      `mapstructure:"capacity_max_retries"`
+	CapacityRetryBaseSeconds          int      `mapstructure:"capacity_retry_base_seconds"`
+	CapacityRetryMaxSeconds           int      `mapstructure:"capacity_retry_max_seconds"`
+	TotalMaxRetries                   int      `mapstructure:"total_max_retries"`
+	RetryJitterPercent                int      `mapstructure:"retry_jitter_percent"`
+	RetryAfterMaxSeconds              int      `mapstructure:"retry_after_max_seconds"`
+	DownloadMaxBytes                  int64    `mapstructure:"download_max_bytes"`
+	DownloadMaxPixels                 int64    `mapstructure:"download_max_pixels"`
+	MaxReferenceImages                int      `mapstructure:"max_reference_images"`
+	MaxReferenceTotalBytes            int64    `mapstructure:"max_reference_total_bytes"`
+	MaxReferenceTotalPixels           int64    `mapstructure:"max_reference_total_pixels"`
+	DownloadTimeoutSeconds            int      `mapstructure:"download_timeout_seconds"`
+	DownloadMaxRedirects              int      `mapstructure:"download_max_redirects"`
+	UploadTimeoutSeconds              int      `mapstructure:"upload_timeout_seconds"`
+	UploadPerMinute                   int      `mapstructure:"upload_per_minute"`
+	MaxInputBytesPerKey               int64    `mapstructure:"max_input_bytes_per_key"`
+	SignedURLExpirySeconds            int      `mapstructure:"signed_url_expiry_seconds"`
+	InputRetentionHours               int      `mapstructure:"input_retention_hours"`
+	TaskRetentionDays                 int      `mapstructure:"task_retention_days"`
+	ResultRetentionDays               int      `mapstructure:"result_retention_days"`
+	GeminiHalfKModels                 []string `mapstructure:"gemini_half_k_models"`
+	PromptPreviewEnabled              bool     `mapstructure:"prompt_preview_enabled"`
+	PromptPreviewMaxChars             int      `mapstructure:"prompt_preview_max_chars"`
 }
 
 // IsConfigured 检查当前 backend 所需字段是否已配置。
@@ -2359,8 +2373,22 @@ func setDefaults() {
 	viper.SetDefault("async_image.storage_retry_attempts", 5)
 	viper.SetDefault("async_image.billing_retry_attempts", 10)
 	viper.SetDefault("async_image.retry_backoff_seconds", 30)
+	viper.SetDefault("async_image.openai_reference_transport_mode", "passthrough_fallback_local")
+	viper.SetDefault("async_image.gemini_reference_transport_mode", "passthrough")
+	viper.SetDefault("async_image.reference_fetch_max_retries", 2)
+	viper.SetDefault("async_image.reference_fetch_retry_base_seconds", 15)
+	viper.SetDefault("async_image.reference_fetch_retry_max_seconds", 60)
+	viper.SetDefault("async_image.upstream_transient_max_retries", 3)
+	viper.SetDefault("async_image.upstream_transient_retry_base_seconds", 15)
+	viper.SetDefault("async_image.upstream_transient_retry_max_seconds", 60)
+	viper.SetDefault("async_image.capacity_max_retries", 5)
+	viper.SetDefault("async_image.capacity_retry_base_seconds", 30)
+	viper.SetDefault("async_image.capacity_retry_max_seconds", 300)
+	viper.SetDefault("async_image.total_max_retries", 16)
+	viper.SetDefault("async_image.retry_jitter_percent", 20)
+	viper.SetDefault("async_image.retry_after_max_seconds", 900)
 	viper.SetDefault("async_image.download_max_bytes", int64(32*1024*1024))
-	viper.SetDefault("async_image.download_max_pixels", int64(40_000_000))
+	viper.SetDefault("async_image.download_max_pixels", int64(80_000_000))
 	viper.SetDefault("async_image.max_reference_images", 8)
 	viper.SetDefault("async_image.max_reference_total_bytes", int64(64*1024*1024))
 	viper.SetDefault("async_image.max_reference_total_pixels", int64(80_000_000))

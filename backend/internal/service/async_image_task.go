@@ -82,6 +82,10 @@ type AsyncImageTask struct {
 	BillingRequestID    *string         `json:"billing_request_id,omitempty"`
 	BillingPayload      json.RawMessage `json:"-"`
 	RetryCount          int             `json:"retry_count"`
+	ReferenceTransport  *string         `json:"reference_transport,omitempty"`
+	ReferenceRetryCount int             `json:"reference_retry_count"`
+	UpstreamRetryCount  int             `json:"upstream_retry_count"`
+	CapacityRetryCount  int             `json:"capacity_retry_count"`
 	StorageRetryCount   int             `json:"storage_retry_count"`
 	BillingRetryCount   int             `json:"billing_retry_count"`
 	Version             int64           `json:"version"`
@@ -140,33 +144,37 @@ type AsyncImageTaskFilter struct {
 }
 
 type AsyncImageTaskTransition struct {
-	TaskID                string
-	ExpectedVersion       int64
-	UpdatedBefore         *time.Time
-	FromStatuses          []string
-	ToStatus              string
-	Progress              *int
-	AccountID             *int64
-	BillingStatus         *string
-	ActualCost            *float64
-	ActualImageSize       *string
-	ImageCount            *int
-	UpstreamRequestID     *string
-	BillingRequestID      *string
-	BillingPayload        json.RawMessage
-	ErrorCode             *string
-	ErrorMessage          *string
-	ClearError            bool
-	IncrementRetry        bool
-	IncrementStorageRetry bool
-	IncrementBillingRetry bool
-	StartedAt             *time.Time
-	UpstreamSucceededAt   *time.Time
-	FinishedAt            *time.Time
-	ExpiresAt             *time.Time
-	ClearRequestPayload   bool
-	EventType             string
-	EventPayload          json.RawMessage
+	TaskID                  string
+	ExpectedVersion         int64
+	UpdatedBefore           *time.Time
+	FromStatuses            []string
+	ToStatus                string
+	Progress                *int
+	AccountID               *int64
+	BillingStatus           *string
+	ActualCost              *float64
+	ActualImageSize         *string
+	ImageCount              *int
+	UpstreamRequestID       *string
+	BillingRequestID        *string
+	BillingPayload          json.RawMessage
+	ErrorCode               *string
+	ErrorMessage            *string
+	ReferenceTransport      *string
+	ClearError              bool
+	IncrementRetry          bool
+	IncrementReferenceRetry bool
+	IncrementUpstreamRetry  bool
+	IncrementCapacityRetry  bool
+	IncrementStorageRetry   bool
+	IncrementBillingRetry   bool
+	StartedAt               *time.Time
+	UpstreamSucceededAt     *time.Time
+	FinishedAt              *time.Time
+	ExpiresAt               *time.Time
+	ClearRequestPayload     bool
+	EventType               string
+	EventPayload            json.RawMessage
 }
 
 type AsyncImageStagingObject struct {

@@ -35,7 +35,8 @@ protocol, platform, request_type, model, status, billing_status, progress,
 requested_image_size, actual_image_size, aspect_ratio, image_count, actual_cost, currency,
 idempotency_key, request_hash, request_payload, prompt_preview,
 upstream_request_id, billing_request_id, billing_payload,
-retry_count, storage_retry_count, billing_retry_count, version,
+retry_count, reference_transport, reference_retry_count, upstream_retry_count,
+capacity_retry_count, storage_retry_count, billing_retry_count, version,
 error_code, error_message, submitted_at, started_at, upstream_succeeded_at,
 finished_at, expires_at, created_at, updated_at`
 
@@ -45,7 +46,8 @@ protocol, platform, request_type, model, status, billing_status, progress,
 requested_image_size, actual_image_size, aspect_ratio, image_count, actual_cost, currency,
 idempotency_key, request_hash, NULL::bytea AS request_payload, prompt_preview,
 upstream_request_id, billing_request_id, NULL::jsonb AS billing_payload,
-retry_count, storage_retry_count, billing_retry_count, version,
+retry_count, reference_transport, reference_retry_count, upstream_retry_count,
+capacity_retry_count, storage_retry_count, billing_retry_count, version,
 error_code, error_message, submitted_at, started_at, upstream_succeeded_at,
 finished_at, expires_at, created_at, updated_at`
 
@@ -346,6 +348,9 @@ func (r *asyncImageTaskRepository) TransitionAsyncImageTask(ctx context.Context,
 	if transition.ImageCount != nil && *transition.ImageCount < 0 {
 		return nil, service.ErrAsyncImageInvalidInput
 	}
+	if transition.ReferenceTransport != nil && !service.IsAsyncImageReferenceTransportMode(*transition.ReferenceTransport) {
+		return nil, service.ErrAsyncImageInvalidInput
+	}
 
 	task, err := updateAsyncImageTaskTransition(ctx, tx, currentVersion, transition)
 	if err != nil {
@@ -393,19 +398,23 @@ UPDATE async_image_tasks SET
     billing_payload = CASE WHEN $19::boolean THEN $20::jsonb ELSE billing_payload END,
     error_code = CASE WHEN $21::boolean THEN NULL WHEN $22::boolean THEN $23 ELSE error_code END,
     error_message = CASE WHEN $21::boolean THEN NULL WHEN $24::boolean THEN $25 ELSE error_message END,
-    retry_count = retry_count + CASE WHEN $26::boolean OR $27::boolean OR $28::boolean THEN 1 ELSE 0 END,
+    retry_count = retry_count + CASE WHEN $26::boolean OR $27::boolean OR $28::boolean OR $31::boolean OR $32::boolean OR $33::boolean THEN 1 ELSE 0 END,
     storage_retry_count = storage_retry_count + CASE WHEN $27::boolean THEN 1 ELSE 0 END,
     billing_retry_count = billing_retry_count + CASE WHEN $28::boolean THEN 1 ELSE 0 END,
-    started_at = CASE WHEN $29::boolean THEN $30 ELSE started_at END,
-    upstream_succeeded_at = CASE WHEN $31::boolean THEN $32 ELSE upstream_succeeded_at END,
-    finished_at = CASE WHEN $33::boolean THEN $34 ELSE finished_at END,
-    expires_at = CASE WHEN $35::boolean THEN $36 ELSE expires_at END,
-    request_payload = CASE WHEN $37::boolean THEN ''::bytea ELSE request_payload END,
+    reference_transport = CASE WHEN $29::boolean THEN $30 ELSE reference_transport END,
+    reference_retry_count = reference_retry_count + CASE WHEN $31::boolean THEN 1 ELSE 0 END,
+    upstream_retry_count = upstream_retry_count + CASE WHEN $32::boolean THEN 1 ELSE 0 END,
+    capacity_retry_count = capacity_retry_count + CASE WHEN $33::boolean THEN 1 ELSE 0 END,
+    started_at = CASE WHEN $34::boolean THEN $35 ELSE started_at END,
+    upstream_succeeded_at = CASE WHEN $36::boolean THEN $37 ELSE upstream_succeeded_at END,
+    finished_at = CASE WHEN $38::boolean THEN $39 ELSE finished_at END,
+    expires_at = CASE WHEN $40::boolean THEN $41 ELSE expires_at END,
+    request_payload = CASE WHEN $42::boolean THEN ''::bytea ELSE request_payload END,
     version = version + 1,
     updated_at = NOW()
 WHERE task_id = $1
-  AND version = $38
-  AND ($39::boolean = false OR updated_at <= $40)
+  AND version = $43
+  AND ($44::boolean = false OR updated_at <= $45)
 RETURNING ` + asyncImageTaskColumns
 	task, err := scanAsyncImageTask(sqlq.QueryRowContext(ctx, query,
 		transition.TaskID, transition.ToStatus,
@@ -423,6 +432,10 @@ RETURNING ` + asyncImageTaskColumns
 		transition.IncrementRetry,
 		transition.IncrementStorageRetry,
 		transition.IncrementBillingRetry,
+		transition.ReferenceTransport != nil, transition.ReferenceTransport,
+		transition.IncrementReferenceRetry,
+		transition.IncrementUpstreamRetry,
+		transition.IncrementCapacityRetry,
 		transition.StartedAt != nil, transition.StartedAt,
 		transition.UpstreamSucceededAt != nil, transition.UpstreamSucceededAt,
 		transition.FinishedAt != nil, transition.FinishedAt,
@@ -1033,7 +1046,7 @@ func scanAsyncImageTask(scanner asyncImageRowScanner) (*service.AsyncImageTask, 
 	var requestedImageSize, actualImageSize, aspectRatio sql.NullString
 	var actualCost sql.NullFloat64
 	var idempotencyKey, promptPreview sql.NullString
-	var upstreamRequestID, billingRequestID sql.NullString
+	var upstreamRequestID, billingRequestID, referenceTransport sql.NullString
 	var errorCode, errorMessage sql.NullString
 	var requestPayload, billingPayload []byte
 	var startedAt, upstreamSucceededAt, finishedAt, expiresAt sql.NullTime
@@ -1044,7 +1057,8 @@ func scanAsyncImageTask(scanner asyncImageRowScanner) (*service.AsyncImageTask, 
 		&aspectRatio, &task.ImageCount, &actualCost, &task.Currency, &idempotencyKey,
 		&task.RequestHash, &requestPayload, &promptPreview, &upstreamRequestID,
 		&billingRequestID, &billingPayload,
-		&task.RetryCount, &task.StorageRetryCount, &task.BillingRetryCount, &task.Version,
+		&task.RetryCount, &referenceTransport, &task.ReferenceRetryCount, &task.UpstreamRetryCount,
+		&task.CapacityRetryCount, &task.StorageRetryCount, &task.BillingRetryCount, &task.Version,
 		&errorCode, &errorMessage, &task.SubmittedAt, &startedAt,
 		&upstreamSucceededAt, &finishedAt, &expiresAt, &task.CreatedAt, &task.UpdatedAt,
 	); err != nil {
@@ -1061,6 +1075,7 @@ func scanAsyncImageTask(scanner asyncImageRowScanner) (*service.AsyncImageTask, 
 	task.UpstreamRequestID = nullableString(upstreamRequestID)
 	task.BillingRequestID = nullableString(billingRequestID)
 	task.BillingPayload = append(json.RawMessage(nil), billingPayload...)
+	task.ReferenceTransport = nullableString(referenceTransport)
 	task.ErrorCode = nullableString(errorCode)
 	task.ErrorMessage = nullableString(errorMessage)
 	task.StartedAt = nullableTime(startedAt)

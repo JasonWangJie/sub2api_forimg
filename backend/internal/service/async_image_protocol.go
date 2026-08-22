@@ -378,6 +378,51 @@ type AsyncImageReference struct {
 	SHA256   string `json:"sha256"`
 }
 
+type AsyncImageReferenceDownloadError struct {
+	Phase      string
+	StatusCode int
+	RetryAfter time.Duration
+	Err        error
+}
+
+func (e *AsyncImageReferenceDownloadError) Error() string {
+	if e == nil {
+		return "reference image download failed"
+	}
+	if e.StatusCode > 0 {
+		return fmt.Sprintf("download reference image: unexpected HTTP status %d", e.StatusCode)
+	}
+	if e.Err != nil {
+		return fmt.Sprintf("%s reference image: %v", strings.TrimSpace(e.Phase), e.Err)
+	}
+	return "reference image download failed"
+}
+
+func (e *AsyncImageReferenceDownloadError) Unwrap() error {
+	if e == nil {
+		return nil
+	}
+	return e.Err
+}
+
+func ParseAsyncImageRetryAfter(value string, now time.Time) time.Duration {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return 0
+	}
+	if seconds, err := strconv.Atoi(value); err == nil {
+		if seconds <= 0 {
+			return 0
+		}
+		return time.Duration(seconds) * time.Second
+	}
+	when, err := http.ParseTime(value)
+	if err != nil || !when.After(now) {
+		return 0
+	}
+	return when.Sub(now)
+}
+
 func (r *AsyncImageReference) DataURI() string {
 	if r == nil {
 		return ""
@@ -461,12 +506,33 @@ func (d AsyncImageReferenceDownloader) ValidateRemoteURL(ctx context.Context, ra
 	return validateAsyncImagePublicHost(ctx, d.resolver(), parsed.Hostname())
 }
 
+func (d AsyncImageReferenceDownloader) AcceptRemoteURL(ctx context.Context, rawURL string) error {
+	if err := d.ValidateRemoteURL(ctx, rawURL); err != nil {
+		return err
+	}
+	return d.Budget.consumeURL()
+}
+
+// ValidatePassthroughURL validates only the URL shape. The provider performs
+// the actual fetch for passthrough transport, so local DNS/SSRF resolution is
+// intentionally skipped in this mode.
+func (d AsyncImageReferenceDownloader) ValidatePassthroughURL(rawURL string) error {
+	parsed, err := url.Parse(strings.TrimSpace(rawURL))
+	if err != nil || !strings.EqualFold(parsed.Scheme, "https") || parsed.Hostname() == "" {
+		return errors.New("reference image URL must be an absolute HTTPS URL or an image data URI")
+	}
+	if ip, parseErr := netip.ParseAddr(strings.Trim(parsed.Hostname(), "[]")); parseErr == nil && !isAsyncImagePublicIP(ip) {
+		return errors.New("reference image URL points to a blocked network address")
+	}
+	return d.Budget.consumeURL()
+}
+
 func (d AsyncImageReferenceDownloader) Download(ctx context.Context, rawURL string) (*AsyncImageReference, error) {
 	rawURL = strings.TrimSpace(rawURL)
 	if d.BoundLoader != nil {
 		reference, handled, err := d.BoundLoader(ctx, rawURL)
 		if err != nil {
-			return nil, err
+			return nil, &AsyncImageReferenceDownloadError{Phase: "load bound", Err: err}
 		}
 		if handled {
 			return d.accept(reference)
@@ -480,7 +546,7 @@ func (d AsyncImageReferenceDownloader) Download(ctx context.Context, rawURL stri
 		return d.accept(reference)
 	}
 	if err := d.ValidateRemoteURL(ctx, rawURL); err != nil {
-		return nil, err
+		return nil, &AsyncImageReferenceDownloadError{Phase: "validate", Err: err}
 	}
 	parsed, err := url.Parse(rawURL)
 	if err != nil {
@@ -514,18 +580,21 @@ func (d AsyncImageReferenceDownloader) Download(ctx context.Context, rawURL stri
 	req.Header.Set("Accept", "image/webp,image/png,image/jpeg")
 	resp, err := client.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("download reference image: %w", err)
+		return nil, &AsyncImageReferenceDownloadError{Phase: "download", Err: err}
 	}
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
-		return nil, fmt.Errorf("download reference image: unexpected HTTP status %d", resp.StatusCode)
+		return nil, &AsyncImageReferenceDownloadError{
+			Phase: "response", StatusCode: resp.StatusCode,
+			RetryAfter: ParseAsyncImageRetryAfter(resp.Header.Get("Retry-After"), time.Now()),
+		}
 	}
 	if resp.ContentLength > d.maxBytes() {
 		return nil, errors.New("reference image exceeds the configured size limit")
 	}
 	data, err := io.ReadAll(io.LimitReader(resp.Body, d.maxBytes()+1))
 	if err != nil {
-		return nil, fmt.Errorf("read reference image: %w", err)
+		return nil, &AsyncImageReferenceDownloadError{Phase: "read", Err: err}
 	}
 	if int64(len(data)) > d.maxBytes() {
 		return nil, errors.New("reference image exceeds the configured size limit")
@@ -603,7 +672,10 @@ func (d AsyncImageReferenceDownloader) safeDialContext(ctx context.Context, netw
 		return nil, err
 	}
 	addresses, err := d.resolver().LookupNetIP(ctx, "ip", host)
-	if err != nil || len(addresses) == 0 {
+	if err != nil {
+		return nil, fmt.Errorf("reference image host could not be resolved: %w", err)
+	}
+	if len(addresses) == 0 {
 		return nil, errors.New("reference image host could not be resolved")
 	}
 	var lastErr error
@@ -636,7 +708,10 @@ func validateAsyncImagePublicHost(ctx context.Context, resolver *net.Resolver, h
 		return nil
 	}
 	addresses, err := resolver.LookupNetIP(ctx, "ip", host)
-	if err != nil || len(addresses) == 0 {
+	if err != nil {
+		return fmt.Errorf("reference image host could not be resolved: %w", err)
+	}
+	if len(addresses) == 0 {
 		return errors.New("reference image host could not be resolved")
 	}
 	for _, ip := range addresses {
@@ -719,6 +794,10 @@ func (d AsyncImageReferenceDownloader) maxRedirects() int {
 // inline-compatible image_url values. Compatibility code maps HTTPS URLs to
 // Gemini fileData and data URIs to inlineData.
 func BuildGeminiAsyncChatBody(ctx context.Context, req *AsyncImageNormalizedRequest, downloader AsyncImageReferenceDownloader) ([]byte, error) {
+	return BuildGeminiAsyncChatBodyWithTransport(ctx, req, downloader, AsyncImageReferenceTransportPassthrough)
+}
+
+func BuildGeminiAsyncChatBodyWithTransport(ctx context.Context, req *AsyncImageNormalizedRequest, downloader AsyncImageReferenceDownloader, transportMode string) ([]byte, error) {
 	if req == nil {
 		return nil, errors.New("normalized image request is required")
 	}
@@ -732,14 +811,15 @@ func BuildGeminiAsyncChatBody(ctx context.Context, req *AsyncImageNormalizedRequ
 			if rawURL == "" {
 				return nil, errors.New("invalid reference image: empty url")
 			}
-			if strings.HasPrefix(strings.ToLower(rawURL), "data:") {
+			local := strings.EqualFold(strings.TrimSpace(transportMode), AsyncImageReferenceTransportLocal)
+			if strings.HasPrefix(strings.ToLower(rawURL), "data:") || local {
 				imageRef, err := downloader.Download(ctx, rawURL)
 				if err != nil {
 					return nil, fmt.Errorf("invalid reference image: %w", err)
 				}
 				rawURL = imageRef.DataURI()
 			} else {
-				if err := downloader.ValidateRemoteURL(ctx, rawURL); err != nil {
+				if err := downloader.ValidatePassthroughURL(rawURL); err != nil {
 					return nil, fmt.Errorf("invalid reference image: %w", err)
 				}
 				if err := downloader.Budget.consumeURL(); err != nil {

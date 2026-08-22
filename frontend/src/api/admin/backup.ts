@@ -135,6 +135,20 @@ export interface AsyncImageRuntimeConfig {
   storage_retry_attempts: number
   billing_retry_attempts: number
   retry_backoff_seconds: number
+  openai_reference_transport_mode: 'passthrough' | 'local' | 'passthrough_fallback_local'
+  gemini_reference_transport_mode: 'passthrough' | 'local' | 'passthrough_fallback_local'
+  reference_fetch_max_retries: number
+  reference_fetch_retry_base_seconds: number
+  reference_fetch_retry_max_seconds: number
+  upstream_transient_max_retries: number
+  upstream_transient_retry_base_seconds: number
+  upstream_transient_retry_max_seconds: number
+  capacity_max_retries: number
+  capacity_retry_base_seconds: number
+  capacity_retry_max_seconds: number
+  total_max_retries: number
+  retry_jitter_percent: number
+  retry_after_max_seconds: number
   download_max_bytes: number
   download_max_pixels: number
   max_reference_images: number

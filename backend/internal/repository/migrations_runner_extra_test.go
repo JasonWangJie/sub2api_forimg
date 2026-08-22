@@ -13,6 +13,7 @@ import (
 	"time"
 
 	sqlmock "github.com/DATA-DOG/go-sqlmock"
+	"github.com/Wei-Shaw/sub2api/migrations"
 	"github.com/stretchr/testify/require"
 )
 
@@ -106,12 +107,26 @@ func TestMigrationChecksumCompatibilityRules_CoverEditedUpgradeCompatibilityMigr
 		"120_enforce_payment_orders_out_trade_no_unique_notx.sql",
 		"123_fix_legacy_auth_source_grant_on_signup_defaults.sql",
 		"190_ZJ_restore_gemini_pro_image_mapping.sql",
+		"222_ZJ_group_image_size_accounts.sql",
 	} {
 		rule, ok := migrationChecksumCompatibilityRules[name]
 		require.Truef(t, ok, "missing compatibility rule for %s", name)
 		require.NotEmpty(t, rule.fileChecksum)
 		require.NotEmpty(t, rule.acceptedDBChecksum)
 	}
+	content, err := migrations.FS.ReadFile(groupImageSizeAccountsMigration)
+	require.NoError(t, err)
+	currentSum := sha256.Sum256([]byte(strings.TrimSpace(string(content))))
+	require.True(t, isMigrationChecksumCompatible(
+		groupImageSizeAccountsMigration,
+		groupImageSizeAccountsLegacyDBChecksum,
+		hex.EncodeToString(currentSum[:]),
+	))
+	require.True(t, isMigrationChecksumCompatible(
+		"  "+groupImageSizeAccountsMigration+"\n",
+		" "+groupImageSizeAccountsLegacyDBChecksum+"\r\n",
+		hex.EncodeToString(currentSum[:])+" ",
+	))
 }
 
 func TestEnsureAtlasBaselineAligned(t *testing.T) {

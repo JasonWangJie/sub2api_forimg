@@ -46,6 +46,21 @@ func TestAsyncImageResultIntentMigrationAddsOutboxClaimOwnership(t *testing.T) {
 	require.Contains(t, sqlText, "ADD COLUMN IF NOT EXISTS claim_token VARCHAR(64)")
 }
 
+func TestAsyncImageReferenceRetryMigrationAddsDurableState(t *testing.T) {
+	content, err := migrations.FS.ReadFile("223_ZJ_async_image_reference_retry_state.sql")
+	require.NoError(t, err)
+	sqlText := string(content)
+	for _, required := range []string{
+		"reference_transport VARCHAR(40)",
+		"reference_retry_count INTEGER NOT NULL DEFAULT 0",
+		"upstream_retry_count INTEGER NOT NULL DEFAULT 0",
+		"capacity_retry_count INTEGER NOT NULL DEFAULT 0",
+		"passthrough_fallback_local",
+	} {
+		require.Contains(t, sqlText, required)
+	}
+}
+
 func TestAsyncImageTaskRepositoryCreateBindsOwnedInputInTransaction(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	require.NoError(t, err)
@@ -140,7 +155,7 @@ func TestAsyncImageTaskRepositoryTransitionUsesVersionCASAndEvent(t *testing.T) 
 	mock.ExpectQuery("SELECT status, version FROM async_image_tasks").
 		WithArgs("asyncimg_1").
 		WillReturnRows(sqlmock.NewRows([]string{"status", "version"}).AddRow(service.AsyncImageTaskStatusQueued, int64(1)))
-	mock.ExpectQuery("(?s)UPDATE async_image_tasks SET.*WHERE task_id = \\$1.*version = \\$38.*updated_at <= \\$40.*RETURNING").
+	mock.ExpectQuery("(?s)UPDATE async_image_tasks SET.*WHERE task_id = \\$1.*version = \\$43.*updated_at <= \\$45.*RETURNING").
 		WillReturnRows(asyncImageTaskRows(now, "asyncimg_1", "hash-1", service.AsyncImageTaskStatusInvoking))
 	mock.ExpectExec("(?s)INSERT INTO async_image_events").
 		WillReturnResult(sqlmock.NewResult(1, 1))
@@ -381,7 +396,8 @@ func asyncImageTaskRowsWithPayload(now time.Time, taskID, requestHash, status st
 		"requested_image_size", "actual_image_size", "aspect_ratio", "image_count", "actual_cost", "currency",
 		"idempotency_key", "request_hash", "request_payload", "prompt_preview",
 		"upstream_request_id", "billing_request_id", "billing_payload",
-		"retry_count", "storage_retry_count", "billing_retry_count", "version",
+		"retry_count", "reference_transport", "reference_retry_count", "upstream_retry_count",
+		"capacity_retry_count", "storage_retry_count", "billing_retry_count", "version",
 		"error_code", "error_message", "submitted_at", "started_at", "upstream_succeeded_at",
 		"finished_at", "expires_at", "created_at", "updated_at",
 	}
@@ -390,7 +406,7 @@ func asyncImageTaskRowsWithPayload(now time.Time, taskID, requestHash, status st
 		service.AsyncImageProtocolBB, service.PlatformGemini, service.AsyncImageRequestTypeTextToImage,
 		"gemini-image", status, service.AsyncImageBillingStatusPending, 0,
 		nil, nil, nil, 1, nil, "USD", nil, requestHash, requestPayload, nil,
-		nil, nil, nil, 0, 0, 0, int64(1), nil, nil, now, nil, nil, nil, nil, now, now,
+		nil, nil, nil, 0, nil, 0, 0, 0, 0, 0, int64(1), nil, nil, now, nil, nil, nil, nil, now, now,
 	}
 	return sqlmock.NewRows(columns).AddRow(values...)
 }

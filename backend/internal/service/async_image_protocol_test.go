@@ -4,11 +4,15 @@ import (
 	"bytes"
 	"context"
 	"encoding/base64"
+	"errors"
 	"image"
 	"image/color"
 	"image/gif"
+	"io"
+	"net/http"
 	"net/netip"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 )
@@ -197,6 +201,19 @@ func TestAsyncImageReferenceDownloaderUsesBoundObjectWithoutNetwork(t *testing.T
 	require.Equal(t, validated.SHA256, ref.SHA256)
 }
 
+func TestAsyncImageReferenceDownloadErrorCarriesCauseAndRetryAfter(t *testing.T) {
+	err := &AsyncImageReferenceDownloadError{Phase: "read", StatusCode: 503, RetryAfter: 45 * time.Second, Err: io.ErrUnexpectedEOF}
+	require.ErrorIs(t, err, io.ErrUnexpectedEOF)
+	require.Contains(t, err.Error(), "HTTP status 503")
+	require.Equal(t, 45*time.Second, err.RetryAfter)
+
+	now := time.Date(2026, time.August, 22, 12, 0, 0, 0, time.UTC)
+	require.Equal(t, 30*time.Second, ParseAsyncImageRetryAfter("30", now))
+	require.Equal(t, 2*time.Minute, ParseAsyncImageRetryAfter(now.Add(2*time.Minute).Format(http.TimeFormat), now))
+	require.Zero(t, ParseAsyncImageRetryAfter("invalid", now))
+	require.True(t, errors.Is(err, io.ErrUnexpectedEOF))
+}
+
 func mustDecodeAsyncImagePNG(t *testing.T) []byte {
 	t.Helper()
 	data, err := base64.StdEncoding.DecodeString(asyncImageOnePixelPNG)
@@ -282,6 +299,23 @@ func TestBuildGeminiAsyncChatBodyPassesHTTPSURLThrough(t *testing.T) {
       ]}],
       "extra_body":{"google":{"image_config":{"image_size":"2K"}}}
     }`, string(body))
+}
+
+func TestBuildGeminiAsyncChatBodyLocalTransportDownloadsReference(t *testing.T) {
+	png := mustDecodeAsyncImagePNG(t)
+	req := &AsyncImageNormalizedRequest{
+		Model: "gemini-image",
+		Parts: []AsyncImageInputPart{{Type: "image_url", URL: "https://cdn.example/ref.png"}},
+	}
+	body, err := BuildGeminiAsyncChatBodyWithTransport(context.Background(), req, AsyncImageReferenceDownloader{
+		BoundLoader: func(_ context.Context, rawURL string) (*AsyncImageReference, bool, error) {
+			require.Equal(t, "https://cdn.example/ref.png", rawURL)
+			return &AsyncImageReference{MIMEType: "image/png", Data: png, Width: 1, Height: 1}, true, nil
+		},
+	}, AsyncImageReferenceTransportLocal)
+	require.NoError(t, err)
+	require.Contains(t, string(body), "data:image/png;base64,")
+	require.NotContains(t, string(body), "https://cdn.example/ref.png")
 }
 
 func TestAsyncImageTaskRequestHashIncludesDialectAndEndpoint(t *testing.T) {

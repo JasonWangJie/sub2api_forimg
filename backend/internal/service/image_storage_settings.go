@@ -218,31 +218,55 @@ type ImageLibraryRuntimeConfig struct {
 // AsyncImageRuntimeConfig is stored with image-storage settings so operational
 // changes take effect without restarting the API service.
 type AsyncImageRuntimeConfig struct {
-	PublicBaseURL           string   `json:"public_base_url"`
-	WorkerConcurrency       int      `json:"worker_concurrency"`
-	WorkerLeaseSeconds      int      `json:"worker_lease_seconds"`
-	RecoveryIntervalSeconds int      `json:"recovery_interval_seconds"`
-	ExecutionTimeoutSeconds int      `json:"execution_timeout_seconds"`
-	StorageRetryAttempts    int      `json:"storage_retry_attempts"`
-	BillingRetryAttempts    int      `json:"billing_retry_attempts"`
-	RetryBackoffSeconds     int      `json:"retry_backoff_seconds"`
-	DownloadMaxBytes        int64    `json:"download_max_bytes"`
-	DownloadMaxPixels       int64    `json:"download_max_pixels"`
-	MaxReferenceImages      int      `json:"max_reference_images"`
-	MaxReferenceTotalBytes  int64    `json:"max_reference_total_bytes"`
-	MaxReferenceTotalPixels int64    `json:"max_reference_total_pixels"`
-	DownloadTimeoutSeconds  int      `json:"download_timeout_seconds"`
-	DownloadMaxRedirects    int      `json:"download_max_redirects"`
-	UploadTimeoutSeconds    int      `json:"upload_timeout_seconds"`
-	UploadPerMinute         int      `json:"upload_per_minute"`
-	MaxInputBytesPerKey     int64    `json:"max_input_bytes_per_key"`
-	SignedURLExpirySeconds  int      `json:"signed_url_expiry_seconds"`
-	InputRetentionHours     int      `json:"input_retention_hours"`
-	TaskRetentionDays       int      `json:"task_retention_days"`
-	ResultRetentionDays     int      `json:"result_retention_days"`
-	GeminiHalfKModels       []string `json:"gemini_half_k_models"`
-	PromptPreviewEnabled    bool     `json:"prompt_preview_enabled"`
-	PromptPreviewMaxChars   int      `json:"prompt_preview_max_chars"`
+	PublicBaseURL                     string   `json:"public_base_url"`
+	WorkerConcurrency                 int      `json:"worker_concurrency"`
+	WorkerLeaseSeconds                int      `json:"worker_lease_seconds"`
+	RecoveryIntervalSeconds           int      `json:"recovery_interval_seconds"`
+	ExecutionTimeoutSeconds           int      `json:"execution_timeout_seconds"`
+	StorageRetryAttempts              int      `json:"storage_retry_attempts"`
+	BillingRetryAttempts              int      `json:"billing_retry_attempts"`
+	RetryBackoffSeconds               int      `json:"retry_backoff_seconds"`
+	OpenAIReferenceTransportMode      string   `json:"openai_reference_transport_mode"`
+	GeminiReferenceTransportMode      string   `json:"gemini_reference_transport_mode"`
+	ReferenceFetchMaxRetries          int      `json:"reference_fetch_max_retries"`
+	ReferenceFetchRetryBaseSeconds    int      `json:"reference_fetch_retry_base_seconds"`
+	ReferenceFetchRetryMaxSeconds     int      `json:"reference_fetch_retry_max_seconds"`
+	UpstreamTransientMaxRetries       int      `json:"upstream_transient_max_retries"`
+	UpstreamTransientRetryBaseSeconds int      `json:"upstream_transient_retry_base_seconds"`
+	UpstreamTransientRetryMaxSeconds  int      `json:"upstream_transient_retry_max_seconds"`
+	CapacityMaxRetries                int      `json:"capacity_max_retries"`
+	CapacityRetryBaseSeconds          int      `json:"capacity_retry_base_seconds"`
+	CapacityRetryMaxSeconds           int      `json:"capacity_retry_max_seconds"`
+	TotalMaxRetries                   int      `json:"total_max_retries"`
+	RetryJitterPercent                int      `json:"retry_jitter_percent"`
+	RetryAfterMaxSeconds              int      `json:"retry_after_max_seconds"`
+	DownloadMaxBytes                  int64    `json:"download_max_bytes"`
+	DownloadMaxPixels                 int64    `json:"download_max_pixels"`
+	MaxReferenceImages                int      `json:"max_reference_images"`
+	MaxReferenceTotalBytes            int64    `json:"max_reference_total_bytes"`
+	MaxReferenceTotalPixels           int64    `json:"max_reference_total_pixels"`
+	DownloadTimeoutSeconds            int      `json:"download_timeout_seconds"`
+	DownloadMaxRedirects              int      `json:"download_max_redirects"`
+	UploadTimeoutSeconds              int      `json:"upload_timeout_seconds"`
+	UploadPerMinute                   int      `json:"upload_per_minute"`
+	MaxInputBytesPerKey               int64    `json:"max_input_bytes_per_key"`
+	SignedURLExpirySeconds            int      `json:"signed_url_expiry_seconds"`
+	InputRetentionHours               int      `json:"input_retention_hours"`
+	TaskRetentionDays                 int      `json:"task_retention_days"`
+	ResultRetentionDays               int      `json:"result_retention_days"`
+	GeminiHalfKModels                 []string `json:"gemini_half_k_models"`
+	PromptPreviewEnabled              bool     `json:"prompt_preview_enabled"`
+	PromptPreviewMaxChars             int      `json:"prompt_preview_max_chars"`
+}
+
+func (in *AsyncImageRuntimeConfig) UnmarshalJSON(data []byte) error {
+	type asyncImageRuntimeConfigAlias AsyncImageRuntimeConfig
+	decoded := asyncImageRuntimeConfigAlias(defaultAsyncImageRuntimeConfig())
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		return err
+	}
+	*in = AsyncImageRuntimeConfig(decoded)
+	return nil
 }
 
 // ImageStorageSettingService 读写后台设置，并把结果解析成一个可直接使用的 uploader。
@@ -984,79 +1008,217 @@ func (s *ImageStorageSettingService) LibraryRuntimeConfig(ctx context.Context) (
 }
 
 func asyncRuntimeFromConfig(in config.AsyncImageConfig) AsyncImageRuntimeConfig {
-	return AsyncImageRuntimeConfig{
-		PublicBaseURL:           in.PublicBaseURL,
-		WorkerConcurrency:       in.WorkerConcurrency,
-		WorkerLeaseSeconds:      in.WorkerLeaseSeconds,
-		RecoveryIntervalSeconds: in.RecoveryIntervalSeconds,
-		ExecutionTimeoutSeconds: in.ExecutionTimeoutSeconds,
-		StorageRetryAttempts:    in.StorageRetryAttempts,
-		BillingRetryAttempts:    in.BillingRetryAttempts,
-		RetryBackoffSeconds:     in.RetryBackoffSeconds,
-		DownloadMaxBytes:        in.DownloadMaxBytes,
-		DownloadMaxPixels:       in.DownloadMaxPixels,
-		MaxReferenceImages:      in.MaxReferenceImages,
-		MaxReferenceTotalBytes:  in.MaxReferenceTotalBytes,
-		MaxReferenceTotalPixels: in.MaxReferenceTotalPixels,
-		DownloadTimeoutSeconds:  in.DownloadTimeoutSeconds,
-		DownloadMaxRedirects:    in.DownloadMaxRedirects,
-		UploadTimeoutSeconds:    in.UploadTimeoutSeconds,
-		UploadPerMinute:         in.UploadPerMinute,
-		MaxInputBytesPerKey:     in.MaxInputBytesPerKey,
-		SignedURLExpirySeconds:  in.SignedURLExpirySeconds,
-		InputRetentionHours:     in.InputRetentionHours,
-		TaskRetentionDays:       in.TaskRetentionDays,
-		ResultRetentionDays:     in.ResultRetentionDays,
-		GeminiHalfKModels:       append([]string(nil), in.GeminiHalfKModels...),
-		PromptPreviewEnabled:    in.PromptPreviewEnabled,
-		PromptPreviewMaxChars:   in.PromptPreviewMaxChars,
+	out := defaultAsyncImageRuntimeConfig()
+	out.PublicBaseURL = in.PublicBaseURL
+	out.WorkerConcurrency = in.WorkerConcurrency
+	out.WorkerLeaseSeconds = in.WorkerLeaseSeconds
+	out.RecoveryIntervalSeconds = in.RecoveryIntervalSeconds
+	out.ExecutionTimeoutSeconds = in.ExecutionTimeoutSeconds
+	out.StorageRetryAttempts = in.StorageRetryAttempts
+	out.BillingRetryAttempts = in.BillingRetryAttempts
+	out.RetryBackoffSeconds = in.RetryBackoffSeconds
+	if strings.TrimSpace(in.OpenAIReferenceTransportMode) != "" {
+		out.OpenAIReferenceTransportMode = in.OpenAIReferenceTransportMode
 	}
+	if strings.TrimSpace(in.GeminiReferenceTransportMode) != "" {
+		out.GeminiReferenceTransportMode = in.GeminiReferenceTransportMode
+	}
+	out.ReferenceFetchMaxRetries = in.ReferenceFetchMaxRetries
+	if in.ReferenceFetchRetryBaseSeconds > 0 {
+		out.ReferenceFetchRetryBaseSeconds = in.ReferenceFetchRetryBaseSeconds
+	}
+	if in.ReferenceFetchRetryMaxSeconds > 0 {
+		out.ReferenceFetchRetryMaxSeconds = in.ReferenceFetchRetryMaxSeconds
+	}
+	out.UpstreamTransientMaxRetries = in.UpstreamTransientMaxRetries
+	if in.UpstreamTransientRetryBaseSeconds > 0 {
+		out.UpstreamTransientRetryBaseSeconds = in.UpstreamTransientRetryBaseSeconds
+	}
+	if in.UpstreamTransientRetryMaxSeconds > 0 {
+		out.UpstreamTransientRetryMaxSeconds = in.UpstreamTransientRetryMaxSeconds
+	}
+	out.CapacityMaxRetries = in.CapacityMaxRetries
+	if in.CapacityRetryBaseSeconds > 0 {
+		out.CapacityRetryBaseSeconds = in.CapacityRetryBaseSeconds
+	}
+	if in.CapacityRetryMaxSeconds > 0 {
+		out.CapacityRetryMaxSeconds = in.CapacityRetryMaxSeconds
+	}
+	out.TotalMaxRetries = in.TotalMaxRetries
+	out.RetryJitterPercent = in.RetryJitterPercent
+	if in.RetryAfterMaxSeconds > 0 {
+		out.RetryAfterMaxSeconds = in.RetryAfterMaxSeconds
+	}
+	out.DownloadMaxBytes = in.DownloadMaxBytes
+	out.DownloadMaxPixels = in.DownloadMaxPixels
+	out.MaxReferenceImages = in.MaxReferenceImages
+	out.MaxReferenceTotalBytes = in.MaxReferenceTotalBytes
+	out.MaxReferenceTotalPixels = in.MaxReferenceTotalPixels
+	out.DownloadTimeoutSeconds = in.DownloadTimeoutSeconds
+	out.DownloadMaxRedirects = in.DownloadMaxRedirects
+	out.UploadTimeoutSeconds = in.UploadTimeoutSeconds
+	out.UploadPerMinute = in.UploadPerMinute
+	out.MaxInputBytesPerKey = in.MaxInputBytesPerKey
+	out.SignedURLExpirySeconds = in.SignedURLExpirySeconds
+	out.InputRetentionHours = in.InputRetentionHours
+	out.TaskRetentionDays = in.TaskRetentionDays
+	out.ResultRetentionDays = in.ResultRetentionDays
+	out.GeminiHalfKModels = append([]string(nil), in.GeminiHalfKModels...)
+	out.PromptPreviewEnabled = in.PromptPreviewEnabled
+	out.PromptPreviewMaxChars = in.PromptPreviewMaxChars
+	return out
 }
 
 func defaultAsyncImageRuntimeConfig() AsyncImageRuntimeConfig {
 	return AsyncImageRuntimeConfig{
-		WorkerConcurrency:       4,
-		WorkerLeaseSeconds:      120,
-		RecoveryIntervalSeconds: 30,
-		ExecutionTimeoutSeconds: 1200,
-		StorageRetryAttempts:    5,
-		BillingRetryAttempts:    10,
-		RetryBackoffSeconds:     30,
-		DownloadMaxBytes:        defaultImageMaxDownloadBytes,
-		DownloadMaxPixels:       40_000_000,
-		MaxReferenceImages:      8,
-		MaxReferenceTotalBytes:  64 << 20,
-		MaxReferenceTotalPixels: 80_000_000,
-		DownloadTimeoutSeconds:  30,
-		DownloadMaxRedirects:    3,
-		UploadTimeoutSeconds:    300,
-		UploadPerMinute:         20,
-		MaxInputBytesPerKey:     1 << 30,
-		SignedURLExpirySeconds:  3600,
-		InputRetentionHours:     24,
-		TaskRetentionDays:       90,
-		ResultRetentionDays:     90,
-		PromptPreviewEnabled:    true,
-		PromptPreviewMaxChars:   160,
+		WorkerConcurrency:                 4,
+		WorkerLeaseSeconds:                120,
+		RecoveryIntervalSeconds:           30,
+		ExecutionTimeoutSeconds:           1200,
+		StorageRetryAttempts:              5,
+		BillingRetryAttempts:              10,
+		RetryBackoffSeconds:               30,
+		OpenAIReferenceTransportMode:      AsyncImageReferenceTransportPassthroughFallbackLocal,
+		GeminiReferenceTransportMode:      AsyncImageReferenceTransportPassthrough,
+		ReferenceFetchMaxRetries:          2,
+		ReferenceFetchRetryBaseSeconds:    15,
+		ReferenceFetchRetryMaxSeconds:     60,
+		UpstreamTransientMaxRetries:       3,
+		UpstreamTransientRetryBaseSeconds: 15,
+		UpstreamTransientRetryMaxSeconds:  60,
+		CapacityMaxRetries:                5,
+		CapacityRetryBaseSeconds:          30,
+		CapacityRetryMaxSeconds:           300,
+		TotalMaxRetries:                   16,
+		RetryJitterPercent:                20,
+		RetryAfterMaxSeconds:              900,
+		DownloadMaxBytes:                  defaultImageMaxDownloadBytes,
+		DownloadMaxPixels:                 80_000_000,
+		MaxReferenceImages:                8,
+		MaxReferenceTotalBytes:            64 << 20,
+		MaxReferenceTotalPixels:           80_000_000,
+		DownloadTimeoutSeconds:            30,
+		DownloadMaxRedirects:              3,
+		UploadTimeoutSeconds:              300,
+		UploadPerMinute:                   20,
+		MaxInputBytesPerKey:               1 << 30,
+		SignedURLExpirySeconds:            3600,
+		InputRetentionHours:               24,
+		TaskRetentionDays:                 90,
+		ResultRetentionDays:               90,
+		PromptPreviewEnabled:              true,
+		PromptPreviewMaxChars:             160,
 	}
 }
 
 const (
-	maxAsyncImageWorkerConcurrency = 64
-	maxAsyncImageDownloadBytes     = int64(64 << 20)
-	maxAsyncImageDownloadPixels    = int64(80_000_000)
-	maxAsyncImageReferenceImages   = 16
-	maxAsyncImageReferenceBytes    = int64(256 << 20)
-	maxAsyncImageReferencePixels   = int64(320_000_000)
-	minAsyncImageWorkerLease       = 45
-	maxAsyncImageInputRetention    = 24 * 30
-	maxAsyncImageUploadTimeout     = 600
-	maxAsyncImageUploadsPerMinute  = 1000
-	maxAsyncImageInputBytesPerKey  = int64(100 << 30)
+	AsyncImageReferenceTransportPassthrough              = "passthrough"
+	AsyncImageReferenceTransportLocal                    = "local"
+	AsyncImageReferenceTransportPassthroughFallbackLocal = "passthrough_fallback_local"
+
+	maxAsyncImageWorkerConcurrency        = 64
+	minAsyncImageDownloadPixels           = int64(1_000_000)
+	maxAsyncImageDownloadBytes            = int64(64 << 20)
+	maxAsyncImageDownloadPixels           = int64(80_000_000)
+	maxAsyncImageReferenceImages          = 16
+	maxAsyncImageReferenceBytes           = int64(256 << 20)
+	maxAsyncImageReferencePixels          = int64(320_000_000)
+	minAsyncImageWorkerLease              = 45
+	maxAsyncImageInputRetention           = 24 * 30
+	maxAsyncImageUploadTimeout            = 600
+	maxAsyncImageUploadsPerMinute         = 1000
+	maxAsyncImageInputBytesPerKey         = int64(100 << 30)
+	maxAsyncImageReferenceFetchRetries    = 5
+	maxAsyncImageUpstreamTransientRetries = 6
+	maxAsyncImageCapacityRetries          = 10
+	maxAsyncImageTotalRetries             = 32
+	maxAsyncImageRetryJitterPercent       = 50
+	maxAsyncImageRetryAfterSeconds        = 3600
 )
 
 func normalizeAsyncImageRuntimeConfig(in *AsyncImageRuntimeConfig) {
 	defaults := defaultAsyncImageRuntimeConfig()
+	missingRetrySettings := strings.TrimSpace(in.OpenAIReferenceTransportMode) == "" &&
+		strings.TrimSpace(in.GeminiReferenceTransportMode) == "" &&
+		in.ReferenceFetchMaxRetries == 0 && in.ReferenceFetchRetryBaseSeconds == 0 && in.ReferenceFetchRetryMaxSeconds == 0 &&
+		in.UpstreamTransientMaxRetries == 0 && in.UpstreamTransientRetryBaseSeconds == 0 && in.UpstreamTransientRetryMaxSeconds == 0 &&
+		in.CapacityMaxRetries == 0 && in.CapacityRetryBaseSeconds == 0 && in.CapacityRetryMaxSeconds == 0 &&
+		in.TotalMaxRetries == 0 && in.RetryJitterPercent == 0 && in.RetryAfterMaxSeconds == 0
+	if missingRetrySettings {
+		in.OpenAIReferenceTransportMode = defaults.OpenAIReferenceTransportMode
+		in.GeminiReferenceTransportMode = defaults.GeminiReferenceTransportMode
+		in.ReferenceFetchMaxRetries = defaults.ReferenceFetchMaxRetries
+		in.ReferenceFetchRetryBaseSeconds = defaults.ReferenceFetchRetryBaseSeconds
+		in.ReferenceFetchRetryMaxSeconds = defaults.ReferenceFetchRetryMaxSeconds
+		in.UpstreamTransientMaxRetries = defaults.UpstreamTransientMaxRetries
+		in.UpstreamTransientRetryBaseSeconds = defaults.UpstreamTransientRetryBaseSeconds
+		in.UpstreamTransientRetryMaxSeconds = defaults.UpstreamTransientRetryMaxSeconds
+		in.CapacityMaxRetries = defaults.CapacityMaxRetries
+		in.CapacityRetryBaseSeconds = defaults.CapacityRetryBaseSeconds
+		in.CapacityRetryMaxSeconds = defaults.CapacityRetryMaxSeconds
+		in.TotalMaxRetries = defaults.TotalMaxRetries
+		in.RetryJitterPercent = defaults.RetryJitterPercent
+		in.RetryAfterMaxSeconds = defaults.RetryAfterMaxSeconds
+	}
+	in.OpenAIReferenceTransportMode = normalizeAsyncImageReferenceTransportMode(in.OpenAIReferenceTransportMode, defaults.OpenAIReferenceTransportMode)
+	in.GeminiReferenceTransportMode = normalizeAsyncImageReferenceTransportMode(in.GeminiReferenceTransportMode, defaults.GeminiReferenceTransportMode)
+	if in.ReferenceFetchMaxRetries < 0 {
+		in.ReferenceFetchMaxRetries = 0
+	} else if in.ReferenceFetchMaxRetries > maxAsyncImageReferenceFetchRetries {
+		in.ReferenceFetchMaxRetries = maxAsyncImageReferenceFetchRetries
+	}
+	if in.ReferenceFetchRetryBaseSeconds <= 0 {
+		in.ReferenceFetchRetryBaseSeconds = defaults.ReferenceFetchRetryBaseSeconds
+	}
+	if in.ReferenceFetchRetryMaxSeconds <= 0 {
+		in.ReferenceFetchRetryMaxSeconds = defaults.ReferenceFetchRetryMaxSeconds
+	}
+	if in.ReferenceFetchRetryMaxSeconds < in.ReferenceFetchRetryBaseSeconds {
+		in.ReferenceFetchRetryMaxSeconds = in.ReferenceFetchRetryBaseSeconds
+	}
+	if in.UpstreamTransientMaxRetries < 0 {
+		in.UpstreamTransientMaxRetries = 0
+	} else if in.UpstreamTransientMaxRetries > maxAsyncImageUpstreamTransientRetries {
+		in.UpstreamTransientMaxRetries = maxAsyncImageUpstreamTransientRetries
+	}
+	if in.UpstreamTransientRetryBaseSeconds <= 0 {
+		in.UpstreamTransientRetryBaseSeconds = defaults.UpstreamTransientRetryBaseSeconds
+	}
+	if in.UpstreamTransientRetryMaxSeconds <= 0 {
+		in.UpstreamTransientRetryMaxSeconds = defaults.UpstreamTransientRetryMaxSeconds
+	}
+	if in.UpstreamTransientRetryMaxSeconds < in.UpstreamTransientRetryBaseSeconds {
+		in.UpstreamTransientRetryMaxSeconds = in.UpstreamTransientRetryBaseSeconds
+	}
+	if in.CapacityMaxRetries < 0 {
+		in.CapacityMaxRetries = 0
+	} else if in.CapacityMaxRetries > maxAsyncImageCapacityRetries {
+		in.CapacityMaxRetries = maxAsyncImageCapacityRetries
+	}
+	if in.CapacityRetryBaseSeconds <= 0 {
+		in.CapacityRetryBaseSeconds = defaults.CapacityRetryBaseSeconds
+	}
+	if in.CapacityRetryMaxSeconds <= 0 {
+		in.CapacityRetryMaxSeconds = defaults.CapacityRetryMaxSeconds
+	}
+	if in.CapacityRetryMaxSeconds < in.CapacityRetryBaseSeconds {
+		in.CapacityRetryMaxSeconds = in.CapacityRetryBaseSeconds
+	}
+	if in.TotalMaxRetries < 0 {
+		in.TotalMaxRetries = 0
+	} else if in.TotalMaxRetries > maxAsyncImageTotalRetries {
+		in.TotalMaxRetries = maxAsyncImageTotalRetries
+	}
+	if in.RetryJitterPercent < 0 {
+		in.RetryJitterPercent = 0
+	} else if in.RetryJitterPercent > maxAsyncImageRetryJitterPercent {
+		in.RetryJitterPercent = maxAsyncImageRetryJitterPercent
+	}
+	if in.RetryAfterMaxSeconds <= 0 {
+		in.RetryAfterMaxSeconds = defaults.RetryAfterMaxSeconds
+	} else if in.RetryAfterMaxSeconds > maxAsyncImageRetryAfterSeconds {
+		in.RetryAfterMaxSeconds = maxAsyncImageRetryAfterSeconds
+	}
 	in.PublicBaseURL = strings.TrimRight(strings.TrimSpace(in.PublicBaseURL), "/")
 	if in.WorkerConcurrency <= 0 {
 		in.WorkerConcurrency = defaults.WorkerConcurrency
@@ -1090,6 +1252,8 @@ func normalizeAsyncImageRuntimeConfig(in *AsyncImageRuntimeConfig) {
 	}
 	if in.DownloadMaxPixels <= 0 {
 		in.DownloadMaxPixels = defaults.DownloadMaxPixels
+	} else if in.DownloadMaxPixels < minAsyncImageDownloadPixels {
+		in.DownloadMaxPixels = minAsyncImageDownloadPixels
 	} else if in.DownloadMaxPixels > maxAsyncImageDownloadPixels {
 		in.DownloadMaxPixels = maxAsyncImageDownloadPixels
 	}
@@ -1159,6 +1323,25 @@ func normalizeAsyncImageRuntimeConfig(in *AsyncImageRuntimeConfig) {
 	in.GeminiHalfKModels = models
 	if in.PromptPreviewMaxChars <= 0 {
 		in.PromptPreviewMaxChars = defaults.PromptPreviewMaxChars
+	}
+}
+
+func normalizeAsyncImageReferenceTransportMode(mode, fallback string) string {
+	mode = strings.ToLower(strings.TrimSpace(mode))
+	switch mode {
+	case AsyncImageReferenceTransportPassthrough, AsyncImageReferenceTransportLocal, AsyncImageReferenceTransportPassthroughFallbackLocal:
+		return mode
+	default:
+		return fallback
+	}
+}
+
+func IsAsyncImageReferenceTransportMode(mode string) bool {
+	switch strings.ToLower(strings.TrimSpace(mode)) {
+	case AsyncImageReferenceTransportPassthrough, AsyncImageReferenceTransportLocal, AsyncImageReferenceTransportPassthroughFallbackLocal:
+		return true
+	default:
+		return false
 	}
 }
 
