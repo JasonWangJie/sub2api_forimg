@@ -6,8 +6,9 @@ export default {
     adminDescription: 'Inspect and recover downstream image generation tasks across the site',
     summary: {
       active: '{count} active',
-      completed: '{count} completed on this page',
+      completed: '{count} completed',
       attention: '{count} failed',
+      successRate: '{rate} success rate',
     },
     filters: {
       search: 'Task, model, key, or user',

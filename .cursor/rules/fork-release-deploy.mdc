@@ -64,3 +64,9 @@ alwaysApply: true
 - 二进制发行路径：运行配置以 `/opt/sub2api/config.yaml` 为准（`DATA_DIR=/opt/sub2api`）
 - Docker 路径可继续用 `.env`（与原作者一致）；不要为了统一配置而拆掉 Docker 部署
 - 逐步弱化 env 覆盖，但保持兼容，禁止一次性重写配置系统
+
+## 文档同步与交接规则
+
+每次代码、配置、测试或文档任务完成时，必须同步更新根目录 `readmenew.md`、`开发台账.md` 和 `agent.md`。记录必须以实际 `git rev-parse HEAD`、`git status --short --branch`、`git describe --tags --always --dirty` 和 `backend/cmd/server/VERSION` 输出为准，并包含变更摘要、验证命令/结果和未完成项。
+
+完成前运行 `git diff --check` 并检查 Markdown 链接。没有实际执行的测试、生产操作或 CI 不得写成已通过；生产服务器连接、修改或重启必须有用户明确授权。该规则与根目录 `AGENTS.md`、`开发台账.md` 和 `agent.md` 保持一致。

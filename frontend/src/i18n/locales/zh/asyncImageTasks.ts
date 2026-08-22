@@ -6,8 +6,9 @@ export default {
     adminDescription: '统一查看全站下游生图任务并恢复失败的后处理阶段',
     summary: {
       active: '进行中 {count}',
-      completed: '本页已完成 {count}',
+      completed: '已完成 {count}',
       attention: '失败数 {count}',
+      successRate: '成功率 {rate}',
     },
     filters: {
       search: '任务、模型、密钥或用户',

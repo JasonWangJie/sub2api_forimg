@@ -18,6 +18,8 @@ type asyncImageTaskRepositoryStub struct {
 	transitionParams AsyncImageTaskTransition
 	transitionTask   *AsyncImageTask
 	transitionErr    error
+	statusCounts     map[string]int64
+	statusCountsErr  error
 }
 
 func (s *asyncImageTaskRepositoryStub) CreateAsyncImageTask(_ context.Context, params CreateAsyncImageTaskParams) (*AsyncImageTask, bool, error) {
@@ -28,6 +30,25 @@ func (s *asyncImageTaskRepositoryStub) CreateAsyncImageTask(_ context.Context, p
 func (s *asyncImageTaskRepositoryStub) TransitionAsyncImageTask(_ context.Context, params AsyncImageTaskTransition) (*AsyncImageTask, error) {
 	s.transitionParams = params
 	return s.transitionTask, s.transitionErr
+}
+
+func (s *asyncImageTaskRepositoryStub) CountAsyncImageTaskStatuses(context.Context, AsyncImageTaskFilter) (map[string]int64, error) {
+	return s.statusCounts, s.statusCountsErr
+}
+
+func TestAsyncImageTaskServiceStatsUseFilteredStatusCounts(t *testing.T) {
+	repo := &asyncImageTaskRepositoryStub{statusCounts: map[string]int64{
+		AsyncImageTaskStatusQueued: 2, AsyncImageTaskStatusSucceeded: 13,
+		AsyncImageTaskStatusFailed: 4, AsyncImageTaskStatusExecutionUnknown: 3,
+	}}
+	svc := NewAsyncImageTaskService(repo)
+
+	stats, err := svc.StatsForUser(context.Background(), 42, AsyncImageTaskFilter{Status: ""})
+	require.NoError(t, err)
+	require.Equal(t, int64(2), stats.Active)
+	require.Equal(t, int64(13), stats.Completed)
+	require.Equal(t, int64(7), stats.Failed)
+	require.InDelta(t, 65, stats.SuccessRate, 0.0001)
 }
 
 func TestAsyncImageTaskServiceCreateNormalizesAndDelegates(t *testing.T) {

@@ -116,6 +116,14 @@ export interface AsyncImageTaskListResponse {
   page: number
   page_size: number
   pages: number
+  stats?: AsyncImageTaskStats
+}
+
+export interface AsyncImageTaskStats {
+  active: number
+  completed: number
+  failed: number
+  success_rate: number
 }
 
 export interface AsyncImageResultAccess {

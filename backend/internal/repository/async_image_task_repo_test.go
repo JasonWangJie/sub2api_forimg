@@ -61,6 +61,32 @@ func TestAsyncImageReferenceRetryMigrationAddsDurableState(t *testing.T) {
 	}
 }
 
+func TestAsyncImageTaskRepositoryCountsStatusesWithTheTaskFilter(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	require.NoError(t, err)
+	defer func() { _ = db.Close() }()
+
+	createdAfter := time.Date(2026, 8, 22, 0, 0, 0, 0, time.UTC)
+	mock.ExpectQuery(`(?s)SELECT status, COUNT\(\*\) FROM async_image_tasks WHERE user_id = \$1 AND created_at >= \$2 GROUP BY status`).
+		WithArgs(int64(42), createdAfter).
+		WillReturnRows(sqlmock.NewRows([]string{"status", "count"}).
+			AddRow(service.AsyncImageTaskStatusQueued, int64(2)).
+			AddRow(service.AsyncImageTaskStatusSucceeded, int64(13)).
+			AddRow(service.AsyncImageTaskStatusFailed, int64(7)))
+
+	repo := NewAsyncImageTaskRepository(db)
+	statsRepo, ok := repo.(service.AsyncImageTaskStatsRepository)
+	require.True(t, ok)
+	counts, err := statsRepo.CountAsyncImageTaskStatuses(context.Background(), service.AsyncImageTaskFilter{
+		UserID: &[]int64{42}[0], CreatedAfter: &createdAfter,
+	})
+	require.NoError(t, err)
+	require.Equal(t, int64(2), counts[service.AsyncImageTaskStatusQueued])
+	require.Equal(t, int64(13), counts[service.AsyncImageTaskStatusSucceeded])
+	require.Equal(t, int64(7), counts[service.AsyncImageTaskStatusFailed])
+	require.NoError(t, mock.ExpectationsWereMet())
+}
+
 func TestAsyncImageTaskRepositoryCreateBindsOwnedInputInTransaction(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	require.NoError(t, err)

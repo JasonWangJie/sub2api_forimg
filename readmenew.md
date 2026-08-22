@@ -11,30 +11,44 @@ codegraph init
 
 1. 阅读 [wiki-new/文档索引.md](wiki-new/文档索引.md)。
 2. 阅读 [wiki-new/当前状态与完成度.md](wiki-new/当前状态与完成度.md) 和 [wiki-new/智能助手交接清单.md](wiki-new/智能助手交接清单.md)。
-3. 根据任务阅读异步任务、工作台、图库或审核专题。
-4. 运行 `git status --short --branch`、`git rev-parse HEAD`、`git describe --tags --always --dirty`，以实际工作树为准。
-5. 不要把本文中的开发基线当成当前提交；以 `origin/main` 和实际命令输出为准。Fork CI 仍未运行，不能把主线已推送误写成 CI 已通过。
+3. 阅读根目录 [开发台账.md](开发台账.md) 和 [agent.md](agent.md)，了解最近任务、测试证据和交接边界。
+4. 根据任务阅读异步任务、工作台、图库或审核专题。
+5. 运行 `git status --short --branch`、`git rev-parse HEAD`、`git describe --tags --always --dirty`，以实际工作树为准。
+6. 不要把本文中的开发基线当成当前提交；以 `origin/main` 和实际命令输出为准。Fork CI 仍未运行，不能把主线已推送误写成 CI 已通过。
 
 `wiki-new/` 下所有 Markdown 文件统一使用简体中文语义文件名。后续新增文档不得恢复英文 slug、拼音或英文编号前缀；文件重命名后必须同步更新全仓链接并检查断链。
 
 ## 当前版本快照
 
-记录日期：`2026-08-15`（续更：本机目录专用图片域名；签名下载与静态站二选一；管理端公开地址优先于 `config.yaml` 的 `async_image`。此前 `2026-08-14`：1 Key 异步生图双平台分组映射；存储后端可随时切换；管理端清理；固定 `TOTP_ENCRYPTION_KEY`；本机 `DATA_DIR` 回落与可读错误；公开广场短缓存）。
+记录日期：`2026-08-22`（续更：异步任务中心日期筛选默认当天、按筛选条件返回全局进行中/完成/失败统计和成功率；异步参考图传输策略、分类重试、任务重试状态持久化、80 MP 默认像素上限和管理端运行参数。此前 `2026-08-16` 至 `2026-08-21` 还加入图像大小账号池、异步任务中心信息展示、本地容量耗尽处理及仓储/服务错误处理重构）。
 
 | 项目 | 当前记录 |
 |---|---|
 | 发布版本文件 | `backend/cmd/server/VERSION`（以仓库文件为准） |
-| 文档记录时 HEAD | `91ecca6114a6e5e8eecac89eccb76ce04603a38b`（工作树可能 dirty；以 `git rev-parse`/`git status` 为准） |
-| HEAD 描述 | `v0.1.173.3-dirty`（以 `git describe --tags --always --dirty` 为准） |
+| 文档记录时 HEAD | `8d92b5d75ea6b74529dbeecdf959e145ddf124b6`（后续以 `git rev-parse`/`git status` 为准） |
+| HEAD 描述 | `v0.1.173.29`（以 `git describe --tags --always --dirty` 为准） |
 | 当前及后续默认分支 | `main` |
 | 已合并原作者主线 | 以 `git log` / `upstream/main` 实际为准 |
 | SC 上传安全迁移 | `backend/migrations/187_ZJ_async_image_upload_reservations.sql` |
 | 延期广场投稿迁移 | `backend/migrations/188_ZJ_plaza_submission_deferred_upload.sql` |
 | 结果上传意图迁移 | `backend/migrations/189_ZJ_async_image_result_upload_intents.sql` |
 | API Key 双平台生图映射 | `backend/migrations/221_ZJ_api_key_platform_groups.sql` |
+| 异步参考图与分类重试迁移 | `backend/migrations/223_ZJ_async_image_reference_retry_state.sql` |
 | Fork CI | 发版时在 `JasonWangJie/sub2api_forimg/actions` 核对实际结果 |
 
 最终交付必须同时报告 `VERSION`、完整 SHA、`git describe`、推送分支和 CI 链接/结果。历史 `2026-07-22` 基线与测试证据仍保留在下方「当前完成度」与 [wiki-new/测试与验收记录.md](wiki-new/测试与验收记录.md)。
+
+## 近期 Git 更新台账
+
+近期提交和本地验证证据集中记录在 [开发台账.md](开发台账.md)。本次最新功能提交 `8d92b5d` 已同步到代码、设置界面、迁移和测试；随后任务中心统计改动已在工作树完成并同步文档，不能只更新代码而遗漏总览或交接文档。
+
+每个任务完成时必须同步更新：
+
+1. `readmenew.md`：更新版本快照、功能摘要和入口链接。
+2. `开发台账.md`：记录日期、完整 SHA、变更范围、验证命令、结果和未完成项。
+3. `agent.md`：记录下一位助手所需的当前上下文、运行时边界和下一步。
+
+规则细节见 [AGENTS.md](AGENTS.md) 和 [.cursor/rules/fork-release-deploy.mdc](.cursor/rules/fork-release-deploy.mdc)。
 
 ## 本 Fork 的图片能力
 

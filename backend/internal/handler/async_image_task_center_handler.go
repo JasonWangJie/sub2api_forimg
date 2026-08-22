@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -25,6 +26,15 @@ type asyncImageTaskCenterService interface {
 	GetForAdmin(context.Context, string) (*service.AsyncImageTaskDetails, error)
 	ListResults(context.Context, string) ([]service.AsyncImageResult, error)
 	ResumePostProcessing(context.Context, string) (*service.AsyncImageTaskDetails, error)
+}
+
+type asyncImageTaskCenterPage struct {
+	Items    []asyncImageTaskCenterView  `json:"items"`
+	Total    int64                       `json:"total"`
+	Page     int                         `json:"page"`
+	PageSize int                         `json:"page_size"`
+	Pages    int                         `json:"pages"`
+	Stats    service.AsyncImageTaskStats `json:"stats"`
 }
 
 type asyncImageTaskStorageAccess interface {
@@ -81,9 +91,9 @@ func (c *asyncImageTaskCenterServiceCatalog) GetAccount(ctx context.Context, id 
 // AsyncImageTaskCenterHandler serves the authenticated site task center. It is
 // intentionally separate from the BB/SC downstream protocol handlers.
 type AsyncImageTaskCenterHandler struct {
-	tasks    asyncImageTaskCenterService
-	storage  asyncImageTaskStorageAccess
-	catalog  asyncImageTaskCenterCatalog
+	tasks   asyncImageTaskCenterService
+	storage asyncImageTaskStorageAccess
+	catalog asyncImageTaskCenterCatalog
 }
 
 func NewAsyncImageTaskCenterHandler(
@@ -110,6 +120,7 @@ func (h *AsyncImageTaskCenterHandler) ListForUser(c *gin.Context) {
 	if !ok {
 		return
 	}
+	filter.UserID = &subject.UserID
 	tasks, total, err := h.tasks.ListForUser(c.Request.Context(), subject.UserID, filter)
 	if err != nil {
 		response.ErrorFrom(c, err)
@@ -120,7 +131,12 @@ func (h *AsyncImageTaskCenterHandler) ListForUser(c *gin.Context) {
 		response.ErrorFrom(c, err)
 		return
 	}
-	response.Paginated(c, items, total, page, pageSize)
+	stats, err := h.globalStats(c.Request.Context(), filter, false, tasks)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, asyncImageTaskCenterPage{Items: items, Total: total, Page: page, PageSize: pageSize, Pages: pageCount(total, pageSize), Stats: stats})
 }
 
 func (h *AsyncImageTaskCenterHandler) GetForUser(c *gin.Context) {
@@ -171,7 +187,61 @@ func (h *AsyncImageTaskCenterHandler) ListForAdmin(c *gin.Context) {
 		response.ErrorFrom(c, err)
 		return
 	}
-	response.Paginated(c, items, total, page, pageSize)
+	stats, err := h.globalStats(c.Request.Context(), filter, true, tasks)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, asyncImageTaskCenterPage{Items: items, Total: total, Page: page, PageSize: pageSize, Pages: pageCount(total, pageSize), Stats: stats})
+}
+
+func pageCount(total int64, pageSize int) int {
+	if pageSize <= 0 {
+		pageSize = 20
+	}
+	pages := int(math.Ceil(float64(total) / float64(pageSize)))
+	if pages < 1 {
+		return 1
+	}
+	return pages
+}
+
+func (h *AsyncImageTaskCenterHandler) globalStats(ctx context.Context, filter service.AsyncImageTaskFilter, admin bool, pageTasks []*service.AsyncImageTask) (service.AsyncImageTaskStats, error) {
+	if statsService, ok := h.tasks.(service.AsyncImageTaskCenterStatsService); ok {
+		if admin {
+			return statsService.StatsForAdmin(ctx, filter)
+		}
+		if filter.UserID == nil {
+			return service.AsyncImageTaskStats{}, service.ErrAsyncImageInvalidInput
+		}
+		return statsService.StatsForUser(ctx, *filter.UserID, filter)
+	}
+	// Keep alternate task-center implementations compatible; the durable
+	// service uses the aggregate query above, while test adapters fall back to
+	// their supplied page without claiming it is global.
+	var stats service.AsyncImageTaskStats
+	for _, task := range pageTasks {
+		if task == nil {
+			continue
+		}
+		switch task.Status {
+		case service.AsyncImageTaskStatusQueued, service.AsyncImageTaskStatusInvoking,
+			service.AsyncImageTaskStatusUpstreamSucceeded, service.AsyncImageTaskStatusUploading,
+			service.AsyncImageTaskStatusBillingPending:
+			stats.Active++
+		case service.AsyncImageTaskStatusSucceeded:
+			stats.Completed++
+		case service.AsyncImageTaskStatusFailed, service.AsyncImageTaskStatusExecutionUnknown,
+			service.AsyncImageTaskStatusStorageFailed, service.AsyncImageTaskStatusBillingFailed,
+			service.AsyncImageTaskStatusExpired:
+			stats.Failed++
+		}
+	}
+	finished := stats.Completed + stats.Failed
+	if finished > 0 {
+		stats.SuccessRate = float64(stats.Completed) / float64(finished) * 100
+	}
+	return stats, nil
 }
 
 func (h *AsyncImageTaskCenterHandler) GetForAdmin(c *gin.Context) {

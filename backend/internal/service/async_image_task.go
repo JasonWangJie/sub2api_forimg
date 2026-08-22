@@ -143,6 +143,28 @@ type AsyncImageTaskFilter struct {
 	Offset          int
 }
 
+// AsyncImageTaskStats contains counts for the full filtered result set, not
+// only the current page of tasks.
+type AsyncImageTaskStats struct {
+	Active      int64   `json:"active"`
+	Completed   int64   `json:"completed"`
+	Failed      int64   `json:"failed"`
+	SuccessRate float64 `json:"success_rate"`
+}
+
+// AsyncImageTaskStatsRepository is optional so lightweight task repositories
+// used by tests and integrations do not need to implement aggregate queries.
+type AsyncImageTaskStatsRepository interface {
+	CountAsyncImageTaskStatuses(ctx context.Context, filter AsyncImageTaskFilter) (map[string]int64, error)
+}
+
+// AsyncImageTaskCenterStatsService is implemented by the durable task service
+// and lets the site task center request global filtered statistics.
+type AsyncImageTaskCenterStatsService interface {
+	StatsForUser(ctx context.Context, userID int64, filter AsyncImageTaskFilter) (AsyncImageTaskStats, error)
+	StatsForAdmin(ctx context.Context, filter AsyncImageTaskFilter) (AsyncImageTaskStats, error)
+}
+
 type AsyncImageTaskTransition struct {
 	TaskID                  string
 	ExpectedVersion         int64
@@ -385,6 +407,44 @@ func (s *AsyncImageTaskService) ListForUser(ctx context.Context, userID int64, f
 func (s *AsyncImageTaskService) ListForAdmin(ctx context.Context, filter AsyncImageTaskFilter) ([]*AsyncImageTask, int64, error) {
 	normalizeAsyncImageTaskFilter(&filter)
 	return s.repo.ListAsyncImageTasks(ctx, filter)
+}
+
+func (s *AsyncImageTaskService) StatsForUser(ctx context.Context, userID int64, filter AsyncImageTaskFilter) (AsyncImageTaskStats, error) {
+	if userID <= 0 {
+		return AsyncImageTaskStats{}, ErrAsyncImageInvalidInput
+	}
+	filter.UserID = &userID
+	return s.taskStats(ctx, filter)
+}
+
+func (s *AsyncImageTaskService) StatsForAdmin(ctx context.Context, filter AsyncImageTaskFilter) (AsyncImageTaskStats, error) {
+	return s.taskStats(ctx, filter)
+}
+
+func (s *AsyncImageTaskService) taskStats(ctx context.Context, filter AsyncImageTaskFilter) (AsyncImageTaskStats, error) {
+	statsRepo, ok := s.repo.(AsyncImageTaskStatsRepository)
+	if !ok {
+		return AsyncImageTaskStats{}, ErrAsyncImageInvalidInput
+	}
+	normalizeAsyncImageTaskFilter(&filter)
+	counts, err := statsRepo.CountAsyncImageTaskStatuses(ctx, filter)
+	if err != nil {
+		return AsyncImageTaskStats{}, err
+	}
+	stats := AsyncImageTaskStats{
+		Active: counts[AsyncImageTaskStatusQueued] + counts[AsyncImageTaskStatusInvoking] +
+			counts[AsyncImageTaskStatusUpstreamSucceeded] + counts[AsyncImageTaskStatusUploading] +
+			counts[AsyncImageTaskStatusBillingPending],
+		Completed: counts[AsyncImageTaskStatusSucceeded],
+		Failed: counts[AsyncImageTaskStatusFailed] + counts[AsyncImageTaskStatusExecutionUnknown] +
+			counts[AsyncImageTaskStatusStorageFailed] + counts[AsyncImageTaskStatusBillingFailed] +
+			counts[AsyncImageTaskStatusExpired],
+	}
+	finished := stats.Completed + stats.Failed
+	if finished > 0 {
+		stats.SuccessRate = float64(stats.Completed) / float64(finished) * 100
+	}
+	return stats, nil
 }
 
 func (s *AsyncImageTaskService) Transition(ctx context.Context, transition AsyncImageTaskTransition) (*AsyncImageTask, error) {

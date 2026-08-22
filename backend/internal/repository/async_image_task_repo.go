@@ -175,6 +175,28 @@ func (r *asyncImageTaskRepository) ListAsyncImageTasks(ctx context.Context, filt
 	return tasks, total, err
 }
 
+func (r *asyncImageTaskRepository) CountAsyncImageTaskStatuses(ctx context.Context, filter service.AsyncImageTaskFilter) (map[string]int64, error) {
+	where, args := buildAsyncImageTaskFilter(filter)
+	rows, err := r.sql.QueryContext(ctx, `SELECT status, COUNT(*) FROM async_image_tasks`+where+` GROUP BY status`, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	counts := make(map[string]int64)
+	for rows.Next() {
+		var status string
+		var count int64
+		if err := rows.Scan(&status, &count); err != nil {
+			return nil, err
+		}
+		counts[status] = count
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return counts, nil
+}
+
 func buildAsyncImageTaskFilter(filter service.AsyncImageTaskFilter) (string, []any) {
 	clauses := make([]string, 0, 12)
 	args := make([]any, 0, 12)

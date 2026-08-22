@@ -16,6 +16,10 @@
               <span class="h-1.5 w-1.5 rounded-full bg-rose-500"></span>
               {{ t('asyncImageTasks.summary.attention', { count: attentionTaskCount }) }}
             </span>
+            <span class="inline-flex items-center gap-1.5 rounded-md border border-emerald-200 bg-emerald-50 px-2.5 py-1.5 text-emerald-700 dark:border-emerald-900/70 dark:bg-emerald-950/30 dark:text-emerald-300">
+              <span class="h-1.5 w-1.5 rounded-full bg-emerald-500"></span>
+              {{ t('asyncImageTasks.summary.successRate', { rate: successRateLabel }) }}
+            </span>
           </div>
           <div class="flex items-center gap-2">
             <AutoRefreshButton
@@ -433,11 +437,13 @@ import { buildOssThumbnailUrl } from '@/utils/ossThumbnail'
 import { sanitizeUrl } from '@/utils/url'
 
 import asyncImageTasksAPI from './api'
+import { defaultAsyncImageTaskDateFilters } from './dateFilters'
 import type {
   AsyncImageTask,
   AsyncImageTaskEvent,
   AsyncImageTaskListParams,
   AsyncImageTaskResult,
+  AsyncImageTaskStats,
 } from './types'
 
 const props = defineProps<{ admin?: boolean }>()
@@ -488,19 +494,19 @@ const filters = reactive({
   platform: '',
   request_type: '',
   storage_provider: '',
-  start_date: '',
-  end_date: '',
+  ...defaultAsyncImageTaskDateFilters(),
 })
+const stats = ref<AsyncImageTaskStats>({ active: 0, completed: 0, failed: 0, success_rate: 0 })
 const sortState = reactive({ sort_by: 'created_at', sort_order: 'desc' as 'asc' | 'desc' })
 let listController: AbortController | null = null
 let detailController: AbortController | null = null
 
 const inProgressStatuses = new Set(['queued', 'invoking', 'upstream_succeeded', 'uploading', 'billing_pending'])
-const attentionStatuses = new Set(['failed', 'execution_unknown', 'storage_failed', 'billing_failed', 'expired'])
 
-const activeTaskCount = computed(() => tasks.value.filter((task) => inProgressStatuses.has(task.status)).length)
-const completedTaskCount = computed(() => tasks.value.filter((task) => task.status === 'succeeded').length)
-const attentionTaskCount = computed(() => tasks.value.filter((task) => attentionStatuses.has(task.status)).length)
+const activeTaskCount = computed(() => stats.value.active)
+const completedTaskCount = computed(() => stats.value.completed)
+const attentionTaskCount = computed(() => stats.value.failed)
+const successRateLabel = computed(() => `${stats.value.success_rate.toFixed(1)}%`)
 
 const columns = computed<Column[]>(() => [
   { key: 'id', label: t('asyncImageTasks.columns.taskId') },
@@ -759,6 +765,7 @@ async function loadTasks(silent = false): Promise<void> {
     pagination.page = response.page
     pagination.page_size = response.page_size
     pagination.pages = response.pages
+    stats.value = response.stats || { active: 0, completed: 0, failed: 0, success_rate: 0 }
     autoRefresh.resetCountdown()
   } catch (error) {
     const maybeAbort = error as { name?: string; code?: string }
@@ -815,7 +822,7 @@ function search(): void {
 }
 
 function resetFilters(): void {
-  Object.assign(filters, { q: '', status: '', platform: '', request_type: '', storage_provider: '', start_date: '', end_date: '' })
+  Object.assign(filters, { q: '', status: '', platform: '', request_type: '', storage_provider: '', ...defaultAsyncImageTaskDateFilters() })
   pagination.page = 1
   void loadTasks()
 }
