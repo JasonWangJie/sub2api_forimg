@@ -463,3 +463,67 @@ OpenAI 与 Gemini 异步任务均使用此路径；受理响应里的 `query_url
 3. 建议携带 `Idempotency-Key`，避免网络重试重复计费。
 4. 查询统一：`GET /v1/images/tasks_async/{task_id}`（OpenAI / Gemini 相同）。
 5. 仅在 `status === "succeeded"` 时下载 `data[].url`；链接约 24小时有效，过期则无效。
+
+---
+
+## 10. 当日异步生图统计
+
+使用 API Key 所属用户身份，查询服务器配置时区当天的异步生图汇总。统计范围是该用户的全部持久化异步生图任务，不限于当前 API Key；正在处理的任务也计入请求数。
+
+### 10.1 请求
+
+```http
+GET /v1/images/tasks_async/stats
+Authorization: Bearer <API_KEY>
+```
+
+接口只支持 `Authorization: Bearer` 方式传入 API Key，不接受 URL 查询参数传 Key。鉴权通过但余额已耗尽的 Key 仍可读取自己的统计。
+
+### 10.2 成功响应
+
+```json
+{
+  "object": "async_image.stats",
+  "date": "2026-08-23",
+  "timezone": "Asia/Shanghai",
+  "balance": 12.5,
+  "today_requests": 20,
+  "success_count": 15,
+  "failure_count": 3,
+  "success_rate": 83.3333333333
+}
+```
+
+字段说明：
+
+| 字段 | 类型 | 说明 |
+|---|---|---|
+| `date` | string | 统计日期，格式 `YYYY-MM-DD` |
+| `timezone` | string | 服务器当前配置时区；日期边界按此时区计算 |
+| `balance` | number | 当前用户余额 |
+| `today_requests` | integer | 当天任务总数，包含处理中、成功和失败任务 |
+| `success_count` | integer | 当天成功任务数 |
+| `failure_count` | integer | 当天失败任务数，包括 `execution_unknown`、存储失败和计费失败等终态 |
+| `success_rate` | number | 成功率百分比，计算为 `success_count / (success_count + failure_count) * 100`；没有终态任务时为 `0` |
+
+响应带有 `Cache-Control: no-store`。余额和统计均为请求时读取，不应长时间缓存。
+
+### 10.3 错误
+
+```json
+{
+  "error": {
+    "type": "authentication_error",
+    "code": "authentication_error",
+    "message": "invalid API key"
+  }
+}
+```
+
+常见状态码：
+
+| HTTP | code | 说明 |
+|---|---|---|
+| `401` | `authentication_error` | 缺少或无效 API Key |
+| `500` | `stats_unavailable` | 统计查询失败 |
+| `503` | `stats_unavailable` | 当前实例未提供异步统计能力 |

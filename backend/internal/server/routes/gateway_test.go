@@ -154,6 +154,7 @@ func TestGatewayRoutesDurableAsyncImagePathsAreRegistered(t *testing.T) {
 		"POST /v1/chat/completions_gm",
 		"POST /v1/images/generations_oa",
 		"POST /v1/images/edits_oa",
+		"GET /v1/images/tasks_async/stats",
 		"GET /v1/images/tasks_async/:task_id",
 		"POST /v1/uploads/images_sc",
 		"POST /v1/images/generations_sc",

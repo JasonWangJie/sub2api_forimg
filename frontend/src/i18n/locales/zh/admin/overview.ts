@@ -155,6 +155,8 @@ export default {
         runtimeDescription: '配置队列恢复、参考图下载限制、链接签名和保留时间。',
         asyncPublicBaseUrl: '任务查询链接的站点公开地址',
         asyncPublicBaseUrlHint: '任务查询 URL 用此域名。管理端已保存时以界面为准（上方站点/API 地址可补空）；config.yaml 的 async_image 仅在从未保存过管理端配置时生效。',
+        autoArchiveToLibrary: '异步成功结果自动进入个人图库',
+        autoArchiveToLibraryHint: '关闭后仍保存异步结果并返回图片地址，但不创建个人图库记录，也不会消耗图库逻辑字节配额。',
         workerConcurrency: 'Worker 并发数',
         executionTimeoutSeconds: '任务执行超时（秒，默认 1200）',
         signedUrlExpirySeconds: '签名链接有效期（秒）',

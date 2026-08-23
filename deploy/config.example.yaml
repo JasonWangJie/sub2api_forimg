@@ -1508,6 +1508,8 @@ async_image:
   # 管理端「备份/图片存储」保存过后，以管理端的 async_image.public_base_url 为准。
   # local 存储可在该字段留空时回落同表单 public_base_url；OSS/Superbed 不会把对象 CDN 当作 API 地址。
   public_base_url: ""
+  # 异步任务成功后是否自动创建个人图库记录；关闭时仍保存结果并返回图片 URL（默认 false）。
+  auto_archive_to_library: false
   # 单实例同时执行的异步生图 Worker 数（默认 4，最大 64）。多实例部署时总并发为各实例之和；
   # Worker 数在进程启动时确定，修改后需重启服务。
   worker_concurrency: 4

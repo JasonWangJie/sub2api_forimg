@@ -6,6 +6,7 @@ export const ASYNC_IMAGE_DOWNLOAD_PIXEL_LIMITS = {
 } as const
 
 export const ASYNC_IMAGE_REFERENCE_RETRY_DEFAULTS = {
+  auto_archive_to_library: false,
   openai_reference_transport_mode: 'passthrough_fallback_local',
   gemini_reference_transport_mode: 'passthrough',
   reference_fetch_max_retries: 2,
@@ -23,6 +24,7 @@ export const ASYNC_IMAGE_REFERENCE_RETRY_DEFAULTS = {
   download_max_pixels: ASYNC_IMAGE_DOWNLOAD_PIXEL_LIMITS.max,
 } satisfies Pick<
   AsyncImageRuntimeConfig,
+  | 'auto_archive_to_library'
   | 'openai_reference_transport_mode'
   | 'gemini_reference_transport_mode'
   | 'reference_fetch_max_retries'

@@ -166,23 +166,27 @@ type AsyncImageTaskCenterStatsService interface {
 }
 
 type AsyncImageTaskTransition struct {
-	TaskID                  string
-	ExpectedVersion         int64
-	UpdatedBefore           *time.Time
-	FromStatuses            []string
-	ToStatus                string
-	Progress                *int
-	AccountID               *int64
-	BillingStatus           *string
-	ActualCost              *float64
-	ActualImageSize         *string
-	ImageCount              *int
-	UpstreamRequestID       *string
-	BillingRequestID        *string
-	BillingPayload          json.RawMessage
-	ErrorCode               *string
-	ErrorMessage            *string
-	ReferenceTransport      *string
+	TaskID             string
+	ExpectedVersion    int64
+	UpdatedBefore      *time.Time
+	FromStatuses       []string
+	ToStatus           string
+	Progress           *int
+	AccountID          *int64
+	BillingStatus      *string
+	ActualCost         *float64
+	ActualImageSize    *string
+	ImageCount         *int
+	UpstreamRequestID  *string
+	BillingRequestID   *string
+	BillingPayload     json.RawMessage
+	ErrorCode          *string
+	ErrorMessage       *string
+	ReferenceTransport *string
+	// AutoArchiveToLibrary controls whether a successful task creates the
+	// personal-library archive outbox entry. It is evaluated in the same
+	// transaction as the succeeded transition.
+	AutoArchiveToLibrary    bool
 	ClearError              bool
 	IncrementRetry          bool
 	IncrementReferenceRetry bool

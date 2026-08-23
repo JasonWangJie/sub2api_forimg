@@ -20,13 +20,13 @@ codegraph init
 
 ## 当前版本快照
 
-记录日期：`2026-08-22`（续更：异步任务中心日期筛选默认当天、按筛选条件返回全局进行中/完成/失败统计和成功率；异步参考图传输策略、分类重试、任务重试状态持久化、80 MP 默认像素上限和管理端运行参数。此前 `2026-08-16` 至 `2026-08-21` 还加入图像大小账号池、异步任务中心信息展示、本地容量耗尽处理及仓储/服务错误处理重构）。
+记录日期：`2026-08-23`（续更：异步生图增加 `GET /v1/images/tasks_async/stats` API Key 统计接口，返回用户余额、当天请求数、成功数、失败数和成功率；同时保留 `async_image.auto_archive_to_library` 默认关闭的归档策略。此前已加入异步任务中心日期筛选、全局统计、参考图传输策略、分类重试和 80 MP 默认像素上限）。
 
 | 项目 | 当前记录 |
 |---|---|
 | 发布版本文件 | `backend/cmd/server/VERSION`（以仓库文件为准） |
-| 文档记录时 HEAD | `8d92b5d75ea6b74529dbeecdf959e145ddf124b6`（后续以 `git rev-parse`/`git status` 为准） |
-| HEAD 描述 | `v0.1.173.29`（以 `git describe --tags --always --dirty` 为准） |
+| 文档记录时 HEAD | `d5797a8c7ff7dab6f1dc4e23f0bbc104a4d101ff`（本轮未提交工作树） |
+| HEAD 描述 | `v0.1.173.30-dirty` |
 | 当前及后续默认分支 | `main` |
 | 已合并原作者主线 | 以 `git log` / `upstream/main` 实际为准 |
 | SC 上传安全迁移 | `backend/migrations/187_ZJ_async_image_upload_reservations.sql` |
@@ -34,13 +34,15 @@ codegraph init
 | 结果上传意图迁移 | `backend/migrations/189_ZJ_async_image_result_upload_intents.sql` |
 | API Key 双平台生图映射 | `backend/migrations/221_ZJ_api_key_platform_groups.sql` |
 | 异步参考图与分类重试迁移 | `backend/migrations/223_ZJ_async_image_reference_retry_state.sql` |
+| 异步图库自动归档 | `async_image.auto_archive_to_library`，默认 `false`；结果对象和查询 URL 不受影响 |
+| 异步生图用户统计 | `GET /v1/images/tasks_async/stats`；按服务器时区统计用户当天全部异步任务 |
 | Fork CI | 发版时在 `JasonWangJie/sub2api_forimg/actions` 核对实际结果 |
 
 最终交付必须同时报告 `VERSION`、完整 SHA、`git describe`、推送分支和 CI 链接/结果。历史 `2026-07-22` 基线与测试证据仍保留在下方「当前完成度」与 [wiki-new/测试与验收记录.md](wiki-new/测试与验收记录.md)。
 
 ## 近期 Git 更新台账
 
-近期提交和本地验证证据集中记录在 [开发台账.md](开发台账.md)。本次最新功能提交 `8d92b5d` 已同步到代码、设置界面、迁移和测试；随后任务中心统计改动已在工作树完成并同步文档，不能只更新代码而遗漏总览或交接文档。
+近期提交和本地验证证据集中记录在 [开发台账.md](开发台账.md)。本轮统计接口代码、路由、测试和新接口文档均在工作树，尚未提交；不能只更新代码而遗漏总览或交接文档。
 
 每个任务完成时必须同步更新：
 
@@ -76,7 +78,7 @@ codegraph init
 
 失败、超时、`execution_unknown`、`403` 或 `409` 都不能让工作台在实时和异步链路之间自动回退。异步重试必须复用同一请求字节和 `Idempotency-Key`。
 
-实时生图：结果留在本机 IndexedDB；「投稿审核」只提交元数据（checksum/尺寸等），**此时不上传 OSS**。管理员批准后状态为 `approved_pending_sync`；用户再次上线在工作台/个人图库点击「同步至图片广场」时才上传并直接 `published`。异步任务结果仍走服务端 OSS 归档；工作台侧栏不再因归档失败提示「等待恢复归档」。
+实时生图：结果留在本机 IndexedDB；「投稿审核」只提交元数据（checksum/尺寸等），**此时不上传 OSS**。管理员批准后状态为 `approved_pending_sync`；用户再次上线在工作台/个人图库点击「同步至图片广场」时才上传并直接 `published`。异步任务结果始终走服务端持久化对象存储；默认不自动建立个人图库引用，开启 `async_image.auto_archive_to_library` 后才执行归档。任务查询仍返回结果 URL；工作台侧栏不再因归档失败提示「等待恢复归档」。
 
 ## 数据与公开模型
 
@@ -220,6 +222,7 @@ codegraph init
 |---|---|
 | [wiki-new/文档索引.md](wiki-new/文档索引.md) | 二次开发 Wiki 入口和真值顺序 |
 | [wiki-new/异步生图架构.md](wiki-new/异步生图架构.md) | 持久异步任务状态机和恢复边界 |
+| [异步生图接口文档new.md](异步生图接口文档new.md) | 下游异步接口、鉴权、轮询和当日统计接口 |
 | [wiki-new/接口契约.md](wiki-new/接口契约.md) | 下游异步协议与站内图片 API |
 | [wiki-new/对象存储与保留策略.md](wiki-new/对象存储与保留策略.md) | OSS、对象引用、签名和保留策略 |
 | [wiki-new/图片工作台.md](wiki-new/图片工作台.md) | Key 分组驱动的工作台实时/异步分流 |

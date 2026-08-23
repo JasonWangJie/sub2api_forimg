@@ -346,6 +346,7 @@ func (c *ImageDurableStorageConfig) NormalizedBackend() string {
 // image runtime. A database-backed admin setting takes precedence once saved.
 type AsyncImageConfig struct {
 	PublicBaseURL                     string   `mapstructure:"public_base_url"`
+	AutoArchiveToLibrary              bool     `mapstructure:"auto_archive_to_library"`
 	WorkerConcurrency                 int      `mapstructure:"worker_concurrency"`
 	WorkerLeaseSeconds                int      `mapstructure:"worker_lease_seconds"`
 	RecoveryIntervalSeconds           int      `mapstructure:"recovery_interval_seconds"`
@@ -2366,6 +2367,7 @@ func setDefaults() {
 	// Durable asynchronous image task runtime. The admin setting can override
 	// this fallback at runtime without restarting the service.
 	viper.SetDefault("async_image.public_base_url", "")
+	viper.SetDefault("async_image.auto_archive_to_library", false)
 	viper.SetDefault("async_image.worker_concurrency", 4)
 	viper.SetDefault("async_image.worker_lease_seconds", 120)
 	viper.SetDefault("async_image.recovery_interval_seconds", 30)

@@ -26,6 +26,10 @@ type asyncImageTaskCenterServiceStub struct {
 	err           error
 	resumeDetails *service.AsyncImageTaskDetails
 	resumeCalls   int
+	stats         service.AsyncImageTaskStats
+	statsErr      error
+	statsUserID   int64
+	statsFilter   service.AsyncImageTaskFilter
 }
 
 func (s *asyncImageTaskCenterServiceStub) ListForUser(_ context.Context, userID int64, filter service.AsyncImageTaskFilter) ([]*service.AsyncImageTask, int64, error) {
@@ -57,6 +61,63 @@ func (s *asyncImageTaskCenterServiceStub) ResumePostProcessing(_ context.Context
 		return s.resumeDetails, s.err
 	}
 	return s.details, s.err
+}
+
+func (s *asyncImageTaskCenterServiceStub) StatsForUser(_ context.Context, userID int64, filter service.AsyncImageTaskFilter) (service.AsyncImageTaskStats, error) {
+	s.statsUserID, s.statsFilter = userID, filter
+	return s.stats, s.statsErr
+}
+
+func (s *asyncImageTaskCenterServiceStub) StatsForAdmin(_ context.Context, _ service.AsyncImageTaskFilter) (service.AsyncImageTaskStats, error) {
+	return s.stats, s.statsErr
+}
+
+func TestAsyncImageTaskCenterGetStatsReturnsUserBalanceAndTodayCounts(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	h := &AsyncImageTaskCenterHandler{
+		tasks: &asyncImageTaskCenterServiceStub{stats: service.AsyncImageTaskStats{
+			Active: 2, Completed: 7, Failed: 3, SuccessRate: 70,
+		}},
+	}
+	taskStub := h.tasks.(*asyncImageTaskCenterServiceStub)
+	apiKey := &service.APIKey{User: &service.User{ID: 42, Balance: 12.5}}
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest(http.MethodGet, "/v1/images/tasks_async/stats", nil)
+	c.Set(string(middleware.ContextKeyAPIKey), apiKey)
+
+	h.GetStats(c)
+
+	require.Equal(t, http.StatusOK, w.Code)
+	require.Equal(t, "no-store", w.Header().Get("Cache-Control"))
+	var got asyncImageStatsResponse
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &got))
+	require.Equal(t, "async_image.stats", got.Object)
+	require.Equal(t, 12.5, got.Balance)
+	require.Equal(t, int64(12), got.TodayRequests)
+	require.Equal(t, int64(7), got.SuccessCount)
+	require.Equal(t, int64(3), got.FailureCount)
+	require.Equal(t, float64(70), got.SuccessRate)
+	require.NotEmpty(t, got.Date)
+	require.NotEmpty(t, got.Timezone)
+	require.Equal(t, int64(42), taskStub.statsUserID)
+	require.NotNil(t, taskStub.statsFilter.CreatedAfter)
+	require.NotNil(t, taskStub.statsFilter.CreatedBefore)
+	require.Equal(t, got.Date, taskStub.statsFilter.CreatedAfter.Format("2006-01-02"))
+	require.Equal(t, got.Date, taskStub.statsFilter.CreatedBefore.Add(-24*time.Hour).Format("2006-01-02"))
+}
+
+func TestAsyncImageTaskCenterGetStatsRejectsMissingAPIKey(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	h := &AsyncImageTaskCenterHandler{tasks: &asyncImageTaskCenterServiceStub{}}
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest(http.MethodGet, "/v1/images/tasks_async/stats", nil)
+
+	h.GetStats(c)
+
+	require.Equal(t, http.StatusUnauthorized, w.Code)
+	require.Contains(t, w.Body.String(), "authentication_error")
 }
 
 type asyncImageTaskStorageAccessStub struct {
@@ -253,7 +314,7 @@ func TestAsyncImageTaskCenterAdminDetailIncludesRoutingNames(t *testing.T) {
 		Platform: service.PlatformOpenAI, RequestType: service.AsyncImageRequestTypeTextToImage,
 		Model: "gpt-image-2", Status: service.AsyncImageTaskStatusFailed,
 		BillingStatus: service.AsyncImageBillingStatusNotBillable,
-		SubmittedAt: now, CreatedAt: now, UpdatedAt: now,
+		SubmittedAt:   now, CreatedAt: now, UpdatedAt: now,
 	}
 	tasks := &asyncImageTaskCenterServiceStub{details: &service.AsyncImageTaskDetails{Task: task}}
 	h := &AsyncImageTaskCenterHandler{

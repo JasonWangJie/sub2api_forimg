@@ -128,6 +128,7 @@ export interface ImageLibraryRuntimeConfig {
 
 export interface AsyncImageRuntimeConfig {
   public_base_url: string
+  auto_archive_to_library: boolean
   worker_concurrency: number
   worker_lease_seconds: number
   recovery_interval_seconds: number

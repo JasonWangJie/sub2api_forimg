@@ -389,7 +389,7 @@ func (r *asyncImageTaskRepository) TransitionAsyncImageTask(ctx context.Context,
 	}); err != nil {
 		return nil, err
 	}
-	if transition.ToStatus == service.AsyncImageTaskStatusSucceeded {
+	if transition.ToStatus == service.AsyncImageTaskStatusSucceeded && transition.AutoArchiveToLibrary {
 		if _, err := tx.ExecContext(ctx, `
 INSERT INTO async_image_outbox(task_id,event_type,dedup_key,payload)
 VALUES($1,'library_archive',$2,'{}'::jsonb)

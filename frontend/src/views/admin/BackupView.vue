@@ -199,6 +199,13 @@
               <input v-model="imageStorageForm.async_image.public_base_url" type="url" class="input w-full" placeholder="https://api.example.com" />
               <p class="mt-1 text-xs text-gray-400">{{ t('admin.backup.imageStorage.asyncPublicBaseUrlHint') }}</p>
             </div>
+            <div class="md:col-span-2 lg:col-span-3 flex items-start gap-2 rounded-md border border-gray-200 p-3 dark:border-dark-700">
+              <input id="async-auto-archive-to-library" v-model="imageStorageForm.async_image.auto_archive_to_library" type="checkbox" class="mt-0.5" />
+              <label for="async-auto-archive-to-library" class="text-xs text-gray-600 dark:text-gray-400">
+                <span class="font-medium text-gray-700 dark:text-gray-200">{{ t('admin.backup.imageStorage.autoArchiveToLibrary') }}</span>
+                <span class="mt-1 block">{{ t('admin.backup.imageStorage.autoArchiveToLibraryHint') }}</span>
+              </label>
+            </div>
             <div>
               <label class="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">{{ t('admin.backup.imageStorage.workerConcurrency') }}</label>
               <input v-model.number="imageStorageForm.async_image.worker_concurrency" type="number" min="1" max="64" class="input w-full" />

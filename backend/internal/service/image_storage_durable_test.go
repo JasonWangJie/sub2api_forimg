@@ -88,15 +88,17 @@ func TestResolveImageStorageProviderRejectsInvalidValues(t *testing.T) {
 func TestImageStorageRuntimeConfigHotOverride(t *testing.T) {
 	svc, _, _ := newImageStorageFixture(t, config.ImageStorageConfig{})
 	svc.asyncFallback = config.AsyncImageConfig{
-		PublicBaseURL:     "https://fallback.example.com/",
-		WorkerConcurrency: 8,
-		TaskRetentionDays: 120,
+		PublicBaseURL:        "https://fallback.example.com/",
+		AutoArchiveToLibrary: true,
+		WorkerConcurrency:    8,
+		TaskRetentionDays:    120,
 	}
 
 	got, err := svc.RuntimeConfig(context.Background())
 	require.NoError(t, err)
 	require.Equal(t, "https://fallback.example.com", got.PublicBaseURL)
 	require.Equal(t, 8, got.WorkerConcurrency)
+	require.True(t, got.AutoArchiveToLibrary)
 	require.Equal(t, 120, got.TaskRetentionDays)
 	require.Equal(t, 120, got.WorkerLeaseSeconds, "zero fallback fields receive safe defaults")
 

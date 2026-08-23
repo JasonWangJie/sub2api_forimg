@@ -565,7 +565,7 @@ Authorization: Bearer <提交任务的同一个 API_KEY>
 
 只有 OSS 结果清单已持久化且账务状态已确认，任务才对外显示成功。标准模式要求原计费入口确认成功；全站 `simple` 模式沿用项目现有“不扣费但记录用量”语义，以 `not_billable` 作为已确认终态。因而 `processing` 可能表示图片已经生成但仍在上传或结算，客户端必须继续轮询。
 
-单次上游调用受 `async_image.execution_timeout_seconds` 限制（默认 `1200`，即 20 分钟）。Worker 会对该次 invoke 使用 `context` 超时；若上游忽略取消、心跳又不断刷新 `updated_at`，恢复环仍会按 `started_at`（没有则用 `created_at`）的墙钟时间把仍为 `invoking` 的任务标记为 `failed`，`error_code=execution_timeout`。对外 BB `fail_reason` / SC `failReason` 为可读超时文案。配置文件与后台图片存储设置里的异步运行参数均可调整；已保存的后台设置优先于配置文件。
+单次上游调用受 `async_image.execution_timeout_seconds` 限制（默认 `1200`，即 20 分钟）。Worker 会对该次 invoke 使用 `context` 超时；若上游忽略取消、心跳又不断刷新 `updated_at`，恢复环仍会按 `started_at`（没有则用 `created_at`）的墙钟时间把仍为 `invoking` 的任务标记为 `failed`，`error_code=execution_timeout`。对外 BB `fail_reason` / SC `failReason` 为可读超时文案。配置文件与后台图片存储设置里的异步运行参数均可调整；已保存的后台设置优先于配置文件。`async_image.auto_archive_to_library` 默认关闭：成功结果仍会保存到持久化图片存储，任务查询照常返回 `data[].url`，但不会创建个人图库记录或触发图库逻辑字节配额；开启后才执行幂等图库归档。
 
 标准 Gemini/OpenAI 同步上游没有可依赖的幂等保证。系统不会自动重新调用处于 `execution_unknown` 的任务，以免生成第二份图片和产生第二次上游费用。自动重试和管理员“续跑”只处理存储、计费和用量日志等后处理阶段，不会在原任务号下重新生成。
 

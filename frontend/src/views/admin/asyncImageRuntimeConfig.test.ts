@@ -8,6 +8,7 @@ import {
 describe('async image reference and retry settings', () => {
   it('supplies defaults when loading a legacy config', () => {
     const merged = mergeAsyncImageReferenceRetryDefaults({ worker_concurrency: 8 })
+    expect(merged.auto_archive_to_library).toBe(false)
     expect(merged.openai_reference_transport_mode).toBe('passthrough_fallback_local')
     expect(merged.gemini_reference_transport_mode).toBe('passthrough')
     expect(merged.reference_fetch_max_retries).toBe(2)

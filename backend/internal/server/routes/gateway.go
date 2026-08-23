@@ -252,6 +252,7 @@ func RegisterGatewayRoutes(
 		gateway.POST("/chat/completions_gm", h.DurableAsyncImage.SubmitGeminiBB)
 		gateway.POST("/images/generations_oa", h.DurableAsyncImage.SubmitOpenAIBB)
 		gateway.POST("/images/edits_oa", h.DurableAsyncImage.SubmitOpenAIBB)
+		gateway.GET("/images/tasks_async/stats", h.AsyncImageTasks.GetStats)
 		gateway.GET("/images/tasks_async/:task_id", h.DurableAsyncImage.GetBB)
 		gateway.POST("/uploads/images_sc", h.DurableAsyncImage.UploadSC)
 		gateway.POST("/images/generations_sc", h.DurableAsyncImage.SubmitGeminiSC)

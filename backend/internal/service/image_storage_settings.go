@@ -219,6 +219,7 @@ type ImageLibraryRuntimeConfig struct {
 // changes take effect without restarting the API service.
 type AsyncImageRuntimeConfig struct {
 	PublicBaseURL                     string   `json:"public_base_url"`
+	AutoArchiveToLibrary              bool     `json:"auto_archive_to_library"`
 	WorkerConcurrency                 int      `json:"worker_concurrency"`
 	WorkerLeaseSeconds                int      `json:"worker_lease_seconds"`
 	RecoveryIntervalSeconds           int      `json:"recovery_interval_seconds"`
@@ -1010,6 +1011,7 @@ func (s *ImageStorageSettingService) LibraryRuntimeConfig(ctx context.Context) (
 func asyncRuntimeFromConfig(in config.AsyncImageConfig) AsyncImageRuntimeConfig {
 	out := defaultAsyncImageRuntimeConfig()
 	out.PublicBaseURL = in.PublicBaseURL
+	out.AutoArchiveToLibrary = in.AutoArchiveToLibrary
 	out.WorkerConcurrency = in.WorkerConcurrency
 	out.WorkerLeaseSeconds = in.WorkerLeaseSeconds
 	out.RecoveryIntervalSeconds = in.RecoveryIntervalSeconds
@@ -1071,6 +1073,7 @@ func asyncRuntimeFromConfig(in config.AsyncImageConfig) AsyncImageRuntimeConfig 
 
 func defaultAsyncImageRuntimeConfig() AsyncImageRuntimeConfig {
 	return AsyncImageRuntimeConfig{
+		AutoArchiveToLibrary:              false,
 		WorkerConcurrency:                 4,
 		WorkerLeaseSeconds:                120,
 		RecoveryIntervalSeconds:           30,

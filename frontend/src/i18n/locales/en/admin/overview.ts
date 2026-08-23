@@ -155,6 +155,8 @@ export default {
         runtimeDescription: 'Queue recovery, reference download limits, URL signing, and retention controls.',
         asyncPublicBaseUrl: 'Public site base URL for task query links',
         asyncPublicBaseUrlHint: 'Used for task query URLs. After admin settings are saved, the UI wins (site/API URL can fill an empty value here); config.yaml async_image applies only when admin settings were never saved.',
+        autoArchiveToLibrary: 'Automatically add successful async results to personal library',
+        autoArchiveToLibraryHint: 'When disabled, results are still stored and returned by URL, but no personal-library record is created and library logical-byte quota is not consumed.',
         workerConcurrency: 'Worker concurrency',
         executionTimeoutSeconds: 'Execution timeout (seconds, default 1200)',
         signedUrlExpirySeconds: 'Signed URL TTL (seconds)',

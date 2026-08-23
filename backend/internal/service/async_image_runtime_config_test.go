@@ -29,6 +29,14 @@ func TestAsyncImageRuntimeConfigOldJSONGetsRetryDefaults(t *testing.T) {
 	require.Equal(t, 16, cfg.TotalMaxRetries)
 	require.Equal(t, 20, cfg.RetryJitterPercent)
 	require.Equal(t, 900, cfg.RetryAfterMaxSeconds)
+	require.False(t, cfg.AutoArchiveToLibrary)
+}
+
+func TestAsyncImageRuntimeConfigPreservesExplicitAutoArchivePolicy(t *testing.T) {
+	var cfg AsyncImageRuntimeConfig
+	require.NoError(t, json.Unmarshal([]byte(`{"auto_archive_to_library":true}`), &cfg))
+	normalizeAsyncImageRuntimeConfig(&cfg)
+	require.True(t, cfg.AutoArchiveToLibrary)
 }
 
 func TestAsyncImageRuntimeConfigPreservesExplicitZeroRetryLimits(t *testing.T) {

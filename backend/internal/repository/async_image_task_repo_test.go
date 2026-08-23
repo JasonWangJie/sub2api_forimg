@@ -199,6 +199,61 @@ func TestAsyncImageTaskRepositoryTransitionUsesVersionCASAndEvent(t *testing.T) 
 	require.NoError(t, mock.ExpectationsWereMet())
 }
 
+func TestAsyncImageTaskRepositorySuccessSkipsLibraryArchiveWhenDisabled(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	require.NoError(t, err)
+	defer func() { _ = db.Close() }()
+
+	now := time.Now().UTC()
+	mock.ExpectBegin()
+	mock.ExpectQuery("SELECT status, version FROM async_image_tasks").
+		WithArgs("asyncimg_no_archive").
+		WillReturnRows(sqlmock.NewRows([]string{"status", "version"}).AddRow(service.AsyncImageTaskStatusBillingPending, int64(1)))
+	mock.ExpectQuery("(?s)UPDATE async_image_tasks SET.*WHERE task_id = \\$1.*version = \\$43.*RETURNING").
+		WillReturnRows(asyncImageTaskRows(now, "asyncimg_no_archive", "hash-no-archive", service.AsyncImageTaskStatusSucceeded))
+	mock.ExpectExec("(?s)INSERT INTO async_image_events").WillReturnResult(sqlmock.NewResult(1, 1))
+	mock.ExpectCommit()
+
+	repo := NewAsyncImageTaskRepository(db)
+	_, err = repo.TransitionAsyncImageTask(context.Background(), service.AsyncImageTaskTransition{
+		TaskID: "asyncimg_no_archive", ExpectedVersion: 1,
+		FromStatuses:         []string{service.AsyncImageTaskStatusBillingPending},
+		ToStatus:             service.AsyncImageTaskStatusSucceeded,
+		AutoArchiveToLibrary: false,
+	})
+	require.NoError(t, err)
+	require.NoError(t, mock.ExpectationsWereMet())
+}
+
+func TestAsyncImageTaskRepositorySuccessEnqueuesLibraryArchiveWhenEnabled(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	require.NoError(t, err)
+	defer func() { _ = db.Close() }()
+
+	now := time.Now().UTC()
+	mock.ExpectBegin()
+	mock.ExpectQuery("SELECT status, version FROM async_image_tasks").
+		WithArgs("asyncimg_archive").
+		WillReturnRows(sqlmock.NewRows([]string{"status", "version"}).AddRow(service.AsyncImageTaskStatusBillingPending, int64(1)))
+	mock.ExpectQuery("(?s)UPDATE async_image_tasks SET.*WHERE task_id = \\$1.*version = \\$43.*RETURNING").
+		WillReturnRows(asyncImageTaskRows(now, "asyncimg_archive", "hash-archive", service.AsyncImageTaskStatusSucceeded))
+	mock.ExpectExec("(?s)INSERT INTO async_image_events").WillReturnResult(sqlmock.NewResult(1, 1))
+	mock.ExpectExec("(?s)INSERT INTO async_image_outbox.*library_archive").
+		WithArgs("asyncimg_archive", "asyncimg_archive:library_archive").
+		WillReturnResult(sqlmock.NewResult(1, 1))
+	mock.ExpectCommit()
+
+	repo := NewAsyncImageTaskRepository(db)
+	_, err = repo.TransitionAsyncImageTask(context.Background(), service.AsyncImageTaskTransition{
+		TaskID: "asyncimg_archive", ExpectedVersion: 1,
+		FromStatuses:         []string{service.AsyncImageTaskStatusBillingPending},
+		ToStatus:             service.AsyncImageTaskStatusSucceeded,
+		AutoArchiveToLibrary: true,
+	})
+	require.NoError(t, err)
+	require.NoError(t, mock.ExpectationsWereMet())
+}
+
 func TestAsyncImageTaskRepositoryRecordUpstreamSuccessClearsRequestPayload(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	require.NoError(t, err)

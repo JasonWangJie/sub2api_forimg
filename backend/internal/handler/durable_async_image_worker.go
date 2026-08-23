@@ -105,6 +105,10 @@ func (h *DurableAsyncImageHandler) dispatchAsyncImageOutbox(ctx context.Context)
 	if repo == nil {
 		return errors.New("async image task repository is unavailable")
 	}
+	runtimeCfg, runtimeErr := h.storage.RuntimeConfig(ctx)
+	if runtimeErr != nil {
+		return runtimeErr
+	}
 	entries, err := repo.ClaimAsyncImageOutbox(ctx, 100, time.Now().UTC().Add(-time.Minute))
 	if err != nil {
 		return err
@@ -117,6 +121,18 @@ func (h *DurableAsyncImageHandler) dispatchAsyncImageOutbox(ctx context.Context)
 				err = nil
 			}
 		case "library_archive":
+			if !runtimeCfg.AutoArchiveToLibrary {
+				message := "automatic asynchronous image library archival is disabled"
+				if archiveRepo, ok := repo.(service.AsyncImageLibraryArchiveOutboxRepository); ok {
+					err = archiveRepo.MarkAsyncImageOutboxTerminal(ctx, entry.ID, entry.ClaimToken, time.Now().UTC(), message)
+				} else {
+					err = repo.MarkAsyncImageOutboxPublished(ctx, entry.ID, entry.ClaimToken, time.Now().UTC())
+				}
+				if err == nil {
+					logger.L().Info("async_image.library_archive_skipped", zap.String("task_id", entry.TaskID))
+					continue
+				}
+			}
 			err = h.dispatchAsyncImageLibraryArchive(ctx, entry.TaskID)
 		case service.AsyncImageOutboxEventPostProcessingResume:
 			err = h.queue.Enqueue(ctx, entry.TaskID)
@@ -183,9 +199,11 @@ func (h *DurableAsyncImageHandler) recoverAsyncImageTasks(ctx context.Context, c
 	if repo == nil {
 		return
 	}
-	if archiveRepo, ok := repo.(service.AsyncImageLibraryArchiveOutboxRepository); ok {
-		if _, err := archiveRepo.EnqueueMissingAsyncImageLibraryArchives(ctx, 200); err != nil && ctx.Err() == nil {
-			logger.L().Warn("async_image.library_archive_backfill_failed", zap.Error(err))
+	if cfg.AutoArchiveToLibrary {
+		if archiveRepo, ok := repo.(service.AsyncImageLibraryArchiveOutboxRepository); ok {
+			if _, err := archiveRepo.EnqueueMissingAsyncImageLibraryArchives(ctx, 200); err != nil && ctx.Err() == nil {
+				logger.L().Warn("async_image.library_archive_backfill_failed", zap.Error(err))
+			}
 		}
 	}
 
@@ -1550,6 +1568,7 @@ func (h *DurableAsyncImageHandler) postProcessAsyncImageTask(ctx context.Context
 		ToStatus:     service.AsyncImageTaskStatusSucceeded,
 		Progress:     &progress, BillingStatus: &billingStatus, ActualCost: &cost,
 		FinishedAt: &finished, ClearError: true, ClearRequestPayload: true, EventType: "task_succeeded",
+		AutoArchiveToLibrary: cfg.AutoArchiveToLibrary,
 	})
 	if err != nil {
 		return asyncImageWorkerDisposition{requeue: true, delay: 3 * time.Second}
@@ -1557,7 +1576,7 @@ func (h *DurableAsyncImageHandler) postProcessAsyncImageTask(ctx context.Context
 	if err := repo.DeleteAsyncImageStagingObjects(ctx, task.TaskID); err != nil {
 		logger.L().Warn("async_image.staging_cleanup_failed", zap.String("task_id", task.TaskID), zap.Error(err))
 	}
-	_ = succeededTask // The succeeded transition atomically schedules library archival through its outbox.
+	_ = succeededTask // Results remain in async_image_results regardless of library policy.
 	return asyncImageWorkerDisposition{}
 }
 
