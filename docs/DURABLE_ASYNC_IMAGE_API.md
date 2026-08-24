@@ -624,6 +624,7 @@ Gemini BB 的 `image_url` 和 SC 的 `image_urls`：
 - DNS 解析会拒绝内网、回环、链路本地、多播、未指定及保留地址，防止 SSRF。
 - SC multipart 上传仍使用字节、像素、MIME 和解码校验，并在完整解码/OSS 前通过 PostgreSQL 两阶段 admission。
 - OpenAI `image_urls` / `images[].image_url` 本身即上游 URL 透传，网关不会本机转 base64。
+- 已知 Gemini Flash Image 模型单任务最多 3 张参考图，Pro Image 模型最多 14 张；提交阶段取模型能力上限与 `async_image.max_reference_images` 全局上限中的较小值。未知模型继续使用全局上限，避免误拒绝自定义模型。
 
 规范化请求体加密写入 PostgreSQL，任务终态会清除完整请求载荷，只保留请求哈希和截断后的提示摘要。提示摘要仍可能包含业务敏感文本，应按敏感数据保护任务库和管理员页面。数据库不保存原始 API Key，Worker 只按 API Key ID 重新加载上下文；对外错误会经过日志脱敏规则处理，不透出上游凭证或内部地址。
 
@@ -633,7 +634,7 @@ Gemini BB 的 `image_url` 和 SC 的 `image_urls`：
 
 | HTTP 状态 | 场景 |
 |---|---|
-| `400` | JSON/multipart 无效、缺少模型或提示、`stream=true`、非法尺寸/比例、上传文件无效 |
+| `400` | JSON/multipart 无效、缺少模型或提示、`stream=true`、非法尺寸/比例、上传文件无效、已知模型参考图数量超限（`too_many_reference_images_for_model`） |
 | `401` | API Key 无效 |
 | `403` | 分组平台不匹配、普通生图关闭或异步生图关闭 |
 | `404` | 任务不存在、方言不匹配，或不是提交任务的同一个 API Key |

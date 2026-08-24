@@ -20,13 +20,13 @@ codegraph init
 
 ## 当前版本快照
 
-记录日期：`2026-08-23`（续更：异步生图增加 `GET /v1/images/tasks_async/stats` API Key 统计接口，返回用户余额、当天请求数、成功数、失败数和成功率；同时保留 `async_image.auto_archive_to_library` 默认关闭的归档策略。此前已加入异步任务中心日期筛选、全局统计、参考图传输策略、分类重试和 80 MP 默认像素上限）。
+记录日期：`2026-08-24`（续更：完成异步生图生产线本地冒烟审查，修复 Gemini 参考图透传预算重复计数，并在提交阶段增加已知 Gemini Flash/Pro Image 模型的参考图数量校验；新增透传预算与模型能力回归用例。后端 Handler/Service/Repository/路由与中间件定向测试、前端异步配置/策略/任务中心相关 19 个用例和类型检查通过。未连接真实上游、OSS、PostgreSQL/Redis 或生产环境。超时后的上游成本归属和输出总量保护仍需下一步补强）。
 
 | 项目 | 当前记录 |
 |---|---|
 | 发布版本文件 | `backend/cmd/server/VERSION`（以仓库文件为准） |
-| 文档记录时 HEAD | `d5797a8c7ff7dab6f1dc4e23f0bbc104a4d101ff`（本轮未提交工作树） |
-| HEAD 描述 | `v0.1.173.30-dirty` |
+| 文档记录时 HEAD | `1059017e031886bbd42bdc928f55cf8c4a0d3b0d` |
+| HEAD 描述 | `v0.1.173.31-1-g1059017-dirty` |
 | 当前及后续默认分支 | `main` |
 | 已合并原作者主线 | 以 `git log` / `upstream/main` 实际为准 |
 | SC 上传安全迁移 | `backend/migrations/187_ZJ_async_image_upload_reservations.sql` |
@@ -42,7 +42,7 @@ codegraph init
 
 ## 近期 Git 更新台账
 
-近期提交和本地验证证据集中记录在 [开发台账.md](开发台账.md)。本轮统计接口代码、路由、测试和新接口文档均在工作树，尚未提交；不能只更新代码而遗漏总览或交接文档。
+近期提交和本地验证证据集中记录在 [开发台账.md](开发台账.md)。当前工作树包含本次 Gemini 透传预算修复、回归测试和三份交接记录；未连接生产环境。
 
 每个任务完成时必须同步更新：
 

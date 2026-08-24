@@ -67,6 +67,16 @@ func (r *AsyncImageNormalizedRequest) ReferenceCount() int {
 	return count
 }
 
+// AsyncImageModelReferenceLimit returns the known per-model reference-image
+// limit. A zero result means the model is not covered by the local capability
+// table and callers should fall back to their configured global guardrail.
+func AsyncImageModelReferenceLimit(platform, model string) int {
+	if !strings.EqualFold(strings.TrimSpace(platform), PlatformGemini) {
+		return 0
+	}
+	return maxBatchImageReferenceImagesForModel(model)
+}
+
 type bbGeminiRequest struct {
 	Model     string            `json:"model"`
 	Stream    bool              `json:"stream"`
@@ -821,9 +831,6 @@ func BuildGeminiAsyncChatBodyWithTransport(ctx context.Context, req *AsyncImageN
 			} else {
 				if err := downloader.ValidatePassthroughURL(rawURL); err != nil {
 					return nil, fmt.Errorf("invalid reference image: %w", err)
-				}
-				if err := downloader.Budget.consumeURL(); err != nil {
-					return nil, err
 				}
 			}
 			content = append(content, map[string]any{

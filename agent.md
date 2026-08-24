@@ -4,12 +4,12 @@
 
 这是 `JasonWangJie/sub2api_forimg` Fork，默认在 `main` 开发。交接基线：
 
-- HEAD：`d5797a8c7ff7dab6f1dc4e23f0bbc104a4d101ff`（本轮代码尚未提交）
-- `git describe --tags --always`：`v0.1.173.30-dirty`
-- `backend/cmd/server/VERSION`：`0.1.173.29`
+- HEAD：`1059017e031886bbd42bdc928f55cf8c4a0d3b0d`
+- `git describe --tags --always`：`v0.1.173.31-1-g1059017-dirty`
+- `backend/cmd/server/VERSION`：`0.1.173.31`
 - 最近功能：异步生图参考图传输/分类重试、可选的异步结果个人图库自动归档，以及 API Key 用户统计接口
-- 本次交接维护：已补齐 `readmenew.md`、`开发台账.md`、`agent.md`，并新增仓库级同步规则
-- 本次任务：新增 `GET /v1/images/tasks_async/stats`，返回 API Key 所属用户余额和服务器时区当天异步任务统计
+- 本次交接维护：完成异步生图生产线本地冒烟审查，并修复 Gemini 参考图透传预算重复计数；工作树包含本次业务修复、回归测试和交接记录
+- 本次审查结论：Gemini 透传预算重复计数已修复并通过回归测试；已知 Gemini Flash/Pro Image 模型级参考图预校验已接入并通过测试；超时成本对账和输出总量保护仍是下一步
 - 生产环境：本轮未连接、未修改、未重启
 
 开始工作前必须运行：
@@ -44,7 +44,7 @@ Get-Content backend\cmd\server\VERSION
 
 ## 已验证证据
 
-后端异步 Handler、Service、Repository 定向测试通过；本次新增统计 Handler、gateway route、middleware 测试通过；前端异步任务 API/date 用例 7/7 通过；`pnpm typecheck`、`git diff --check` 通过。前端构建的 Browserslist 和 chunk 大小提示不是本次失败。真实生产服务器、真实上游账号和真实 OSS 未验证。
+后端 Service 的 Gemini 透传预算与模型能力回归、Handler、Repository、gateway route、middleware 定向测试通过；前端异步配置/策略/任务中心相关 19/19 通过；`pnpm typecheck`、`git diff --check` 通过。Gemini `passthrough` 现在每张参考图只消费一次预算；已知 Flash Image/Pro Image 模型分别执行 3/14 张上限，未知模型继续使用全局上限。真实生产服务器、真实上游账号、Redis、PostgreSQL/testcontainers 和真实 OSS 未验证。
 
 完整 Service 包测试仍有既有外部 OpenAI token 对比用例因网络/API 不可用而失败；这不是本次任务中心改动造成的。
 
@@ -67,3 +67,8 @@ Get-Content backend\cmd\server\VERSION
 - 管理端设置：`frontend/src/views/admin/BackupView.vue`、`frontend/src/views/admin/asyncImageRuntimeConfig.ts`
 - API 契约：`docs/DURABLE_ASYNC_IMAGE_API.md`
 - 对象存储/图库策略：`wiki-new/异步生图架构.md`、`wiki-new/图片图库与对象模型.md`
+
+## 下一步建议
+
+1. 对 `execution_timeout` 建立上游请求 ID、账号用量和本地账单的对账指标；当前墙钟超时会在仍有心跳时把任务标为失败，这是防止重复生成的设计取舍，但尚未做真实上游成本验收。
+2. 对上游返回结果增加总张数、总字节和单任务 staging 峰值保护，再进行隔离环境的 Redis/PostgreSQL/对象存储端到端演练。

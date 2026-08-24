@@ -221,6 +221,10 @@ func (h *DurableAsyncImageHandler) submit(c *gin.Context, protocol, expectedPlat
 		h.writeProtocolError(c, protocol, http.StatusBadRequest, "too_many_reference_images", "reference image count exceeds the configured limit")
 		return
 	}
+	if modelLimit := service.AsyncImageModelReferenceLimit(expectedPlatform, model); modelLimit > 0 && referenceImageCount > modelLimit {
+		h.writeProtocolError(c, protocol, http.StatusBadRequest, "too_many_reference_images_for_model", fmt.Sprintf("reference image count exceeds the model limit of %d", modelLimit))
+		return
+	}
 	if !h.checkSecurityAuditBeforeSubmit(c, apiKey, protocol, expectedPlatform, moderationProtocol, model, moderationBody) {
 		return
 	}

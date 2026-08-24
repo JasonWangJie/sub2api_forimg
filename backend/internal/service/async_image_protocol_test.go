@@ -48,6 +48,13 @@ func TestParseBBGeminiImageRequestRejectsStreamingAndUnsupportedRole(t *testing.
 	require.ErrorContains(t, err, "unsupported message role")
 }
 
+func TestAsyncImageModelReferenceLimitUsesKnownGeminiCapabilities(t *testing.T) {
+	require.Equal(t, 3, AsyncImageModelReferenceLimit(PlatformGemini, "gemini-2.5-flash-image"))
+	require.Equal(t, 14, AsyncImageModelReferenceLimit(PlatformGemini, "gemini-3-pro-image-preview"))
+	require.Zero(t, AsyncImageModelReferenceLimit(PlatformGemini, "custom-gemini-image"))
+	require.Zero(t, AsyncImageModelReferenceLimit(PlatformOpenAI, "gpt-image-2"))
+}
+
 func TestParseSCGeminiImageRequestDimensions(t *testing.T) {
 	req, err := ParseSCGeminiImageRequest([]byte(`{
         "model":"nano-banana-2","prompt":"modern living room",
@@ -299,6 +306,21 @@ func TestBuildGeminiAsyncChatBodyPassesHTTPSURLThrough(t *testing.T) {
       ]}],
       "extra_body":{"google":{"image_config":{"image_size":"2K"}}}
     }`, string(body))
+}
+
+func TestBuildGeminiAsyncChatBodyPassthroughConsumesEachReferenceOnce(t *testing.T) {
+	budget := &AsyncImageReferenceBudget{MaxImages: 2}
+	req := &AsyncImageNormalizedRequest{
+		Model: "gemini-image",
+		Parts: []AsyncImageInputPart{
+			{Type: "image_url", URL: "https://1.1.1.1/ref-1.png"},
+			{Type: "image_url", URL: "https://8.8.8.8/ref-2.png"},
+		},
+	}
+
+	_, err := BuildGeminiAsyncChatBody(context.Background(), req, AsyncImageReferenceDownloader{Budget: budget})
+	require.NoError(t, err)
+	require.Equal(t, 2, budget.images)
 }
 
 func TestBuildGeminiAsyncChatBodyLocalTransportDownloadsReference(t *testing.T) {
