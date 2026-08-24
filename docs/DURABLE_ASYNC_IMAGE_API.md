@@ -13,10 +13,10 @@
 | BB | OpenAI 图生图 | `POST /v1/images/edits_oa` | `202 Accepted` |
 | BB | 查询图片任务 | `GET /v1/images/tasks_async/{task_id}` | `200 OK` |
 | SC | 上传 Gemini 参考图 | `POST /v1/uploads/images_sc` | `200 OK` |
-| SC | Gemini 文生图/图生图 | `POST /v1/images/generations_sc` | `200 OK` |
-| SC | 查询图片任务 | `GET /v1/tasks_sc/{task_id}` | `200 OK` |
+| SC | Gemini 文生图/图生图 | `POST /v1/images/generations_sc` | `202 Accepted` |
+| SC | 查询图片任务 | `GET /v1/images/tasks_async/{task_id}`（`/v1/tasks_sc/{task_id}` 兼容别名） | `200 OK` |
 
-这些路径和状态语义是固定协议，不提供配置项，也不提供省略 `/v1` 的别名。部署时只配置生成绝对链接所需的 `async_image.public_base_url`。
+这些路径和状态语义是固定协议，不提供配置项，也不提供省略 `/v1` 的别名。SC 的 `/v1/tasks_sc/{task_id}` 仅作为查询兼容别名；提交响应统一返回 `/v1/images/tasks_async/{task_id}`。部署时只配置生成绝对链接所需的 `async_image.public_base_url`。
 
 以下行为保持不变：
 
@@ -448,39 +448,30 @@ Idempotency-Key: sc-20260720-001
 
 `0.5K` 限制以及 `auto`（文生图与图生图均可）规则与 BB Gemini 相同。像素尺寸只用于推导 Gemini 支持的宽高比；上游会结合该比例与 `resolution` 生成，不保证返回精确像素尺寸。
 
-成功受理返回 HTTP `200`，且响应体中的 `code` 也是数字 `200`：
+成功受理返回 HTTP `202`，响应体与 OpenAI 异步提交相同：
 
 ```json
 {
-  "code": 200,
-  "message": "success",
-  "data": {
-    "id": "asyncimg_0123456789abcdef",
-    "status": "pending",
-    "type": "image",
-    "progress": 0
-  }
+  "task_id": "asyncimg_0123456789abcdef",
+  "query_url": "https://api.example.com/v1/images/tasks_async/asyncimg_0123456789abcdef"
 }
 ```
 
 ### 7.3 查询任务
 
 ```http
-GET /v1/tasks_sc/{task_id}
+GET /v1/images/tasks_async/{task_id}
 Authorization: Bearer <提交任务的同一个 API_KEY>
 ```
+
+`GET /v1/tasks_sc/{task_id}` 仍可作为 Gemini SC 查询兼容别名，响应结构相同。
 
 排队中：
 
 ```json
 {
-  "code": 200,
-  "data": {
-    "id": "asyncimg_0123456789abcdef",
-    "status": "pending",
-    "progress": 0,
-    "type": "image"
-  }
+  "status": "queued",
+  "task_id": "asyncimg_0123456789abcdef"
 }
 ```
 
@@ -488,13 +479,8 @@ Authorization: Bearer <提交任务的同一个 API_KEY>
 
 ```json
 {
-  "code": 200,
-  "data": {
-    "id": "asyncimg_0123456789abcdef",
-    "status": "processing",
-    "progress": 60,
-    "type": "image"
-  }
+  "status": "processing",
+  "task_id": "asyncimg_0123456789abcdef"
 }
 ```
 
@@ -502,49 +488,27 @@ Authorization: Bearer <提交任务的同一个 API_KEY>
 
 ```json
 {
-  "code": 200,
-  "data": {
-    "id": "asyncimg_0123456789abcdef",
-    "status": "completed",
-    "progress": 100,
-    "type": "image",
-    "result": {
-      "images": [
-        {
-          "url": [
-            "https://storage.example.com/images/results/output-1.png"
-          ],
-          "expires_at": 1784552400
-        }
-      ],
-      "videos": []
-    }
-  }
+  "status": "succeeded",
+  "task_id": "asyncimg_0123456789abcdef",
+  "data": [
+    { "url": "https://storage.example.com/images/results/output-1.png" }
+  ]
 }
 ```
 
-`result.images[].url` 始终是字符串数组。使用私有桶时，`expires_at` 是该次查询新生成的签名 URL 的实际 Unix 过期秒数；使用 `image_storage.public_base_url` 公开直链时为 `0`。`videos` 固定为空数组，仅用于保持 SC 图片响应结构，不表示本期支持视频。
+SC 查询与 BB 共用 `status`、`task_id`、`data[].url` 结构。私有存储返回的签名 URL 有效期由 `async_image.signed_url_expiry_seconds` 控制；公开地址可返回稳定 URL。
 
 失败：
 
 ```json
 {
-  "code": 200,
-  "data": {
-    "id": "asyncimg_0123456789abcdef",
-    "status": "failed",
-    "progress": 60,
-    "type": "image",
-    "error": {
-      "message": "image generation failed",
-      "type": "task_failed"
-    },
-    "failReason": "image generation failed"
-  }
+  "status": "failed",
+  "task_id": "asyncimg_0123456789abcdef",
+  "fail_reason": "image generation failed"
 }
 ```
 
-查询成功、处理中和任务失败都使用 HTTP `200`。以 `data.status` 为准：`pending` / `processing` 继续轮询，`completed` 消费图片，`failed` 停止并读取错误。
+查询成功、处理中和任务失败都使用 HTTP `200`。以顶层 `status` 为准：`queued` / `processing` 继续轮询，`succeeded` 消费图片，`failed` 停止并读取 `fail_reason`。
 
 ## 8. 状态、恢复与成功条件
 
@@ -624,7 +588,7 @@ Gemini BB 的 `image_url` 和 SC 的 `image_urls`：
 - DNS 解析会拒绝内网、回环、链路本地、多播、未指定及保留地址，防止 SSRF。
 - SC multipart 上传仍使用字节、像素、MIME 和解码校验，并在完整解码/OSS 前通过 PostgreSQL 两阶段 admission。
 - OpenAI `image_urls` / `images[].image_url` 本身即上游 URL 透传，网关不会本机转 base64。
-- 已知 Gemini Flash Image 模型单任务最多 3 张参考图，Pro Image 模型最多 14 张；提交阶段取模型能力上限与 `async_image.max_reference_images` 全局上限中的较小值。未知模型继续使用全局上限，避免误拒绝自定义模型。
+- OpenAI 与 Gemini 都受 `async_image.max_reference_images` 全局参考图保护；已知 Gemini Flash Image 模型单任务最多 3 张参考图，Pro Image 模型最多 14 张，提交阶段取模型能力上限与全局上限中的较小值。未知 Gemini 模型继续使用全局上限，避免误拒绝自定义模型。
 
 规范化请求体加密写入 PostgreSQL，任务终态会清除完整请求载荷，只保留请求哈希和截断后的提示摘要。提示摘要仍可能包含业务敏感文本，应按敏感数据保护任务库和管理员页面。数据库不保存原始 API Key，Worker 只按 API Key ID 重新加载上下文；对外错误会经过日志脱敏规则处理，不透出上游凭证或内部地址。
 

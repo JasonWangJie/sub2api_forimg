@@ -20,13 +20,13 @@ codegraph init
 
 ## 当前版本快照
 
-记录日期：`2026-08-24`（续更：完成异步生图生产线本地冒烟审查，修复 Gemini 参考图透传预算重复计数，并在提交阶段增加已知 Gemini Flash/Pro Image 模型的参考图数量校验；新增透传预算与模型能力回归用例。后端 Handler/Service/Repository/路由与中间件定向测试、前端异步配置/策略/任务中心相关 19 个用例和类型检查通过。未连接真实上游、OSS、PostgreSQL/Redis 或生产环境。超时后的上游成本归属和输出总量保护仍需下一步补强）。
+记录日期：`2026-08-24`（续更：同步 `/guides/async-image-api` 与持久化异步生图实际契约，补齐 Gemini BB、Gemini SC 上传、OpenAI `edits_oa`、SC 查询别名、模型级参考图限制、错误码、幂等、重试和存储 URL 有效期说明；同时修正 `docs/DURABLE_ASYNC_IMAGE_API.md` 中 SC 旧状态/响应体。前端类型检查、ESLint 和生产构建通过；未连接真实上游、OSS、PostgreSQL/Redis 或生产环境）。
 
 | 项目 | 当前记录 |
 |---|---|
 | 发布版本文件 | `backend/cmd/server/VERSION`（以仓库文件为准） |
-| 文档记录时 HEAD | `1059017e031886bbd42bdc928f55cf8c4a0d3b0d` |
-| HEAD 描述 | `v0.1.173.31-1-g1059017-dirty` |
+| 文档记录时 HEAD | `81111d3fc2b9cae415ddf561d69e1a26075fac54` |
+| HEAD 描述 | `v0.1.173.32-dirty` |
 | 当前及后续默认分支 | `main` |
 | 已合并原作者主线 | 以 `git log` / `upstream/main` 实际为准 |
 | SC 上传安全迁移 | `backend/migrations/187_ZJ_async_image_upload_reservations.sql` |
@@ -42,7 +42,7 @@ codegraph init
 
 ## 近期 Git 更新台账
 
-近期提交和本地验证证据集中记录在 [开发台账.md](开发台账.md)。当前工作树包含本次 Gemini 透传预算修复、回归测试和三份交接记录；未连接生产环境。
+近期提交和本地验证证据集中记录在 [开发台账.md](开发台账.md)。当前工作树包含本次 API 页面/静态契约同步及三份交接记录；未连接生产环境。
 
 每个任务完成时必须同步更新：
 
@@ -223,6 +223,7 @@ codegraph init
 | [wiki-new/文档索引.md](wiki-new/文档索引.md) | 二次开发 Wiki 入口和真值顺序 |
 | [wiki-new/异步生图架构.md](wiki-new/异步生图架构.md) | 持久异步任务状态机和恢复边界 |
 | [异步生图接口文档new.md](异步生图接口文档new.md) | 下游异步接口、鉴权、轮询和当日统计接口 |
+| [docs/DURABLE_ASYNC_IMAGE_API.md](docs/DURABLE_ASYNC_IMAGE_API.md) | 持久化异步生图 BB/SC 完整协议、限制、错误和存储约定 |
 | [wiki-new/接口契约.md](wiki-new/接口契约.md) | 下游异步协议与站内图片 API |
 | [wiki-new/对象存储与保留策略.md](wiki-new/对象存储与保留策略.md) | OSS、对象引用、签名和保留策略 |
 | [wiki-new/图片工作台.md](wiki-new/图片工作台.md) | Key 分组驱动的工作台实时/异步分流 |

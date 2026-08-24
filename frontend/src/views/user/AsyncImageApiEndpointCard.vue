@@ -41,7 +41,7 @@
     <h4 class="api-h3">{{ labels.requestBody }}</h4>
     <div class="api-code-block">
       <div class="api-code-toolbar">
-        <span>JSON</span>
+        <span>{{ block.bodyLabel || 'JSON' }}</span>
         <button type="button" class="api-copy" @click="$emit('copy', block.bodyExample)">
           {{ labels.copy }}
         </button>
@@ -49,7 +49,7 @@
       <pre><code>{{ block.bodyExample }}</code></pre>
     </div>
 
-    <h4 class="api-h3">{{ labels.acceptResponse }}</h4>
+    <h4 class="api-h3">{{ block.responseLabel || labels.acceptResponse }}</h4>
     <div class="api-code-block">
       <pre><code>{{ block.acceptExample }}</code></pre>
     </div>
@@ -74,6 +74,8 @@ defineProps<{
     contentType?: string
     params: Array<{ name: string; required: boolean; type: string; desc: string }>
     bodyExample: string
+    bodyLabel?: string
+    responseLabel?: string
     acceptExample: string
     notes?: string[]
   }

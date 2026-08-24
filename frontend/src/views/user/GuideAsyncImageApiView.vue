@@ -41,7 +41,7 @@
                 <p class="api-subtitle">{{ doc.subtitle }}</p>
                 <div class="mt-5 flex flex-wrap gap-2">
                   <span class="api-chip">task_id</span>
-                  <span class="api-chip">{{ isEn ? 'OSS · 1 day' : 'OSS · 有效期 1 天' }}</span>
+                  <span class="api-chip">{{ isEn ? 'Storage-configured URLs' : '按存储配置返回链接' }}</span>
                   <span class="api-chip">OpenAI / Gemini</span>
                 </div>
                 <ul class="api-bullet-list mt-6">
@@ -70,8 +70,8 @@
                 <p class="api-lead">
                   {{
                     isEn
-                      ? 'POST generations_oa for both text-to-image and image-to-image (route by image_urls / multipart image). Accept: HTTP 202 + task_id.'
-                      : 'POST generations_oa 同时覆盖文生图与图生图（按 image_urls / multipart image 分流）。受理成功：HTTP 202 + task_id。'
+                      ? 'Use generations_oa for text-to-image and edits_oa for explicit image edits. generations_oa also promotes to edit mode when usable reference inputs are present. Accept: HTTP 202 + task_id.'
+                      : '文生图使用 generations_oa，明确图生图使用 edits_oa；generations_oa 带有效参考图时也会自动进入编辑模式。受理成功：HTTP 202 + task_id。'
                   }}
                 </p>
                 <AsyncImageApiEndpointCard
@@ -90,26 +90,58 @@
                 />
               </section>
 
-              <section id="gemini" class="api-section">
-                <h2 class="api-h2">{{ doc.toc[5].label }}</h2>
+              <section id="gemini-bb" class="api-section">
+                <h2 class="api-h2">{{ isEn ? 'Gemini BB' : 'Gemini BB' }}</h2>
                 <p class="api-lead">
                   {{
                     isEn
-                      ? 'POST generations_sc for both text-to-image and image-to-image. Use image_urls for references; size accepts an aspect ratio (e.g. 3:2) or pixel dimensions (e.g. 1080x1350, mapped to 4:5). Accept: HTTP 202 (same body as OpenAI async).'
-                      : '统一路径 generations_sc：文生图 / 图生图。图生图传 image_urls；size 可传宽高比（如 3:2）或像素尺寸（如 1080x1350，会映射为 4:5）。受理成功：HTTP 202（与 OpenAI 异步同格式）。'
+                      ? 'Chat Completions-compatible Gemini endpoint for text-to-image and image-to-image. Use image_url content parts for references; stream is disabled.'
+                      : 'Chat Completions 兼容的 Gemini 入口，文生图和图生图都使用同一路径；参考图放入 image_url content part，异步接口不支持流式。'
+                  }}
+                </p>
+                <AsyncImageApiEndpointCard
+                  class="mt-4"
+                  :block="doc.geminiBBT2I"
+                  :labels="doc.labels"
+                  :desc-header="descHeader"
+                  @copy="copyText"
+                />
+                <AsyncImageApiEndpointCard
+                  class="mt-6"
+                  :block="doc.geminiBBI2I"
+                  :labels="doc.labels"
+                  :desc-header="descHeader"
+                  @copy="copyText"
+                />
+              </section>
+
+              <section id="gemini-sc" class="api-section">
+                <h2 class="api-h2">{{ isEn ? 'Gemini SC' : 'Gemini SC' }}</h2>
+                <p class="api-lead">
+                  {{
+                    isEn
+                      ? 'JSON-oriented Gemini endpoint for text-to-image and image-to-image. Use image_urls for references and size for ratio or pixel-size aliases. Accept: HTTP 202.'
+                      : 'JSON 风格的 Gemini 入口，文生图和图生图共用路径；图生图通过 image_urls 传参考图，size 支持比例或像素尺寸别名。受理成功：HTTP 202。'
                   }}
                 </p>
                 <AsyncImageApiEndpointCard
                   class="mt-4"
                   :block="doc.geminiT2I"
-                  :labels="geminiLabels"
+                  :labels="doc.labels"
                   :desc-header="descHeader"
                   @copy="copyText"
                 />
                 <AsyncImageApiEndpointCard
                   class="mt-6"
                   :block="doc.geminiI2I"
-                  :labels="geminiLabels"
+                  :labels="doc.labels"
+                  :desc-header="descHeader"
+                  @copy="copyText"
+                />
+                <AsyncImageApiEndpointCard
+                  class="mt-6"
+                  :block="doc.scUpload"
+                  :labels="doc.labels"
                   :desc-header="descHeader"
                   @copy="copyText"
                 />
@@ -125,6 +157,9 @@
                   </div>
                 </div>
                 <p class="api-lead mt-3">{{ doc.query.summary }}</p>
+                <p class="api-note mt-2">
+                  {{ isEn ? 'Gemini SC compatibility alias: ' : 'Gemini SC 兼容查询别名：' }}<code>{{ doc.query.aliasPath }}</code>
+                </p>
 
                 <h3 class="api-h3">{{ doc.labels.statusTable }}</h3>
                 <div class="api-table-wrap">
@@ -158,6 +193,33 @@
                     <div class="api-code-toolbar"><span>failed</span></div>
                     <pre><code>{{ doc.query.failedExample }}</code></pre>
                   </div>
+                </div>
+              </section>
+
+              <section id="limits" class="api-section">
+                <h2 class="api-h2">{{ doc.limits.title }}</h2>
+                <ul class="api-bullet-list">
+                  <li v-for="(b, i) in doc.limits.bullets" :key="i">{{ b }}</li>
+                </ul>
+              </section>
+
+              <section id="errors" class="api-section">
+                <h2 class="api-h2">{{ doc.errors.title }}</h2>
+                <div class="api-table-wrap">
+                  <table class="api-table">
+                    <thead>
+                      <tr>
+                        <th>HTTP</th>
+                        <th>{{ descHeader }}</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <tr v-for="row in doc.errors.rows" :key="row.status">
+                        <td><code>{{ row.status }}</code></td>
+                        <td>{{ row.meaning }}</td>
+                      </tr>
+                    </tbody>
+                  </table>
                 </div>
               </section>
 
@@ -211,10 +273,6 @@ const apiRoot = computed(() => {
 const isEn = computed(() => String(locale.value).toLowerCase().startsWith('en'))
 const doc = computed(() => getAsyncImageApiDoc(String(locale.value), apiRoot.value))
 const descHeader = computed(() => (isEn.value ? 'Description' : '说明'))
-const geminiLabels = computed(() => ({
-  ...doc.value.labels,
-  acceptResponse: isEn.value ? 'Accept response (200)' : '受理响应（200）',
-}))
 
 copyBtn.value = getAsyncImageApiDoc(String(locale.value), apiRoot.value).labels.copy
 

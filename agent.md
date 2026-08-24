@@ -4,12 +4,12 @@
 
 这是 `JasonWangJie/sub2api_forimg` Fork，默认在 `main` 开发。交接基线：
 
-- HEAD：`1059017e031886bbd42bdc928f55cf8c4a0d3b0d`
-- `git describe --tags --always`：`v0.1.173.31-1-g1059017-dirty`
+- HEAD：`81111d3fc2b9cae415ddf561d69e1a26075fac54`
+- `git describe --tags --always`：`v0.1.173.32-dirty`
 - `backend/cmd/server/VERSION`：`0.1.173.31`
 - 最近功能：异步生图参考图传输/分类重试、可选的异步结果个人图库自动归档，以及 API Key 用户统计接口
-- 本次交接维护：完成异步生图生产线本地冒烟审查，并修复 Gemini 参考图透传预算重复计数；工作树包含本次业务修复、回归测试和交接记录
-- 本次审查结论：Gemini 透传预算重复计数已修复并通过回归测试；已知 Gemini Flash/Pro Image 模型级参考图预校验已接入并通过测试；超时成本对账和输出总量保护仍是下一步
+- 本次交接维护：同步 `/guides/async-image-api` 与 `docs/DURABLE_ASYNC_IMAGE_API.md` 到当前 BB/SC 路由、状态、限制和存储契约；工作树包含本次页面/文档改动和交接记录
+- 本次审查结论：页面已覆盖 Gemini BB `completions_gm`、Gemini SC 上传、OpenAI `edits_oa`、统一查询与 `/tasks_sc` 别名、模型级参考图限制、幂等/重试、错误和存储 URL 有效期；超时成本对账、输出总量保护和真实端到端验收仍是下一步
 - 生产环境：本轮未连接、未修改、未重启
 
 开始工作前必须运行：
@@ -33,6 +33,8 @@ Get-Content backend\cmd\server\VERSION
 - `backend/internal/repository/async_image_task_repo.go`
 - `frontend/src/views/admin/BackupView.vue`
 - `backend/internal/config/config.go`（`config.yaml` 兜底）
+- `frontend/src/views/user/GuideAsyncImageApiView.vue` 与 `frontend/src/views/user/guideAsyncImageApiContent.ts`（用户可见异步生图 API 页面）
+- `docs/DURABLE_ASYNC_IMAGE_API.md`（静态持久化异步协议）
 
 功能包括 OpenAI/Gemini 参考图三种传输策略、data URI 本地校验、OpenAI multipart、Gemini inlineData、三类独立重试计数、指数退避与抖动、`Retry-After`、混合回退阶段持久化，以及迁移 `backend/migrations/223_ZJ_async_image_reference_retry_state.sql`。
 
@@ -44,7 +46,7 @@ Get-Content backend\cmd\server\VERSION
 
 ## 已验证证据
 
-后端 Service 的 Gemini 透传预算与模型能力回归、Handler、Repository、gateway route、middleware 定向测试通过；前端异步配置/策略/任务中心相关 19/19 通过；`pnpm typecheck`、`git diff --check` 通过。Gemini `passthrough` 现在每张参考图只消费一次预算；已知 Flash Image/Pro Image 模型分别执行 3/14 张上限，未知模型继续使用全局上限。真实生产服务器、真实上游账号、Redis、PostgreSQL/testcontainers 和真实 OSS 未验证。
+后端 Service 的 Gemini 透传预算与模型能力回归、Handler、Repository、gateway route、middleware 定向测试通过；前端异步配置/策略/任务中心相关 19/19 通过；本次页面/静态文档同步后 `pnpm typecheck`、目标文件 ESLint、`pnpm build`、`git diff --check` 通过。Gemini `passthrough` 现在每张参考图只消费一次预算；已知 Flash Image/Pro Image 模型分别执行 3/14 张上限，未知模型继续使用全局上限。真实生产服务器、真实上游账号、Redis、PostgreSQL/testcontainers 和真实 OSS 未验证。
 
 完整 Service 包测试仍有既有外部 OpenAI token 对比用例因网络/API 不可用而失败；这不是本次任务中心改动造成的。
 
@@ -66,6 +68,7 @@ Get-Content backend\cmd\server\VERSION
 - 任务字段和迁移：`backend/internal/service/async_image_task.go`、`backend/migrations/223_ZJ_async_image_reference_retry_state.sql`
 - 管理端设置：`frontend/src/views/admin/BackupView.vue`、`frontend/src/views/admin/asyncImageRuntimeConfig.ts`
 - API 契约：`docs/DURABLE_ASYNC_IMAGE_API.md`
+- 用户 API 页面：`/guides/async-image-api`（`frontend/src/views/user/GuideAsyncImageApiView.vue`）
 - 对象存储/图库策略：`wiki-new/异步生图架构.md`、`wiki-new/图片图库与对象模型.md`
 
 ## 下一步建议
