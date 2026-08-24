@@ -20,13 +20,13 @@ codegraph init
 
 ## 当前版本快照
 
-记录日期：`2026-08-24`（续更：同步 `/guides/async-image-api` 与持久化异步生图实际契约，补齐 Gemini BB、Gemini SC 上传、OpenAI `edits_oa`、SC 查询别名、模型级参考图限制、错误码、幂等、重试和存储 URL 有效期说明；同时修正 `docs/DURABLE_ASYNC_IMAGE_API.md` 中 SC 旧状态/响应体。前端类型检查、ESLint 和生产构建通过；未连接真实上游、OSS、PostgreSQL/Redis 或生产环境）。
+记录日期：`2026-08-25`（续更：异步账号尝试审计、Gemini 快速换号、容量重试排除最近失败账号、上游超时对账待处理状态和 Worker 实际并发启动日志；前后端定向测试、类型检查和生产构建通过；未部署或重启生产）。
 
 | 项目 | 当前记录 |
 |---|---|
 | 发布版本文件 | `backend/cmd/server/VERSION`（以仓库文件为准） |
-| 文档记录时 HEAD | `81111d3fc2b9cae415ddf561d69e1a26075fac54` |
-| HEAD 描述 | `v0.1.173.32-dirty` |
+| 文档记录时 HEAD | `c296cd167800a3723b93f03f107032e4e55cc887` |
+| HEAD 描述 | `v0.1.173.33-1-gc296cd1-dirty` |
 | 当前及后续默认分支 | `main` |
 | 已合并原作者主线 | 以 `git log` / `upstream/main` 实际为准 |
 | SC 上传安全迁移 | `backend/migrations/187_ZJ_async_image_upload_reservations.sql` |
@@ -34,6 +34,7 @@ codegraph init
 | 结果上传意图迁移 | `backend/migrations/189_ZJ_async_image_result_upload_intents.sql` |
 | API Key 双平台生图映射 | `backend/migrations/221_ZJ_api_key_platform_groups.sql` |
 | 异步参考图与分类重试迁移 | `backend/migrations/223_ZJ_async_image_reference_retry_state.sql` |
+| 异步账号尝试与超时对账迁移 | `backend/migrations/224_ZJ_async_image_account_attempts.sql` |
 | 异步图库自动归档 | `async_image.auto_archive_to_library`，默认 `false`；结果对象和查询 URL 不受影响 |
 | 异步生图用户统计 | `GET /v1/images/tasks_async/stats`；按服务器时区统计用户当天全部异步任务 |
 | Fork CI | 发版时在 `JasonWangJie/sub2api_forimg/actions` 核对实际结果 |
@@ -251,6 +252,14 @@ codegraph init
 ```text
 这是 JasonWangJie/sub2api_forimg Fork，当前及后续默认在 main 开发和推送。先读 wiki-new/文档索引.md、当前状态与完成度.md、测试与验收记录.md、智能助手交接清单.md，以及 deploy/FORK_RELEASE.md 与 .cursor/rules/fork-release-deploy.mdc（发行版一键安装身份；合并 upstream 不得改回 Wei-Shaw）。Fork 自研 SQL 使用 NNN_ZJ_description.sql；182_ZJ 是初版图片广场，185_ZJ 是持久异步任务，186_ZJ 是统一图片对象/个人图库/审核广场，187_ZJ 是 SC 上传 PostgreSQL admission/幂等/恢复，188_ZJ 是本机延期投稿（审核通过后再同步 OSS），189_ZJ 是异步结果上传意图；上游 182_prompt、183、184 保持原名。工作台实时结果默认本机；投稿只交元数据；模式只能由 Key 当前分组决定；默认私有，公开需审核；计费必须复用现有链路。OSS key 按年月日分区。发布、安装、升级、在线更新和 GHCR 镜像必须使用 JasonWangJie/sub2api_forimg；上游检查继续使用 Wei-Shaw/sub2api。
 ```
+
+## 2026-08-25 异步账号切换与超时观测
+
+- 新增 `async_image_tasks.account_attempts`、`attempted_account_ids` 和 `reconciliation_status`，每次异步账号选择、成功或失败都会记录账号 ID、账号名称、状态码和可获得的上游请求 ID。
+- Gemini 异步请求默认单账号只尝试一次，网络超时/连接错误立即进入换号；`gemini_async_max_account_switches` 默认 3，可在 `/admin/backups/image-storage` 的高级异步参数中配置，任务总时长仍受 `execution_timeout_seconds` 限制。
+- 容量重试会优先排除本任务最近失败的账号，全部排除时自动放宽一次；耗尽提示包含本轮实际尝试账号数。上游超时和中断统一标记 `execution_unknown`、`reconciliation_status=pending`，不会盲目重放。
+- Worker 启动日志新增实际 `worker_concurrency`；此前只读核实生产数据库设置为 50、配置文件兜底为 8，本轮未重启生产，代码日志尚未在生产生效。
+
 
 
 ### 启动方式：

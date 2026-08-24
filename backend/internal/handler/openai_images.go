@@ -145,6 +145,7 @@ func (h *OpenAIGatewayHandler) Images(c *gin.Context) {
 
 	sessionHash := h.gatewayService.GenerateExplicitSessionHash(c, body)
 	requestCtx := service.WithOpenAIImagesEndpoint(service.WithOpenAIImageGenerationIntent(c.Request.Context()))
+	asyncImageGeneration := asyncImageUsageCaptureFromContext(c.Request.Context()) != nil
 
 	maxAccountSwitches := h.maxAccountSwitches
 	switchCount := 0
@@ -152,6 +153,7 @@ func (h *OpenAIGatewayHandler) Images(c *gin.Context) {
 	failedAccountIDs := make(map[int64]struct{})
 	sameAccountRetryCount := make(map[int64]int)
 	var lastFailoverErr *service.UpstreamFailoverError
+	historicalExclusionsRetried := false
 	stopJSONKeepalive := func() {}
 	jsonKeepaliveStarted := false
 	defer func() { stopJSONKeepalive() }()
@@ -159,16 +161,29 @@ func (h *OpenAIGatewayHandler) Images(c *gin.Context) {
 
 	for {
 		reqLog.Debug("openai.images.account_selecting", zap.Int("excluded_account_count", len(failedAccountIDs)))
+		selectionExcludedIDs := make(map[int64]struct{}, len(failedAccountIDs)+3)
+		for id := range failedAccountIDs {
+			selectionExcludedIDs[id] = struct{}{}
+		}
+		if !historicalExclusionsRetried {
+			for id := range service.AsyncImageExcludedAccountIDs(requestCtx) {
+				selectionExcludedIDs[id] = struct{}{}
+			}
+		}
 		selection, scheduleDecision, err := h.gatewayService.SelectAccountWithSchedulerForImages(
 			requestCtx,
 			apiKey.GroupID,
 			sessionHash,
 			routingModel,
-			failedAccountIDs,
+			selectionExcludedIDs,
 			parsed.RequiredCapability,
 			parsed.SizeTier,
 		)
 		if err != nil {
+			if len(failedAccountIDs) == 0 && len(service.AsyncImageExcludedAccountIDs(requestCtx)) > 0 && !historicalExclusionsRetried {
+				historicalExclusionsRetried = true
+				continue
+			}
 			if failoverClientGone(c) {
 				reqLog.Info("openai.images.account_select_aborted_client_disconnected", zap.Error(err))
 				return
@@ -222,6 +237,11 @@ func (h *OpenAIGatewayHandler) Images(c *gin.Context) {
 		sessionHash = ensureOpenAIPoolModeSessionHash(sessionHash, account)
 		reqLog.Debug("openai.images.account_selected", zap.Int64("account_id", account.ID), zap.String("account_name", account.Name))
 		setOpsSelectedAccount(c, account.ID, account.Platform)
+		if asyncImageGeneration {
+			service.RecordAsyncImageAccountAttempt(c.Request.Context(), service.AsyncImageAccountAttempt{
+				AccountID: account.ID, AccountName: account.Name, Status: service.AsyncImageAccountAttemptSelected,
+			})
+		}
 
 		accountReleaseFunc, slotResult := h.acquireResponsesAccountSlot(c, apiKey.GroupID, sessionHash, selection, parsed.Stream, &streamStarted, reqLog)
 		if slotResult == openAISlotAcquireProfitVetoed {
@@ -288,6 +308,12 @@ func (h *OpenAIGatewayHandler) Images(c *gin.Context) {
 				}
 				var failoverErr *service.UpstreamFailoverError
 				if errors.As(err, &failoverErr) {
+					if asyncImageGeneration {
+						service.RecordAsyncImageAccountAttempt(c.Request.Context(), service.AsyncImageAccountAttempt{
+							AccountID: account.ID, AccountName: account.Name, Status: service.AsyncImageAccountAttemptFailed,
+							StatusCode: failoverErr.StatusCode, UpstreamRequestID: upstreamRequestIDFromFailover(failoverErr), Error: failoverErr.Error(),
+						})
+					}
 					h.gatewayService.ReportOpenAIAccountScheduleResult(account.ID, openAIAccountScheduleModel(requestCtx, account, requestModel, result), false, nil)
 					if service.OpenAIImagesJSONKeepaliveAdjustedWrittenSize(c) != writerSizeBeforeForward {
 						reqLog.Warn("openai.images.upstream_failover_skipped_after_flush",
@@ -342,6 +368,11 @@ func (h *OpenAIGatewayHandler) Images(c *gin.Context) {
 					)
 					continue
 				}
+				if asyncImageGeneration {
+					service.RecordAsyncImageAccountAttempt(c.Request.Context(), service.AsyncImageAccountAttempt{
+						AccountID: account.ID, AccountName: account.Name, Status: service.AsyncImageAccountAttemptFailed, Error: err.Error(),
+					})
+				}
 				h.gatewayService.ReportOpenAIAccountScheduleResult(account.ID, openAIAccountScheduleModel(requestCtx, account, requestModel, result), false, nil)
 				upstreamErrorAlreadyCommunicated := openAIForwardErrorAlreadyCommunicated(c, writerSizeBeforeForward, err)
 				wroteFallback := false
@@ -363,6 +394,11 @@ func (h *OpenAIGatewayHandler) Images(c *gin.Context) {
 			}
 		}
 		if result != nil {
+			if asyncImageGeneration {
+				service.RecordAsyncImageAccountAttempt(c.Request.Context(), service.AsyncImageAccountAttempt{
+					AccountID: account.ID, AccountName: account.Name, Status: service.AsyncImageAccountAttemptSucceeded, UpstreamRequestID: result.RequestID,
+				})
+			}
 			// 排除 spark 影子:其 codex_* 仅由 QueryUsage(/wham/usage bengalfox)更新(外审第7轮 P1)。
 			if account.Type == service.AccountTypeOAuth && !account.IsShadow() {
 				h.gatewayService.UpdateCodexUsageSnapshotFromHeaders(c.Request.Context(), account.ID, result.ResponseHeaders)

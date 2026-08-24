@@ -138,6 +138,7 @@ export interface AsyncImageRuntimeConfig {
   retry_backoff_seconds: number
   openai_reference_transport_mode: 'passthrough' | 'local' | 'passthrough_fallback_local'
   gemini_reference_transport_mode: 'passthrough' | 'local' | 'passthrough_fallback_local'
+  gemini_async_max_account_switches: number
   reference_fetch_max_retries: number
   reference_fetch_retry_base_seconds: number
   reference_fetch_retry_max_seconds: number

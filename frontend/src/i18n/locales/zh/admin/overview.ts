@@ -172,6 +172,8 @@ export default {
         referenceTransportTitle: '参考图传输策略',
         openaiReferenceTransportMode: 'OpenAI 参考图传输',
         geminiReferenceTransportMode: 'Gemini 参考图传输',
+        geminiAsyncMaxAccountSwitches: 'Gemini 异步换号上限',
+        geminiAsyncMaxAccountSwitchesHint: '超时或网络错误会提前切换账号，不在同一账号重复等待',
         referenceTransportPassthrough: 'URL 原样透传',
         referenceTransportLocalMultipart: '本地预下载并转 multipart',
         referenceTransportFallbackMultipart: '先透传，抓取失败后回退 multipart',

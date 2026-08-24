@@ -229,6 +229,7 @@ type AsyncImageRuntimeConfig struct {
 	RetryBackoffSeconds               int      `json:"retry_backoff_seconds"`
 	OpenAIReferenceTransportMode      string   `json:"openai_reference_transport_mode"`
 	GeminiReferenceTransportMode      string   `json:"gemini_reference_transport_mode"`
+	GeminiAsyncMaxAccountSwitches     int      `json:"gemini_async_max_account_switches"`
 	ReferenceFetchMaxRetries          int      `json:"reference_fetch_max_retries"`
 	ReferenceFetchRetryBaseSeconds    int      `json:"reference_fetch_retry_base_seconds"`
 	ReferenceFetchRetryMaxSeconds     int      `json:"reference_fetch_retry_max_seconds"`
@@ -1025,6 +1026,7 @@ func asyncRuntimeFromConfig(in config.AsyncImageConfig) AsyncImageRuntimeConfig 
 	if strings.TrimSpace(in.GeminiReferenceTransportMode) != "" {
 		out.GeminiReferenceTransportMode = in.GeminiReferenceTransportMode
 	}
+	out.GeminiAsyncMaxAccountSwitches = in.GeminiAsyncMaxAccountSwitches
 	out.ReferenceFetchMaxRetries = in.ReferenceFetchMaxRetries
 	if in.ReferenceFetchRetryBaseSeconds > 0 {
 		out.ReferenceFetchRetryBaseSeconds = in.ReferenceFetchRetryBaseSeconds
@@ -1083,6 +1085,7 @@ func defaultAsyncImageRuntimeConfig() AsyncImageRuntimeConfig {
 		RetryBackoffSeconds:               30,
 		OpenAIReferenceTransportMode:      AsyncImageReferenceTransportPassthroughFallbackLocal,
 		GeminiReferenceTransportMode:      AsyncImageReferenceTransportPassthrough,
+		GeminiAsyncMaxAccountSwitches:     3,
 		ReferenceFetchMaxRetries:          2,
 		ReferenceFetchRetryBaseSeconds:    15,
 		ReferenceFetchRetryMaxSeconds:     60,
@@ -1165,6 +1168,11 @@ func normalizeAsyncImageRuntimeConfig(in *AsyncImageRuntimeConfig) {
 	}
 	in.OpenAIReferenceTransportMode = normalizeAsyncImageReferenceTransportMode(in.OpenAIReferenceTransportMode, defaults.OpenAIReferenceTransportMode)
 	in.GeminiReferenceTransportMode = normalizeAsyncImageReferenceTransportMode(in.GeminiReferenceTransportMode, defaults.GeminiReferenceTransportMode)
+	if in.GeminiAsyncMaxAccountSwitches < 0 {
+		in.GeminiAsyncMaxAccountSwitches = 0
+	} else if in.GeminiAsyncMaxAccountSwitches > 16 {
+		in.GeminiAsyncMaxAccountSwitches = 16
+	}
 	if in.ReferenceFetchMaxRetries < 0 {
 		in.ReferenceFetchMaxRetries = 0
 	} else if in.ReferenceFetchMaxRetries > maxAsyncImageReferenceFetchRetries {

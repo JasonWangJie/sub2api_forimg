@@ -172,6 +172,8 @@ export default {
         referenceTransportTitle: 'Reference image transport',
         openaiReferenceTransportMode: 'OpenAI reference transport',
         geminiReferenceTransportMode: 'Gemini reference transport',
+        geminiAsyncMaxAccountSwitches: 'Gemini async account switches',
+        geminiAsyncMaxAccountSwitchesHint: 'Network timeouts fail over early instead of waiting repeatedly on one account.',
         referenceTransportPassthrough: 'Pass URL through',
         referenceTransportLocalMultipart: 'Download locally as multipart',
         referenceTransportFallbackMultipart: 'Pass through, then fall back to multipart',

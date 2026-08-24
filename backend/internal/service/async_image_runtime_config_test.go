@@ -23,6 +23,7 @@ func TestAsyncImageRuntimeConfigOldJSONGetsRetryDefaults(t *testing.T) {
 	require.Equal(t, int64(40_000_000), cfg.DownloadMaxPixels, "explicit legacy pixel limit must be preserved")
 	require.Equal(t, AsyncImageReferenceTransportPassthroughFallbackLocal, cfg.OpenAIReferenceTransportMode)
 	require.Equal(t, AsyncImageReferenceTransportPassthrough, cfg.GeminiReferenceTransportMode)
+	require.Equal(t, 3, cfg.GeminiAsyncMaxAccountSwitches)
 	require.Equal(t, 2, cfg.ReferenceFetchMaxRetries)
 	require.Equal(t, 3, cfg.UpstreamTransientMaxRetries)
 	require.Equal(t, 5, cfg.CapacityMaxRetries)

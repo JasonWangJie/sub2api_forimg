@@ -55,49 +55,52 @@ var (
 // AsyncImageTask is the durable PostgreSQL representation. RequestPayload is
 // encrypted by the caller before it crosses this persistence boundary.
 type AsyncImageTask struct {
-	ID                  int64           `json:"-"`
-	TaskID              string          `json:"task_id"`
-	UserID              int64           `json:"user_id"`
-	APIKeyID            int64           `json:"api_key_id"`
-	GroupID             int64           `json:"group_id"`
-	AccountID           *int64          `json:"account_id,omitempty"`
-	Protocol            string          `json:"protocol"`
-	Platform            string          `json:"platform"`
-	RequestType         string          `json:"request_type"`
-	Model               string          `json:"model"`
-	Status              string          `json:"status"`
-	BillingStatus       string          `json:"billing_status"`
-	Progress            int             `json:"progress"`
-	RequestedImageSize  *string         `json:"requested_image_size,omitempty"`
-	ActualImageSize     *string         `json:"actual_image_size,omitempty"`
-	AspectRatio         *string         `json:"aspect_ratio,omitempty"`
-	ImageCount          int             `json:"image_count"`
-	ActualCost          *float64        `json:"actual_cost,omitempty"`
-	Currency            string          `json:"currency"`
-	IdempotencyKey      *string         `json:"-"`
-	RequestHash         string          `json:"-"`
-	RequestPayload      []byte          `json:"-"`
-	PromptPreview       *string         `json:"prompt_preview,omitempty"`
-	UpstreamRequestID   *string         `json:"upstream_request_id,omitempty"`
-	BillingRequestID    *string         `json:"billing_request_id,omitempty"`
-	BillingPayload      json.RawMessage `json:"-"`
-	RetryCount          int             `json:"retry_count"`
-	ReferenceTransport  *string         `json:"reference_transport,omitempty"`
-	ReferenceRetryCount int             `json:"reference_retry_count"`
-	UpstreamRetryCount  int             `json:"upstream_retry_count"`
-	CapacityRetryCount  int             `json:"capacity_retry_count"`
-	StorageRetryCount   int             `json:"storage_retry_count"`
-	BillingRetryCount   int             `json:"billing_retry_count"`
-	Version             int64           `json:"version"`
-	ErrorCode           *string         `json:"error_code,omitempty"`
-	ErrorMessage        *string         `json:"error_message,omitempty"`
-	SubmittedAt         time.Time       `json:"submitted_at"`
-	StartedAt           *time.Time      `json:"started_at,omitempty"`
-	UpstreamSucceededAt *time.Time      `json:"upstream_succeeded_at,omitempty"`
-	FinishedAt          *time.Time      `json:"finished_at,omitempty"`
-	ExpiresAt           *time.Time      `json:"expires_at,omitempty"`
-	CreatedAt           time.Time       `json:"created_at"`
-	UpdatedAt           time.Time       `json:"updated_at"`
+	ID                   int64           `json:"-"`
+	TaskID               string          `json:"task_id"`
+	UserID               int64           `json:"user_id"`
+	APIKeyID             int64           `json:"api_key_id"`
+	GroupID              int64           `json:"group_id"`
+	AccountID            *int64          `json:"account_id,omitempty"`
+	AccountAttempts      json.RawMessage `json:"account_attempts,omitempty"`
+	AttemptedAccountIDs  json.RawMessage `json:"attempted_account_ids,omitempty"`
+	Protocol             string          `json:"protocol"`
+	Platform             string          `json:"platform"`
+	RequestType          string          `json:"request_type"`
+	Model                string          `json:"model"`
+	Status               string          `json:"status"`
+	BillingStatus        string          `json:"billing_status"`
+	Progress             int             `json:"progress"`
+	RequestedImageSize   *string         `json:"requested_image_size,omitempty"`
+	ActualImageSize      *string         `json:"actual_image_size,omitempty"`
+	AspectRatio          *string         `json:"aspect_ratio,omitempty"`
+	ImageCount           int             `json:"image_count"`
+	ActualCost           *float64        `json:"actual_cost,omitempty"`
+	Currency             string          `json:"currency"`
+	IdempotencyKey       *string         `json:"-"`
+	RequestHash          string          `json:"-"`
+	RequestPayload       []byte          `json:"-"`
+	PromptPreview        *string         `json:"prompt_preview,omitempty"`
+	UpstreamRequestID    *string         `json:"upstream_request_id,omitempty"`
+	ReconciliationStatus string          `json:"reconciliation_status,omitempty"`
+	BillingRequestID     *string         `json:"billing_request_id,omitempty"`
+	BillingPayload       json.RawMessage `json:"-"`
+	RetryCount           int             `json:"retry_count"`
+	ReferenceTransport   *string         `json:"reference_transport,omitempty"`
+	ReferenceRetryCount  int             `json:"reference_retry_count"`
+	UpstreamRetryCount   int             `json:"upstream_retry_count"`
+	CapacityRetryCount   int             `json:"capacity_retry_count"`
+	StorageRetryCount    int             `json:"storage_retry_count"`
+	BillingRetryCount    int             `json:"billing_retry_count"`
+	Version              int64           `json:"version"`
+	ErrorCode            *string         `json:"error_code,omitempty"`
+	ErrorMessage         *string         `json:"error_message,omitempty"`
+	SubmittedAt          time.Time       `json:"submitted_at"`
+	StartedAt            *time.Time      `json:"started_at,omitempty"`
+	UpstreamSucceededAt  *time.Time      `json:"upstream_succeeded_at,omitempty"`
+	FinishedAt           *time.Time      `json:"finished_at,omitempty"`
+	ExpiresAt            *time.Time      `json:"expires_at,omitempty"`
+	CreatedAt            time.Time       `json:"created_at"`
+	UpdatedAt            time.Time       `json:"updated_at"`
 }
 
 type CreateAsyncImageTaskParams struct {
@@ -166,23 +169,26 @@ type AsyncImageTaskCenterStatsService interface {
 }
 
 type AsyncImageTaskTransition struct {
-	TaskID             string
-	ExpectedVersion    int64
-	UpdatedBefore      *time.Time
-	FromStatuses       []string
-	ToStatus           string
-	Progress           *int
-	AccountID          *int64
-	BillingStatus      *string
-	ActualCost         *float64
-	ActualImageSize    *string
-	ImageCount         *int
-	UpstreamRequestID  *string
-	BillingRequestID   *string
-	BillingPayload     json.RawMessage
-	ErrorCode          *string
-	ErrorMessage       *string
-	ReferenceTransport *string
+	TaskID               string
+	ExpectedVersion      int64
+	UpdatedBefore        *time.Time
+	FromStatuses         []string
+	ToStatus             string
+	Progress             *int
+	AccountID            *int64
+	AccountAttempts      json.RawMessage
+	AttemptedAccountIDs  json.RawMessage
+	BillingStatus        *string
+	ActualCost           *float64
+	ActualImageSize      *string
+	ImageCount           *int
+	UpstreamRequestID    *string
+	ReconciliationStatus *string
+	BillingRequestID     *string
+	BillingPayload       json.RawMessage
+	ErrorCode            *string
+	ErrorMessage         *string
+	ReferenceTransport   *string
 	// AutoArchiveToLibrary controls whether a successful task creates the
 	// personal-library archive outbox entry. It is evaluated in the same
 	// transaction as the succeeded transition.
@@ -222,6 +228,8 @@ type RecordAsyncImageUpstreamSuccessParams struct {
 	ExpectedVersion     int64
 	AccountID           int64
 	UpstreamRequestID   *string
+	AccountAttempts     json.RawMessage
+	AttemptedAccountIDs json.RawMessage
 	ActualImageSize     *string
 	ImageCount          int
 	BillingRequestID    string

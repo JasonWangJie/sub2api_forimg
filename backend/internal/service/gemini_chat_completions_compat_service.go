@@ -119,9 +119,10 @@ func (s *GeminiMessagesCompatService) forwardClaudeBodyAsChatCompletions(
 	asyncImageGeneration := hasGeminiAsyncImageGeneration(ctx)
 	maxAttempts := geminiMaxRetries
 	if asyncImageGeneration {
-		if switchCount, switched := AccountSwitchCountFromContext(ctx); switched && switchCount > 0 {
-			maxAttempts = 1
-		}
+		// Durable image tasks can retry with another account. A network timeout
+		// on the current account must therefore fail over immediately instead of
+		// consuming the normal five-attempt chat retry budget.
+		maxAttempts = 1
 	}
 
 	var resp *http.Response
@@ -254,6 +255,7 @@ func (s *GeminiMessagesCompatService) forwardClaudeBodyAsChatCompletions(
 			return nil, &UpstreamFailoverError{
 				StatusCode:             resp.StatusCode,
 				ResponseBody:           evBody,
+				ResponseHeaders:        resp.Header.Clone(),
 				RetryableOnSameAccount: !asyncImageGeneration && account.IsPoolMode() && account.IsPoolModeRetryableStatus(resp.StatusCode),
 			}
 		}

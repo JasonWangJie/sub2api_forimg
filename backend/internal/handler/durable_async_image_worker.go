@@ -67,6 +67,10 @@ func (h *DurableAsyncImageHandler) startRuntime(ctx context.Context) {
 	if workers <= 0 {
 		workers = 1
 	}
+	logger.L().Info("async_image.runtime_started",
+		zap.Int("worker_concurrency", workers),
+		zap.Int("configured_worker_concurrency", cfg.WorkerConcurrency),
+	)
 	start := func(run func(context.Context)) {
 		h.runtimeWG.Add(1)
 		go func() {
@@ -455,12 +459,13 @@ func (h *DurableAsyncImageHandler) processAsyncImageTask(parent context.Context,
 		// invoke upstream. Observing invoking from a later delivery means the
 		// prior process may have sent the request and must never be replayed.
 		code, message, finished := "execution_unknown", "generation outcome is unknown after an interrupted upstream request", time.Now().UTC()
+		reconciliation := "pending"
 		_, _ = h.tasks.Transition(parent, service.AsyncImageTaskTransition{
 			TaskID: task.TaskID, ExpectedVersion: task.Version,
 			FromStatuses: []string{service.AsyncImageTaskStatusInvoking},
 			ToStatus:     service.AsyncImageTaskStatusExecutionUnknown,
 			ErrorCode:    &code, ErrorMessage: &message, FinishedAt: &finished,
-			ClearRequestPayload: true, EventType: "duplicate_invocation_blocked",
+			ClearRequestPayload: true, EventType: "duplicate_invocation_blocked", ReconciliationStatus: &reconciliation,
 		})
 		return asyncImageWorkerDisposition{}
 	case service.AsyncImageTaskStatusUpstreamSucceeded, service.AsyncImageTaskStatusUploading,
@@ -486,6 +491,12 @@ func asyncImageInvocationHeartbeatFresh(task *service.AsyncImageTask, cfg servic
 }
 
 func (h *DurableAsyncImageHandler) invokeAsyncImageTask(parent context.Context, task *service.AsyncImageTask, cfg service.AsyncImageRuntimeConfig) asyncImageWorkerDisposition {
+	attemptCapture := &service.AsyncImageAccountAttemptCapture{}
+	parent = service.WithAsyncImageAccountAttemptCapture(parent, attemptCapture)
+	parent = service.WithAsyncImageExcludedAccountIDs(parent, asyncImageRecentFailedAccountIDs(task))
+	if task != nil && task.Platform == service.PlatformGemini {
+		parent = service.WithAsyncImageGeminiMaxAccountSwitches(parent, cfg.GeminiAsyncMaxAccountSwitches)
+	}
 	storage, enabled, storageErr := h.storage.DurableStorage(parent)
 	if storageErr != nil || !enabled || storage == nil {
 		h.failAsyncImageTask(parent, task, "storage_unavailable", "image result storage is not configured", false)
@@ -531,6 +542,7 @@ func (h *DurableAsyncImageHandler) invokeAsyncImageTask(parent context.Context, 
 	}
 	if task.Platform == service.PlatformGemini {
 		ctx = service.WithGeminiAsyncImageGeneration(ctx)
+		ctx = service.WithAsyncImageGeminiMaxAccountSwitches(ctx, cfg.GeminiAsyncMaxAccountSwitches)
 		if task.RequestedImageSize != nil && strings.EqualFold(strings.TrimSpace(*task.RequestedImageSize), "0.5K") {
 			if !service.AsyncImageGeminiModelSupportsHalfK(cfg, task.Model) {
 				h.failAsyncImageTask(parent, task, "unsupported_image_dimensions", "0.5K is no longer enabled for this Gemini model", false)
@@ -562,7 +574,7 @@ func (h *DurableAsyncImageHandler) invokeAsyncImageTask(parent context.Context, 
 		return h.deferAsyncImageForLocalCapacity(parent, task, cfg)
 	}
 	if executionCtx.Err() != nil {
-		h.failAsyncImageTask(parent, task, "execution_timeout", fmt.Sprintf("image generation timed out after %s", executionTimeout.Round(time.Second)), false)
+		h.markAsyncImageExecutionUnknown(parent, task, fmt.Sprintf("image generation timed out after %s; upstream reconciliation pending", executionTimeout.Round(time.Second)))
 		return asyncImageWorkerDisposition{}
 	}
 	if recorder.Code < http.StatusOK || recorder.Code >= http.StatusMultipleChoices {
@@ -621,9 +633,11 @@ func (h *DurableAsyncImageHandler) invokeAsyncImageTask(parent context.Context, 
 		})
 	}
 	billingRequestID := "client:async-image:" + task.TaskID
+	accountAttempts, attemptedAccountIDs := asyncImageAttemptState(task, parent)
 	storedTask, err := h.tasks.RecordUpstreamSuccess(parent, service.RecordAsyncImageUpstreamSuccessParams{
 		TaskID: task.TaskID, ExpectedVersion: task.Version, AccountID: accountID,
 		UpstreamRequestID: upstreamRequestID, ActualImageSize: actualSize,
+		AccountAttempts: accountAttempts, AttemptedAccountIDs: attemptedAccountIDs,
 		ImageCount: len(staging), BillingRequestID: billingRequestID,
 		BillingPayload: billingPayload, StagingObjects: staging,
 		UpstreamSucceededAt: time.Now().UTC(),
@@ -878,6 +892,7 @@ func (h *DurableAsyncImageHandler) scheduleAsyncImageReferenceRetry(ctx context.
 		Progress: &progress, ErrorCode: &code, ErrorMessage: &message,
 		IncrementReferenceRetry: true, EventType: "reference_image_fetch_retry",
 	}
+	transition = enrichAsyncImageAttemptTransition(ctx, task, transition)
 	if fallbackLocal {
 		mode := service.AsyncImageReferenceTransportLocal
 		transition.ReferenceTransport = &mode
@@ -900,12 +915,13 @@ func (h *DurableAsyncImageHandler) retryAsyncImageCapacity(ctx context.Context, 
 	message := fmt.Sprintf("image generation capacity unavailable; scheduled retry %d/%d: %s", attempt, cfg.CapacityMaxRetries, asyncImageSafeError(errors.New(detail)))
 	progress := 0
 	eventPayload, _ := json.Marshal(map[string]any{"retry": attempt, "max": cfg.CapacityMaxRetries, "reason": reason})
-	if _, err := h.tasks.Transition(ctx, service.AsyncImageTaskTransition{
+	transition := service.AsyncImageTaskTransition{
 		TaskID: task.TaskID, ExpectedVersion: task.Version,
 		FromStatuses: []string{service.AsyncImageTaskStatusInvoking}, ToStatus: service.AsyncImageTaskStatusQueued,
 		Progress: &progress, ErrorCode: &code, ErrorMessage: &message,
 		IncrementCapacityRetry: true, EventType: "capacity_retry", EventPayload: eventPayload,
-	}); err != nil {
+	}
+	if _, err := h.tasks.Transition(ctx, enrichAsyncImageAttemptTransition(ctx, task, transition)); err != nil {
 		logger.L().Warn("async_image.capacity_retry_transition_failed", zap.String("task_id", task.TaskID), zap.Error(err))
 		return asyncImageWorkerDisposition{}
 	}
@@ -922,12 +938,13 @@ func (h *DurableAsyncImageHandler) retryAsyncImageUpstreamTransient(ctx context.
 	message := fmt.Sprintf("upstream image service temporarily unavailable; scheduled retry %d/%d: %s", attempt, cfg.UpstreamTransientMaxRetries, asyncImageSafeError(errors.New(detail)))
 	progress := 0
 	eventPayload, _ := json.Marshal(map[string]any{"retry": attempt, "max": cfg.UpstreamTransientMaxRetries})
-	if _, err := h.tasks.Transition(ctx, service.AsyncImageTaskTransition{
+	transition := service.AsyncImageTaskTransition{
 		TaskID: task.TaskID, ExpectedVersion: task.Version,
 		FromStatuses: []string{service.AsyncImageTaskStatusInvoking}, ToStatus: service.AsyncImageTaskStatusQueued,
 		Progress: &progress, ErrorCode: &code, ErrorMessage: &message,
 		IncrementUpstreamRetry: true, EventType: "upstream_transient_retry", EventPayload: eventPayload,
-	}); err != nil {
+	}
+	if _, err := h.tasks.Transition(ctx, enrichAsyncImageAttemptTransition(ctx, task, transition)); err != nil {
 		logger.L().Warn("async_image.upstream_retry_transition_failed", zap.String("task_id", task.TaskID), zap.Error(err))
 		return asyncImageWorkerDisposition{}
 	}
@@ -1831,12 +1848,13 @@ func (h *DurableAsyncImageHandler) failAsyncImageTask(ctx context.Context, task 
 	}
 	message = asyncImageSafeError(errors.New(message))
 	finished := time.Now().UTC()
-	_, err := h.tasks.Transition(ctx, service.AsyncImageTaskTransition{
+	transition := service.AsyncImageTaskTransition{
 		TaskID: task.TaskID, ExpectedVersion: task.Version,
 		FromStatuses: []string{task.Status}, ToStatus: service.AsyncImageTaskStatusFailed,
 		ErrorCode: &code, ErrorMessage: &message, IncrementRetry: incrementRetry,
 		FinishedAt: &finished, ClearRequestPayload: true, EventType: "task_failed",
-	})
+	}
+	_, err := h.tasks.Transition(ctx, enrichAsyncImageAttemptTransition(ctx, task, transition))
 	if err != nil {
 		logger.L().Warn("async_image.fail_transition_failed", zap.String("task_id", task.TaskID), zap.Error(err))
 	}
@@ -1848,16 +1866,81 @@ func (h *DurableAsyncImageHandler) markAsyncImageExecutionUnknown(ctx context.Co
 	}
 	code, finished := "execution_unknown", time.Now().UTC()
 	message = asyncImageSafeError(errors.New(message))
-	_, err := h.tasks.Transition(ctx, service.AsyncImageTaskTransition{
+	reconciliation := "pending"
+	transition := service.AsyncImageTaskTransition{
 		TaskID: task.TaskID, ExpectedVersion: task.Version,
 		FromStatuses: []string{service.AsyncImageTaskStatusInvoking},
 		ToStatus:     service.AsyncImageTaskStatusExecutionUnknown,
 		ErrorCode:    &code, ErrorMessage: &message, FinishedAt: &finished,
-		ClearRequestPayload: true, EventType: "execution_unknown",
-	})
+		ClearRequestPayload: true, EventType: "execution_unknown", ReconciliationStatus: &reconciliation,
+	}
+	_, err := h.tasks.Transition(ctx, enrichAsyncImageAttemptTransition(ctx, task, transition))
 	if err != nil {
 		logger.L().Warn("async_image.execution_unknown_transition_failed", zap.String("task_id", task.TaskID), zap.Error(err))
 	}
+}
+
+func asyncImageAttemptState(task *service.AsyncImageTask, ctx context.Context) (json.RawMessage, json.RawMessage) {
+	if task == nil {
+		return nil, nil
+	}
+	capture := service.AsyncImageAccountAttemptCaptureFromContext(ctx)
+	if capture == nil {
+		return task.AccountAttempts, task.AttemptedAccountIDs
+	}
+	return service.MergeAsyncImageAccountAttempts(task.AccountAttempts, capture.Attempts())
+}
+
+func enrichAsyncImageAttemptTransition(ctx context.Context, task *service.AsyncImageTask, transition service.AsyncImageTaskTransition) service.AsyncImageTaskTransition {
+	if task == nil {
+		return transition
+	}
+	accountAttempts, attemptedIDs := asyncImageAttemptState(task, ctx)
+	if len(accountAttempts) > 0 {
+		transition.AccountAttempts = accountAttempts
+	}
+	if len(attemptedIDs) > 0 {
+		transition.AttemptedAccountIDs = attemptedIDs
+	}
+	if capture := service.AsyncImageAccountAttemptCaptureFromContext(ctx); capture != nil {
+		attempts := capture.Attempts()
+		if len(attempts) > 0 {
+			last := attempts[len(attempts)-1]
+			if transition.AccountID == nil {
+				id := last.AccountID
+				transition.AccountID = &id
+			}
+			if transition.UpstreamRequestID == nil && last.UpstreamRequestID != "" {
+				requestID := last.UpstreamRequestID
+				transition.UpstreamRequestID = &requestID
+			}
+			if transition.ErrorMessage == nil && last.Error != "" {
+				message := asyncImageSafeError(errors.New(last.Error))
+				transition.ErrorMessage = &message
+			}
+		}
+	}
+	return transition
+}
+
+func asyncImageRecentFailedAccountIDs(task *service.AsyncImageTask) map[int64]struct{} {
+	if task == nil || len(task.AccountAttempts) == 0 {
+		return nil
+	}
+	var attempts []service.AsyncImageAccountAttempt
+	if err := json.Unmarshal(task.AccountAttempts, &attempts); err != nil {
+		return nil
+	}
+	ids := make(map[int64]struct{})
+	seen := 0
+	for i := len(attempts) - 1; i >= 0 && seen < 3; i-- {
+		if attempts[i].Status != service.AsyncImageAccountAttemptFailed || attempts[i].AccountID <= 0 {
+			continue
+		}
+		ids[attempts[i].AccountID] = struct{}{}
+		seen++
+	}
+	return ids
 }
 
 func asyncImageSafeError(err error) string {

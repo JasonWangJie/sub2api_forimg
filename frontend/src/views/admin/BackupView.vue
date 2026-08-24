@@ -286,6 +286,11 @@
                 </select>
                 <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">{{ t('admin.backup.imageStorage.geminiReferenceTransportHint') }}</p>
               </div>
+              <div>
+                <label class="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">{{ t('admin.backup.imageStorage.geminiAsyncMaxAccountSwitches') }}</label>
+                <input v-model.number="imageStorageForm.async_image.gemini_async_max_account_switches" type="number" min="0" max="16" class="input w-full" />
+                <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">{{ t('admin.backup.imageStorage.geminiAsyncMaxAccountSwitchesHint') }}</p>
+              </div>
               <div class="md:col-span-2 lg:col-span-3">
                 <h5 class="text-xs font-semibold text-gray-700 dark:text-gray-300">{{ t('admin.backup.imageStorage.referenceRetryTitle') }}</h5>
               </div>

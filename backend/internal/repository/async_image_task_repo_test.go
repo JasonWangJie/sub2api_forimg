@@ -61,6 +61,15 @@ func TestAsyncImageReferenceRetryMigrationAddsDurableState(t *testing.T) {
 	}
 }
 
+func TestAsyncImageAccountAttemptMigrationAddsAuditAndReconciliationState(t *testing.T) {
+	content, err := migrations.FS.ReadFile("224_ZJ_async_image_account_attempts.sql")
+	require.NoError(t, err)
+	sqlText := string(content)
+	for _, required := range []string{"account_attempts JSONB", "attempted_account_ids JSONB", "reconciliation_status", "pending"} {
+		require.Contains(t, sqlText, required)
+	}
+}
+
 func TestAsyncImageTaskRepositoryCountsStatusesWithTheTaskFilter(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	require.NoError(t, err)
@@ -271,7 +280,7 @@ func TestAsyncImageTaskRepositoryRecordUpstreamSuccessClearsRequestPayload(t *te
 	mock.ExpectExec("(?s)INSERT INTO async_image_staging_objects .*VALUES \\(\\$1, \\$2, \\$3, \\$4, \\$5, \\$6, \\$7, \\$8, \\$9\\)").
 		WithArgs("asyncimg_success", 0, []byte("image-bytes"), "image/png", int64(11), "checksum", nil, nil, expiresAt).
 		WillReturnResult(sqlmock.NewResult(1, 1))
-	mock.ExpectQuery("(?s)UPDATE async_image_tasks SET.*billing_payload = \\$8::jsonb,\\s*upstream_succeeded_at = \\$9,\\s*error_code = NULL,\\s*error_message = NULL,\\s*request_payload = ''::bytea,\\s*version = version \\+ 1.*WHERE task_id = \\$1 AND version = \\$10.*RETURNING").
+	mock.ExpectQuery("(?s)UPDATE async_image_tasks SET.*billing_payload = \\$8::jsonb,\\s*upstream_succeeded_at = \\$9,.*error_code = NULL,\\s*error_message = NULL,\\s*request_payload = ''::bytea,\\s*version = version \\+ 1.*WHERE task_id = \\$1 AND version = \\$10.*RETURNING").
 		WillReturnRows(asyncImageTaskRowsWithPayload(now, "asyncimg_success", "hash-success", service.AsyncImageTaskStatusUpstreamSucceeded, []byte{}))
 	mock.ExpectExec("(?s)INSERT INTO async_image_events").
 		WillReturnResult(sqlmock.NewResult(1, 1))
@@ -472,22 +481,22 @@ func asyncImageTaskRows(now time.Time, taskID, requestHash, status string) *sqlm
 
 func asyncImageTaskRowsWithPayload(now time.Time, taskID, requestHash, status string, requestPayload []byte) *sqlmock.Rows {
 	columns := []string{
-		"id", "task_id", "user_id", "api_key_id", "group_id", "account_id",
+		"id", "task_id", "user_id", "api_key_id", "group_id", "account_id", "account_attempts", "attempted_account_ids",
 		"protocol", "platform", "request_type", "model", "status", "billing_status", "progress",
 		"requested_image_size", "actual_image_size", "aspect_ratio", "image_count", "actual_cost", "currency",
 		"idempotency_key", "request_hash", "request_payload", "prompt_preview",
-		"upstream_request_id", "billing_request_id", "billing_payload",
+		"upstream_request_id", "reconciliation_status", "billing_request_id", "billing_payload",
 		"retry_count", "reference_transport", "reference_retry_count", "upstream_retry_count",
 		"capacity_retry_count", "storage_retry_count", "billing_retry_count", "version",
 		"error_code", "error_message", "submitted_at", "started_at", "upstream_succeeded_at",
 		"finished_at", "expires_at", "created_at", "updated_at",
 	}
 	values := []driver.Value{
-		int64(1), taskID, int64(1), int64(2), int64(3), nil,
+		int64(1), taskID, int64(1), int64(2), int64(3), nil, []byte(`[]`), []byte(`[]`),
 		service.AsyncImageProtocolBB, service.PlatformGemini, service.AsyncImageRequestTypeTextToImage,
 		"gemini-image", status, service.AsyncImageBillingStatusPending, 0,
 		nil, nil, nil, 1, nil, "USD", nil, requestHash, requestPayload, nil,
-		nil, nil, nil, 0, nil, 0, 0, 0, 0, 0, int64(1), nil, nil, now, nil, nil, nil, nil, now, now,
+		nil, "none", nil, nil, 0, nil, 0, 0, 0, 0, 0, int64(1), nil, nil, now, nil, nil, nil, nil, now, now,
 	}
 	return sqlmock.NewRows(columns).AddRow(values...)
 }

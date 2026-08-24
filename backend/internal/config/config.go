@@ -356,6 +356,7 @@ type AsyncImageConfig struct {
 	RetryBackoffSeconds               int      `mapstructure:"retry_backoff_seconds"`
 	OpenAIReferenceTransportMode      string   `mapstructure:"openai_reference_transport_mode"`
 	GeminiReferenceTransportMode      string   `mapstructure:"gemini_reference_transport_mode"`
+	GeminiAsyncMaxAccountSwitches     int      `mapstructure:"gemini_async_max_account_switches"`
 	ReferenceFetchMaxRetries          int      `mapstructure:"reference_fetch_max_retries"`
 	ReferenceFetchRetryBaseSeconds    int      `mapstructure:"reference_fetch_retry_base_seconds"`
 	ReferenceFetchRetryMaxSeconds     int      `mapstructure:"reference_fetch_retry_max_seconds"`
@@ -2377,6 +2378,7 @@ func setDefaults() {
 	viper.SetDefault("async_image.retry_backoff_seconds", 30)
 	viper.SetDefault("async_image.openai_reference_transport_mode", "passthrough_fallback_local")
 	viper.SetDefault("async_image.gemini_reference_transport_mode", "passthrough")
+	viper.SetDefault("async_image.gemini_async_max_account_switches", 3)
 	viper.SetDefault("async_image.reference_fetch_max_retries", 2)
 	viper.SetDefault("async_image.reference_fetch_retry_base_seconds", 15)
 	viper.SetDefault("async_image.reference_fetch_retry_max_seconds", 60)

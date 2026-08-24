@@ -65,7 +65,7 @@ Get-Content backend\cmd\server\VERSION
 - 异步任务状态机：`backend/internal/handler/durable_async_image_worker.go`
 - 请求构造与参考图：`backend/internal/service/async_image_protocol.go`
 - 运行参数默认值与归一化：`backend/internal/service/image_storage_settings.go`
-- 任务字段和迁移：`backend/internal/service/async_image_task.go`、`backend/migrations/223_ZJ_async_image_reference_retry_state.sql`
+- 任务字段和迁移：`backend/internal/service/async_image_task.go`、`backend/migrations/223_ZJ_async_image_reference_retry_state.sql`、`backend/migrations/224_ZJ_async_image_account_attempts.sql`
 - 管理端设置：`frontend/src/views/admin/BackupView.vue`、`frontend/src/views/admin/asyncImageRuntimeConfig.ts`
 - API 契约：`docs/DURABLE_ASYNC_IMAGE_API.md`
 - 用户 API 页面：`/guides/async-image-api`（`frontend/src/views/user/GuideAsyncImageApiView.vue`）
@@ -75,3 +75,12 @@ Get-Content backend\cmd\server\VERSION
 
 1. 对 `execution_timeout` 建立上游请求 ID、账号用量和本地账单的对账指标；当前墙钟超时会在仍有心跳时把任务标为失败，这是防止重复生成的设计取舍，但尚未做真实上游成本验收。
 2. 对上游返回结果增加总张数、总字节和单任务 staging 峰值保护，再进行隔离环境的 Redis/PostgreSQL/对象存储端到端演练。
+
+## 2026-08-25 本轮交接
+
+- 工作树基线：`main`，HEAD `c296cd167800a3723b93f03f107032e4e55cc887`；`git describe` 在本轮修改后为 dirty；`backend/cmd/server/VERSION` 仍为 `0.1.173.33`。生产服务器未连接、未修改、未重启。
+- 代码新增 `backend/internal/service/async_image_account_attempt.go` 与迁移 `backend/migrations/224_ZJ_async_image_account_attempts.sql`。任务 JSON 会返回账号尝试历史、去重账号 ID 和对账状态；失败 transition 会携带最近账号和请求 ID。
+- `durable_async_image_worker.go` 在启动时记录 configured/actual worker 数；异步上下文传递最近失败账号排除列表和 Gemini `maxSwitches`。Gemini 兼容服务异步网络请求的同账号重试预算固定为 1，避免 5 次超时后才切换。
+- 管理端字段：`gemini_async_max_account_switches`，默认 3、范围 0–16；保存后普通运行参数热读取，Worker 数仍只在进程启动时生效。生产此前只读核实数据库设置为 50，必须重启后从新增启动日志确认实际值。
+- 已执行并通过：`go test ./internal/service -run 'AsyncImage|Gemini' -count=1`、`go test ./internal/handler -run 'AsyncImage|Gateway' -count=1`、`go test ./internal/repository -run 'AsyncImage|Migration' -count=1`、三包 `-run '^$'` 编译检查、`frontend pnpm typecheck`、`frontend pnpm build`。Build 仅有既有 chunk/Browserslist/动态导入警告。
+- 后续重点：网关若提供按上游 request ID 查询接口，再实现 `reconciliation_status=pending` 的主动对账；在此之前禁止自动重放 `execution_unknown`。补充真实网关账号轮换和容量耗尽端到端测试。

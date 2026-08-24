@@ -3,8 +3,10 @@ package handler
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/ip"
@@ -175,10 +177,13 @@ func (h *GatewayHandler) ChatCompletions(c *gin.Context) {
 	}
 	// 3. Account selection + failover loop
 	fs := NewFailoverState(h.maxAccountSwitches, false)
+	historicalExclusionsRetried := false
 	if groupPlatform == service.PlatformGemini {
 		maxSwitches := h.maxAccountSwitchesGemini
 		if asyncImageGeneration {
-			maxSwitches = 1
+			if configured, ok := service.AsyncImageGeminiMaxAccountSwitches(c.Request.Context()); ok {
+				maxSwitches = configured
+			}
 		}
 		fs = NewFailoverState(maxSwitches, false)
 	}
@@ -187,8 +192,21 @@ func (h *GatewayHandler) ChatCompletions(c *gin.Context) {
 		if c.Request.Context().Err() != nil {
 			return
 		}
-		selection, err := h.gatewayService.SelectAccountWithLoadAwareness(c.Request.Context(), apiKey.GroupID, selectionSessionHash, reqModel, fs.FailedAccountIDs, "", int64(0))
+		excludedAccountIDs := make(map[int64]struct{}, len(fs.FailedAccountIDs)+3)
+		for id := range fs.FailedAccountIDs {
+			excludedAccountIDs[id] = struct{}{}
+		}
+		if !historicalExclusionsRetried {
+			for id := range service.AsyncImageExcludedAccountIDs(c.Request.Context()) {
+				excludedAccountIDs[id] = struct{}{}
+			}
+		}
+		selection, err := h.gatewayService.SelectAccountWithLoadAwareness(c.Request.Context(), apiKey.GroupID, selectionSessionHash, reqModel, excludedAccountIDs, "", int64(0))
 		if err != nil {
+			if len(fs.FailedAccountIDs) == 0 && len(service.AsyncImageExcludedAccountIDs(c.Request.Context())) > 0 && !historicalExclusionsRetried {
+				historicalExclusionsRetried = true
+				continue
+			}
 			if len(fs.FailedAccountIDs) == 0 {
 				cls := classifyNoAccountErrorFromGin(c, h.gatewayService, apiKey, reqModel, reqModel, groupPlatform)
 				if !cls.ModelNotFound {
@@ -205,7 +223,7 @@ func (h *GatewayHandler) ChatCompletions(c *gin.Context) {
 				if fs.LastFailoverErr != nil {
 					h.handleCCFailoverExhausted(c, fs.LastFailoverErr, streamStarted)
 				} else {
-					h.chatCompletionsErrorResponse(c, http.StatusBadGateway, "server_error", "All available accounts exhausted")
+					h.chatCompletionsErrorResponse(c, http.StatusBadGateway, "server_error", asyncImageExhaustedMessage(c))
 				}
 				return
 			}
@@ -220,7 +238,7 @@ func (h *GatewayHandler) ChatCompletions(c *gin.Context) {
 				if fs.LastFailoverErr != nil {
 					h.handleCCFailoverExhausted(c, fs.LastFailoverErr, streamStarted)
 				} else {
-					h.chatCompletionsErrorResponse(c, http.StatusBadGateway, "server_error", "All available accounts exhausted")
+					h.chatCompletionsErrorResponse(c, http.StatusBadGateway, "server_error", asyncImageExhaustedMessage(c))
 				}
 				return
 			}
@@ -267,6 +285,11 @@ func (h *GatewayHandler) ChatCompletions(c *gin.Context) {
 		}
 		account = latest
 		selection.Account = latest
+		if asyncImageGeneration {
+			service.RecordAsyncImageAccountAttempt(c.Request.Context(), service.AsyncImageAccountAttempt{
+				AccountID: account.ID, AccountName: account.Name, Status: service.AsyncImageAccountAttemptSelected,
+			})
+		}
 		if selection.ProfitGateActive() {
 			if err := h.gatewayService.BindStickySessionAfterProfitAdmission(admissionCtx, apiKey.GroupID, selectionSessionHash, account.ID); err != nil {
 				reqLog.Warn("gateway.cc.bind_sticky_session_after_profit_admission_failed", zap.Int64("account_id", account.ID), zap.Error(err))
@@ -324,6 +347,12 @@ func (h *GatewayHandler) ChatCompletions(c *gin.Context) {
 		if err != nil {
 			var failoverErr *service.UpstreamFailoverError
 			if errors.As(err, &failoverErr) {
+				if asyncImageGeneration {
+					service.RecordAsyncImageAccountAttempt(c.Request.Context(), service.AsyncImageAccountAttempt{
+						AccountID: account.ID, AccountName: account.Name, Status: service.AsyncImageAccountAttemptFailed,
+						StatusCode: failoverErr.StatusCode, UpstreamRequestID: upstreamRequestIDFromFailover(failoverErr), Error: failoverErr.Error(),
+					})
+				}
 				if c.Writer.Size() != writerSizeBeforeForward {
 					h.handleCCFailoverExhausted(c, failoverErr, true)
 					return
@@ -339,6 +368,11 @@ func (h *GatewayHandler) ChatCompletions(c *gin.Context) {
 					failoverClientGone(c)
 					return
 				}
+			}
+			if asyncImageGeneration {
+				service.RecordAsyncImageAccountAttempt(c.Request.Context(), service.AsyncImageAccountAttempt{
+					AccountID: account.ID, AccountName: account.Name, Status: service.AsyncImageAccountAttemptFailed, Error: err.Error(),
+				})
 			}
 			upstreamErrorAlreadyCommunicated := gatewayForwardErrorAlreadyCommunicated(c, writerSizeBeforeForward, err)
 			wroteFallback := false
@@ -381,6 +415,15 @@ func (h *GatewayHandler) ChatCompletions(c *gin.Context) {
 			ChannelUsageFields: clientRequestedUsageFields(c, channelMapping, reqModel, result.UpstreamModel),
 		}
 		if capture := asyncImageUsageCaptureFromContext(c.Request.Context()); capture != nil {
+			if asyncImageGeneration {
+				requestID := ""
+				if result != nil {
+					requestID = result.RequestID
+				}
+				service.RecordAsyncImageAccountAttempt(c.Request.Context(), service.AsyncImageAccountAttempt{
+					AccountID: account.ID, AccountName: account.Name, Status: service.AsyncImageAccountAttemptSucceeded, UpstreamRequestID: requestID,
+				})
+			}
 			capture.setGemini(usageInput)
 			return
 		}
@@ -428,5 +471,35 @@ func (h *GatewayHandler) handleCCFailoverExhausted(c *gin.Context, lastErr *serv
 		h.chatCompletionsErrorResponse(c, http.StatusBadGateway, "upstream_error", service.OpenAISilentRefusalClientMessage())
 		return
 	}
-	h.chatCompletionsErrorResponse(c, statusCode, "server_error", "All available accounts exhausted")
+	message := asyncImageExhaustedMessage(c)
+	h.chatCompletionsErrorResponse(c, statusCode, "server_error", message)
+}
+
+func asyncImageExhaustedMessage(c *gin.Context) string {
+	message := "All available accounts exhausted"
+	if c == nil {
+		return message
+	}
+	if capture := service.AsyncImageAccountAttemptCaptureFromContext(c.Request.Context()); capture != nil {
+		ids := make(map[int64]struct{})
+		for _, attempt := range capture.Attempts() {
+			if attempt.AccountID > 0 {
+				ids[attempt.AccountID] = struct{}{}
+			}
+		}
+		message = fmt.Sprintf("All available accounts exhausted (attempted=%d)", len(ids))
+	}
+	return message
+}
+
+func upstreamRequestIDFromFailover(err *service.UpstreamFailoverError) string {
+	if err == nil || err.ResponseHeaders == nil {
+		return ""
+	}
+	for _, key := range []string{"x-request-id", "x-goog-request-id", "request-id"} {
+		if value := strings.TrimSpace(err.ResponseHeaders.Get(key)); value != "" {
+			return value
+		}
+	}
+	return ""
 }

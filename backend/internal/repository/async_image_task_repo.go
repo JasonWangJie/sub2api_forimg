@@ -30,22 +30,22 @@ func NewAsyncImageTaskRepository(db *sql.DB) service.AsyncImageTaskRepository {
 }
 
 const asyncImageTaskColumns = `
-id, task_id, user_id, api_key_id, group_id, account_id,
+id, task_id, user_id, api_key_id, group_id, account_id, account_attempts, attempted_account_ids,
 protocol, platform, request_type, model, status, billing_status, progress,
 requested_image_size, actual_image_size, aspect_ratio, image_count, actual_cost, currency,
 idempotency_key, request_hash, request_payload, prompt_preview,
-upstream_request_id, billing_request_id, billing_payload,
+upstream_request_id, reconciliation_status, billing_request_id, billing_payload,
 retry_count, reference_transport, reference_retry_count, upstream_retry_count,
 capacity_retry_count, storage_retry_count, billing_retry_count, version,
 error_code, error_message, submitted_at, started_at, upstream_succeeded_at,
 finished_at, expires_at, created_at, updated_at`
 
 const asyncImageTaskSummaryColumns = `
-id, task_id, user_id, api_key_id, group_id, account_id,
+id, task_id, user_id, api_key_id, group_id, account_id, account_attempts, attempted_account_ids,
 protocol, platform, request_type, model, status, billing_status, progress,
 requested_image_size, actual_image_size, aspect_ratio, image_count, actual_cost, currency,
 idempotency_key, request_hash, NULL::bytea AS request_payload, prompt_preview,
-upstream_request_id, billing_request_id, NULL::jsonb AS billing_payload,
+upstream_request_id, reconciliation_status, billing_request_id, NULL::jsonb AS billing_payload,
 retry_count, reference_transport, reference_retry_count, upstream_retry_count,
 capacity_retry_count, storage_retry_count, billing_retry_count, version,
 error_code, error_message, submitted_at, started_at, upstream_succeeded_at,
@@ -432,6 +432,9 @@ UPDATE async_image_tasks SET
     finished_at = CASE WHEN $38::boolean THEN $39 ELSE finished_at END,
     expires_at = CASE WHEN $40::boolean THEN $41 ELSE expires_at END,
     request_payload = CASE WHEN $42::boolean THEN ''::bytea ELSE request_payload END,
+    account_attempts = CASE WHEN $46::boolean THEN $47::jsonb ELSE account_attempts END,
+    attempted_account_ids = CASE WHEN $48::boolean THEN $49::jsonb ELSE attempted_account_ids END,
+    reconciliation_status = CASE WHEN $50::boolean THEN $51 ELSE reconciliation_status END,
     version = version + 1,
     updated_at = NOW()
 WHERE task_id = $1
@@ -464,6 +467,9 @@ RETURNING ` + asyncImageTaskColumns
 		transition.ExpiresAt != nil, transition.ExpiresAt,
 		transition.ClearRequestPayload, currentVersion,
 		transition.UpdatedBefore != nil, transition.UpdatedBefore,
+		len(transition.AccountAttempts) > 0, normalizeJSONArrayPayload(transition.AccountAttempts),
+		len(transition.AttemptedAccountIDs) > 0, normalizeJSONArrayPayload(transition.AttemptedAccountIDs),
+		transition.ReconciliationStatus != nil, transition.ReconciliationStatus,
 	))
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, service.ErrAsyncImageInvalidTransition
@@ -523,6 +529,9 @@ UPDATE async_image_tasks SET
     billing_request_id = $7,
     billing_payload = $8::jsonb,
     upstream_succeeded_at = $9,
+    account_attempts = CASE WHEN $11::boolean THEN $12::jsonb ELSE account_attempts END,
+    attempted_account_ids = CASE WHEN $13::boolean THEN $14::jsonb ELSE attempted_account_ids END,
+    reconciliation_status = 'none',
     error_code = NULL,
     error_message = NULL,
     request_payload = ''::bytea,
@@ -533,6 +542,8 @@ RETURNING `+asyncImageTaskColumns,
 		params.TaskID, params.AccountID, params.UpstreamRequestID,
 		actualImageSizeSet, params.ActualImageSize, params.ImageCount,
 		params.BillingRequestID, params.BillingPayload, params.UpstreamSucceededAt, currentVersion,
+		len(params.AccountAttempts) > 0, normalizeJSONArrayPayload(params.AccountAttempts),
+		len(params.AttemptedAccountIDs) > 0, normalizeJSONArrayPayload(params.AttemptedAccountIDs),
 	))
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, service.ErrAsyncImageInvalidTransition
@@ -1069,16 +1080,18 @@ func scanAsyncImageTask(scanner asyncImageRowScanner) (*service.AsyncImageTask, 
 	var actualCost sql.NullFloat64
 	var idempotencyKey, promptPreview sql.NullString
 	var upstreamRequestID, billingRequestID, referenceTransport sql.NullString
+	var reconciliationStatus sql.NullString
 	var errorCode, errorMessage sql.NullString
-	var requestPayload, billingPayload []byte
+	var requestPayload, accountAttempts, attemptedAccountIDs, billingPayload []byte
 	var startedAt, upstreamSucceededAt, finishedAt, expiresAt sql.NullTime
 	if err := scanner.Scan(
 		&task.ID, &task.TaskID, &task.UserID, &task.APIKeyID, &task.GroupID, &accountID,
+		&accountAttempts, &attemptedAccountIDs,
 		&task.Protocol, &task.Platform, &task.RequestType, &task.Model, &task.Status,
 		&task.BillingStatus, &task.Progress, &requestedImageSize, &actualImageSize,
 		&aspectRatio, &task.ImageCount, &actualCost, &task.Currency, &idempotencyKey,
 		&task.RequestHash, &requestPayload, &promptPreview, &upstreamRequestID,
-		&billingRequestID, &billingPayload,
+		&reconciliationStatus, &billingRequestID, &billingPayload,
 		&task.RetryCount, &referenceTransport, &task.ReferenceRetryCount, &task.UpstreamRetryCount,
 		&task.CapacityRetryCount, &task.StorageRetryCount, &task.BillingRetryCount, &task.Version,
 		&errorCode, &errorMessage, &task.SubmittedAt, &startedAt,
@@ -1087,6 +1100,8 @@ func scanAsyncImageTask(scanner asyncImageRowScanner) (*service.AsyncImageTask, 
 		return nil, err
 	}
 	task.AccountID = nullableInt64(accountID)
+	task.AccountAttempts = append(json.RawMessage(nil), accountAttempts...)
+	task.AttemptedAccountIDs = append(json.RawMessage(nil), attemptedAccountIDs...)
 	task.RequestedImageSize = nullableString(requestedImageSize)
 	task.ActualImageSize = nullableString(actualImageSize)
 	task.AspectRatio = nullableString(aspectRatio)
@@ -1095,6 +1110,11 @@ func scanAsyncImageTask(scanner asyncImageRowScanner) (*service.AsyncImageTask, 
 	task.RequestPayload = append([]byte(nil), requestPayload...)
 	task.PromptPreview = nullableString(promptPreview)
 	task.UpstreamRequestID = nullableString(upstreamRequestID)
+	if reconciliationStatus.Valid {
+		task.ReconciliationStatus = reconciliationStatus.String
+	} else {
+		task.ReconciliationStatus = "none"
+	}
 	task.BillingRequestID = nullableString(billingRequestID)
 	task.BillingPayload = append(json.RawMessage(nil), billingPayload...)
 	task.ReferenceTransport = nullableString(referenceTransport)
@@ -1122,6 +1142,13 @@ func scanAsyncImageTasks(rows *sql.Rows) ([]*service.AsyncImageTask, error) {
 func normalizeJSONPayload(payload json.RawMessage) json.RawMessage {
 	if len(payload) == 0 || !json.Valid(payload) {
 		return json.RawMessage(`{}`)
+	}
+	return payload
+}
+
+func normalizeJSONArrayPayload(payload json.RawMessage) json.RawMessage {
+	if len(payload) == 0 || !json.Valid(payload) || payload[0] != '[' {
+		return json.RawMessage(`[]`)
 	}
 	return payload
 }

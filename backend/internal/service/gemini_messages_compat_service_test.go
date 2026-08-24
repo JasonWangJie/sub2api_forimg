@@ -121,7 +121,7 @@ func TestGeminiForwardAsChatCompletions_OAuthRoutesToGeminiAndReturnsChatFormat(
 	require.Equal(t, float64(10), usage["total_tokens"])
 }
 
-func TestGeminiForwardAsChatCompletionsAsyncImageRetriesPrimaryFiveTimesAndAlternateOnce(t *testing.T) {
+func TestGeminiForwardAsChatCompletionsAsyncImageFailsOverAfterOneAttempt(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	newUpstream := func() *geminiCompatHTTPUpstreamStub {
 		return &geminiCompatHTTPUpstreamStub{responseFactory: func() *http.Response {
@@ -157,7 +157,7 @@ func TestGeminiForwardAsChatCompletionsAsyncImageRetriesPrimaryFiveTimesAndAlter
 	}
 
 	asyncCtx := WithGeminiAsyncImageGeneration(context.Background())
-	t.Run("primary account", func(t *testing.T) { run(t, asyncCtx, 5) })
+	t.Run("primary account", func(t *testing.T) { run(t, asyncCtx, 1) })
 	t.Run("alternate account", func(t *testing.T) {
 		run(t, WithAccountSwitchCount(asyncCtx, 1, false), 1)
 	})

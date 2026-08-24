@@ -9,6 +9,7 @@ export const ASYNC_IMAGE_REFERENCE_RETRY_DEFAULTS = {
   auto_archive_to_library: false,
   openai_reference_transport_mode: 'passthrough_fallback_local',
   gemini_reference_transport_mode: 'passthrough',
+  gemini_async_max_account_switches: 3,
   reference_fetch_max_retries: 2,
   reference_fetch_retry_base_seconds: 15,
   reference_fetch_retry_max_seconds: 60,
@@ -27,6 +28,7 @@ export const ASYNC_IMAGE_REFERENCE_RETRY_DEFAULTS = {
   | 'auto_archive_to_library'
   | 'openai_reference_transport_mode'
   | 'gemini_reference_transport_mode'
+  | 'gemini_async_max_account_switches'
   | 'reference_fetch_max_retries'
   | 'reference_fetch_retry_base_seconds'
   | 'reference_fetch_retry_max_seconds'
