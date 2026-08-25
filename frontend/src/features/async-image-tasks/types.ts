@@ -41,6 +41,16 @@ export interface AsyncImageTaskEvent {
   created_at: string
 }
 
+export interface AsyncImageAccountAttempt {
+  account_id: number
+  account_name?: string | null
+  status: string
+  status_code?: number | null
+  upstream_request_id?: string | null
+  error?: string | null
+  attempted_at: string
+}
+
 export interface AsyncImageTask {
   id: string | number
   task_id?: string
@@ -77,6 +87,11 @@ export interface AsyncImageTask {
   view_url?: string | null
   retry_count?: number | null
   upstream_request_id?: string | null
+  account_attempt_count?: number | null
+  attempted_account_ids?: number[]
+  account_attempts?: AsyncImageAccountAttempt[]
+  last_failure_reason?: string | null
+  reconciliation_status?: string | null
   error_code?: string | null
   error_message?: string | null
   can_resume?: boolean

@@ -332,6 +332,58 @@
           </dl>
         </section>
 
+        <section v-if="admin && (detail.account_attempt_count !== undefined || detail.reconciliation_status)">
+          <div class="flex flex-wrap items-end justify-between gap-2">
+            <h4 class="section-title">{{ t('asyncImageTasks.detail.accountAudit') }}</h4>
+            <span :class="reconciliationBadgeClass(detail.reconciliation_status)">
+              {{ reconciliationLabel(detail.reconciliation_status) }}
+            </span>
+          </div>
+          <dl class="mt-3 grid grid-cols-1 gap-x-8 gap-y-3 sm:grid-cols-2 lg:grid-cols-4">
+            <DetailRow :label="t('asyncImageTasks.detail.accountAttemptCount')" :value="String(detail.account_attempt_count ?? 0)" />
+            <DetailRow :label="t('asyncImageTasks.detail.reconciliationStatus')" :value="reconciliationLabel(detail.reconciliation_status)" />
+            <DetailRow v-if="detail.last_failure_reason" :label="t('asyncImageTasks.detail.lastFailureReason')" :value="detail.last_failure_reason" />
+          </dl>
+
+          <details v-if="detail.account_attempts?.length" class="mt-4 rounded-md border border-gray-200 bg-gray-50/70 dark:border-dark-700 dark:bg-dark-900/60">
+            <summary class="cursor-pointer list-none px-4 py-3 text-sm font-medium text-gray-700 outline-none focus-visible:ring-2 focus-visible:ring-primary-500 dark:text-gray-200">
+              <span class="inline-flex items-center gap-2">
+                <Icon name="chevronDown" size="sm" />
+                {{ t('asyncImageTasks.detail.accountAttemptHistory', { count: detail.account_attempts.length }) }}
+              </span>
+            </summary>
+            <div class="overflow-x-auto border-t border-gray-200 dark:border-dark-700">
+              <table class="min-w-full text-left text-xs">
+                <thead class="bg-white text-[11px] uppercase text-gray-400 dark:bg-dark-800">
+                  <tr>
+                    <th class="whitespace-nowrap px-4 py-2 font-medium">{{ t('asyncImageTasks.detail.attemptedAt') }}</th>
+                    <th class="whitespace-nowrap px-4 py-2 font-medium">{{ t('asyncImageTasks.detail.attemptStatus') }}</th>
+                    <th class="whitespace-nowrap px-4 py-2 font-medium">{{ t('asyncImageTasks.detail.httpStatus') }}</th>
+                    <th class="whitespace-nowrap px-4 py-2 font-medium">{{ t('asyncImageTasks.detail.account') }}</th>
+                    <th class="whitespace-nowrap px-4 py-2 font-medium">{{ t('asyncImageTasks.detail.upstreamRequestId') }}</th>
+                    <th class="min-w-[220px] px-4 py-2 font-medium">{{ t('asyncImageTasks.detail.failureReason') }}</th>
+                  </tr>
+                </thead>
+                <tbody class="divide-y divide-gray-200 dark:divide-dark-700">
+                  <tr v-for="(attempt, index) in detail.account_attempts" :key="`${attempt.account_id}-${attempt.attempted_at}-${index}`">
+                    <td class="whitespace-nowrap px-4 py-3 text-gray-500 dark:text-gray-400">{{ formatTime(attempt.attempted_at) }}</td>
+                    <td class="whitespace-nowrap px-4 py-3">
+                      <span :class="statusBadgeClass(attempt.status)">{{ attemptStatusLabel(attempt.status) }}</span>
+                    </td>
+                    <td class="whitespace-nowrap px-4 py-3 font-mono text-gray-600 dark:text-gray-300">{{ attempt.status_code ?? '-' }}</td>
+                    <td class="max-w-[180px] px-4 py-3 text-gray-700 dark:text-gray-200">
+                      <div class="truncate" :title="attempt.account_name || idFallback(attempt.account_id)">{{ attempt.account_name || idFallback(attempt.account_id) }}</div>
+                      <div class="mt-0.5 font-mono text-[11px] text-gray-400">#{{ attempt.account_id }}</div>
+                    </td>
+                    <td class="max-w-[220px] px-4 py-3 font-mono text-[11px] text-gray-600 break-all dark:text-gray-300">{{ attempt.upstream_request_id || '-' }}</td>
+                    <td class="max-w-[320px] break-words px-4 py-3 text-gray-500 dark:text-gray-400">{{ attempt.error || '-' }}</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </details>
+        </section>
+
         <section v-if="detail.error_message" class="rounded-md border border-rose-200 bg-rose-50 p-4 dark:border-rose-900/60 dark:bg-rose-950/30">
           <div class="flex items-start gap-3">
             <Icon name="exclamationTriangle" size="sm" class="mt-0.5 flex-none text-rose-600 dark:text-rose-400" />
@@ -610,6 +662,25 @@ function statusLabel(value: string): string {
   return te(key) ? t(key) : value || '-'
 }
 
+function attemptStatusLabel(value: string): string {
+  const key = `asyncImageTasks.accountAttemptStatus.${value}`
+  return te(key) ? t(key) : statusLabel(value)
+}
+
+function reconciliationLabel(value?: string | null): string {
+  const normalized = value || 'none'
+  const key = `asyncImageTasks.reconciliation.${normalized}`
+  return te(key) ? t(key) : normalized
+}
+
+function reconciliationBadgeClass(value?: string | null): string {
+  const base = 'inline-flex items-center rounded-md border px-2 py-1 text-xs font-medium'
+  if (value === 'confirmed_success') return `${base} border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-900/70 dark:bg-emerald-950/40 dark:text-emerald-300`
+  if (value === 'pending' || value === 'unavailable') return `${base} border-amber-200 bg-amber-50 text-amber-700 dark:border-amber-900/70 dark:bg-amber-950/40 dark:text-amber-300`
+  if (value === 'confirmed_failure') return `${base} border-rose-200 bg-rose-50 text-rose-700 dark:border-rose-900/70 dark:bg-rose-950/40 dark:text-rose-300`
+  return `${base} border-gray-200 bg-gray-50 text-gray-600 dark:border-dark-700 dark:bg-dark-800 dark:text-gray-300`
+}
+
 function providerLabel(value?: string | null): string {
   if (!value) return t('asyncImageTasks.provider.pending')
   const key = `asyncImageTasks.provider.${value}`
@@ -619,7 +690,7 @@ function providerLabel(value?: string | null): string {
 function statusBadgeClass(status: string): string {
   const base = 'inline-flex items-center gap-1.5 rounded-md border px-2 py-1 text-xs font-medium'
   if (status === 'succeeded') return `${base} border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-900/70 dark:bg-emerald-950/40 dark:text-emerald-300`
-  if (inProgressStatuses.has(status) || status === 'upstream_image_url_fetch_retry') {
+  if (inProgressStatuses.has(status) || status === 'upstream_image_url_fetch_retry' || status === 'selected') {
     return `${base} border-amber-200 bg-amber-50 text-amber-700 dark:border-amber-900/70 dark:bg-amber-950/40 dark:text-amber-300`
   }
   if (status === 'execution_unknown') return `${base} border-violet-200 bg-violet-50 text-violet-700 dark:border-violet-900/70 dark:bg-violet-950/40 dark:text-violet-300`
@@ -628,7 +699,7 @@ function statusBadgeClass(status: string): string {
 
 function statusDotClass(status: string): string {
   if (status === 'succeeded') return 'bg-emerald-500'
-  if (inProgressStatuses.has(status) || status === 'upstream_image_url_fetch_retry') return 'bg-amber-500'
+  if (inProgressStatuses.has(status) || status === 'upstream_image_url_fetch_retry' || status === 'selected') return 'bg-amber-500'
   if (status === 'execution_unknown') return 'bg-violet-500'
   return 'bg-rose-500'
 }

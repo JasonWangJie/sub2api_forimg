@@ -26,6 +26,25 @@ func TestAsyncImageExecutionTimeoutDefaultsToTwentyMinutes(t *testing.T) {
 	require.Equal(t, 5*time.Minute, asyncImageExecutionTimeout(service.AsyncImageRuntimeConfig{ExecutionTimeoutSeconds: 300}))
 }
 
+func TestAsyncImageRecentFailedAccountIDsCountsUniqueAccounts(t *testing.T) {
+	task := &service.AsyncImageTask{
+		AccountAttempts: json.RawMessage(`[
+			{"account_id": 11, "status": "failed"},
+			{"account_id": 12, "status": "failed"},
+			{"account_id": 13, "status": "failed"},
+			{"account_id": 11, "status": "failed"},
+			{"account_id": 11, "status": "failed"}
+		]`),
+	}
+
+	ids := asyncImageRecentFailedAccountIDs(task)
+	require.Equal(t, map[int64]struct{}{
+		11: {},
+		12: {},
+		13: {},
+	}, ids)
+}
+
 func TestAsyncImageExplicitReferenceFetchFailure(t *testing.T) {
 	msg := "上游生图失败（HTTP 400）：image_url fetch failed: Failed to perform, curl: (28) Connection timed out after 60002 milliseconds. See https://cdn.example/a.png first for more details."
 	require.True(t, isAsyncImageExplicitReferenceFetchFailure(msg))

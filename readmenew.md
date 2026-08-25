@@ -20,13 +20,13 @@ codegraph init
 
 ## 当前版本快照
 
-记录日期：`2026-08-25`（续更：异步账号尝试审计、Gemini 快速换号、容量重试排除最近失败账号、上游超时对账待处理状态和 Worker 实际并发启动日志；前后端定向测试、类型检查和生产构建通过；未部署或重启生产）。
+记录日期：`2026-08-25`（最近三次提交冒烟复验并补齐管理员任务审计展示、修正最近失败账号唯一 ID 计数：异步账号尝试/对账、版本同步、异步 API 文档与前端页面；后端定向测试、迁移检查、前端异步用例、类型检查和生产构建通过；文档与本轮代码同步后工作树 dirty；未部署或重启生产）。
 
 | 项目 | 当前记录 |
 |---|---|
 | 发布版本文件 | `backend/cmd/server/VERSION`（以仓库文件为准） |
-| 文档记录时 HEAD | `c296cd167800a3723b93f03f107032e4e55cc887` |
-| HEAD 描述 | `v0.1.173.33-1-gc296cd1-dirty` |
+| 文档记录时 HEAD | `b958648186fd9079d21111a7f32fa2a2a1a7566a` |
+| HEAD 描述 | `v0.1.173.33-2-gb958648-dirty` |
 | 当前及后续默认分支 | `main` |
 | 已合并原作者主线 | 以 `git log` / `upstream/main` 实际为准 |
 | SC 上传安全迁移 | `backend/migrations/187_ZJ_async_image_upload_reservations.sql` |
@@ -43,7 +43,7 @@ codegraph init
 
 ## 近期 Git 更新台账
 
-近期提交和本地验证证据集中记录在 [开发台账.md](开发台账.md)。当前工作树包含本次 API 页面/静态契约同步及三份交接记录；未连接生产环境。
+近期提交和本地验证证据集中记录在 [开发台账.md](开发台账.md)。本次冒烟以最近三次实际 Git 提交为范围；当前工作树包含本轮管理员任务审计展示及三份交接记录同步，未连接生产环境。
 
 每个任务完成时必须同步更新：
 
@@ -61,6 +61,8 @@ codegraph init
 - 站内图片产品层：图片工作台根据所选 API Key 的当前分组自动选择实时或异步执行；**实时结果默认只保存在本机浏览器**；公开作品必须显式投稿并经管理员审核；**审核通过后由用户再同步上传 OSS 才进入广场**，避免恶意投稿占满 OSS。
 
 两层能力共享原有账号调度、模型映射、内容审核、故障切换、并发控制、资格检查和计费链路。BB、SC 只是下游协议方言，不是新的上游供应商。
+
+管理员异步任务详情已展示尝试账号数、去重账号 ID、每次尝试状态、HTTP 状态码、上游 request ID、最后失败原因和对账状态；失败文本沿用现有脱敏逻辑并额外遮蔽常见 Authorization/api-key/token 头部。普通用户任务接口不返回账号内部 ID、账号名称、尝试历史或完整上游 request ID。前端默认先显示尝试账号数和对账状态，详细历史位于管理员专用折叠区域。
 
 ## 工作台模式矩阵
 
@@ -259,6 +261,14 @@ codegraph init
 - Gemini 异步请求默认单账号只尝试一次，网络超时/连接错误立即进入换号；`gemini_async_max_account_switches` 默认 3，可在 `/admin/backups/image-storage` 的高级异步参数中配置，任务总时长仍受 `execution_timeout_seconds` 限制。
 - 容量重试会优先排除本任务最近失败的账号，全部排除时自动放宽一次；耗尽提示包含本轮实际尝试账号数。上游超时和中断统一标记 `execution_unknown`、`reconciliation_status=pending`，不会盲目重放。
 - Worker 启动日志新增实际 `worker_concurrency`；此前只读核实生产数据库设置为 50、配置文件兜底为 8，本轮未重启生产，代码日志尚未在生产生效。
+
+## 2026-08-25 最近三次提交冒烟复验
+
+- 范围：`b958648`（账号尝试/换号/对账）、`c296cd1`（版本 `0.1.173.33`）、`0336ab7`（持久异步 API 文档与前端页面）。
+- 通过：`backend` 中 `go test ./internal/service ./internal/handler ./internal/repository ./internal/server/routes ./internal/server/middleware -run 'AsyncImage|Gemini|Gateway|Migration' -count=1`；上述五包及 `cmd/server` 的 `-run '^$'` 编译检查；`go test ./migrations -count=1`；`go vet ./migrations`。
+- 通过：前端异步相关 Vitest 4 个文件、14 项；`pnpm typecheck`；目标文件 ESLint；`pnpm build`。构建仅出现既有的 pnpm overrides 提示、Browserslist 过期提示、动态导入提示和大 chunk 警告。
+- `git diff --check` 通过；版本文件实际为 `0.1.173.33`。本机未执行真实上游账号、Redis、PostgreSQL/testcontainers、OSS、生产或 Fork CI 验收。
+- 已完成：管理员任务中心审计展示及用户字段隔离已通过 Handler 边界测试；`asyncImageRecentFailedAccountIDs` 已按唯一账号 ID 计数，连续失败同一账号不会占用多个最近账号名额，并已补回归测试。真实上游对账和生产验收仍未执行。
 
 
 

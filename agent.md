@@ -4,12 +4,12 @@
 
 这是 `JasonWangJie/sub2api_forimg` Fork，默认在 `main` 开发。交接基线：
 
-- HEAD：`81111d3fc2b9cae415ddf561d69e1a26075fac54`
-- `git describe --tags --always`：`v0.1.173.32-dirty`
-- `backend/cmd/server/VERSION`：`0.1.173.31`
-- 最近功能：异步生图参考图传输/分类重试、可选的异步结果个人图库自动归档，以及 API Key 用户统计接口
-- 本次交接维护：同步 `/guides/async-image-api` 与 `docs/DURABLE_ASYNC_IMAGE_API.md` 到当前 BB/SC 路由、状态、限制和存储契约；工作树包含本次页面/文档改动和交接记录
-- 本次审查结论：页面已覆盖 Gemini BB `completions_gm`、Gemini SC 上传、OpenAI `edits_oa`、统一查询与 `/tasks_sc` 别名、模型级参考图限制、幂等/重试、错误和存储 URL 有效期；超时成本对账、输出总量保护和真实端到端验收仍是下一步
+- HEAD：`b958648186fd9079d21111a7f32fa2a2a1a7566a`
+- `git describe --tags --always --dirty`：`v0.1.173.33-2-gb958648-dirty`
+- `backend/cmd/server/VERSION`：`0.1.173.33`
+- 最近功能：异步生图账号尝试审计、Gemini 快速换号、容量重试排除最近失败账号、`execution_unknown` 对账待处理状态，以及异步 API 文档同步
+- 本次交接维护：同步 `/guides/async-image-api` 与 `docs/DURABLE_ASYNC_IMAGE_API.md` 到当前 BB/SC 路由、状态、限制和存储契约，并补齐管理员任务账号尝试/对账审计展示；工作树包含本次页面、后端和交接记录改动
+- 本次冒烟结论：最近三次提交的后端异步/Gemini/网关/迁移定向测试、迁移包测试、`go vet`、编译检查、前端异步 14/14、类型检查、目标 ESLint 和生产构建均通过；管理员审计 Handler 边界测试、前端异步 API/date 7/7 以及唯一失败账号排除回归测试通过；超时成本对账、真实端到端验收仍未完成。最近失败账号排除已改为按唯一账号 ID 计数
 - 生产环境：本轮未连接、未修改、未重启
 
 开始工作前必须运行：
@@ -46,7 +46,7 @@ Get-Content backend\cmd\server\VERSION
 
 ## 已验证证据
 
-后端 Service 的 Gemini 透传预算与模型能力回归、Handler、Repository、gateway route、middleware 定向测试通过；前端异步配置/策略/任务中心相关 19/19 通过；本次页面/静态文档同步后 `pnpm typecheck`、目标文件 ESLint、`pnpm build`、`git diff --check` 通过。Gemini `passthrough` 现在每张参考图只消费一次预算；已知 Flash Image/Pro Image 模型分别执行 3/14 张上限，未知模型继续使用全局上限。真实生产服务器、真实上游账号、Redis、PostgreSQL/testcontainers 和真实 OSS 未验证。
+后端 Service 的 Gemini 透传预算与模型能力回归、Handler、Repository、gateway route、middleware 定向测试通过；本轮最近三次提交冒烟覆盖异步/Gemini/网关/迁移用例、五包加 `cmd/server` 编译检查、`go test ./migrations` 和 `go vet ./migrations`；前端异步 Vitest 14/14、`pnpm typecheck`、目标 ESLint、`pnpm build`、`git diff --check` 通过。构建仅有既有 pnpm overrides、Browserslist、动态导入和大 chunk 警告。真实生产服务器、真实上游账号、Redis、PostgreSQL/testcontainers、真实 OSS 和 Fork CI 未验证。
 
 完整 Service 包测试仍有既有外部 OpenAI token 对比用例因网络/API 不可用而失败；这不是本次任务中心改动造成的。
 
@@ -78,9 +78,10 @@ Get-Content backend\cmd\server\VERSION
 
 ## 2026-08-25 本轮交接
 
-- 工作树基线：`main`，HEAD `c296cd167800a3723b93f03f107032e4e55cc887`；`git describe` 在本轮修改后为 dirty；`backend/cmd/server/VERSION` 仍为 `0.1.173.33`。生产服务器未连接、未修改、未重启。
-- 代码新增 `backend/internal/service/async_image_account_attempt.go` 与迁移 `backend/migrations/224_ZJ_async_image_account_attempts.sql`。任务 JSON 会返回账号尝试历史、去重账号 ID 和对账状态；失败 transition 会携带最近账号和请求 ID。
+- 工作树基线：`main`，HEAD `b958648186fd9079d21111a7f32fa2a2a1a7566a`；`git describe` 在本轮文档同步后为 `v0.1.173.33-2-gb958648-dirty`；`backend/cmd/server/VERSION` 为 `0.1.173.33`。生产服务器未连接、未修改、未重启。
+- 代码新增 `backend/internal/service/async_image_account_attempt.go` 与迁移 `backend/migrations/224_ZJ_async_image_account_attempts.sql`。数据库任务模型保存账号尝试历史、去重账号 ID 和对账状态；失败 transition 会携带最近账号和请求 ID。当前站内任务中心通过 view 映射未展示这些字段，不能把它描述为已交付的管理端审计展示。
 - `durable_async_image_worker.go` 在启动时记录 configured/actual worker 数；异步上下文传递最近失败账号排除列表和 Gemini `maxSwitches`。Gemini 兼容服务异步网络请求的同账号重试预算固定为 1，避免 5 次超时后才切换。
-- 管理端字段：`gemini_async_max_account_switches`，默认 3、范围 0–16；保存后普通运行参数热读取，Worker 数仍只在进程启动时生效。生产此前只读核实数据库设置为 50，必须重启后从新增启动日志确认实际值。
+- 管理端字段：`gemini_async_max_account_switches`，默认 3、范围 0–16；保存后普通运行参数热读取，Worker 数仍只在进程启动时生效。生产此前只读核实数据库设置为 50，必须重启后从新增启动日志确认实际值。管理员异步任务详情现展示尝试账号数、去重 ID、对账状态和可折叠尝试历史；用户接口不返回这些内部字段或完整上游 request ID。
 - 已执行并通过：`go test ./internal/service -run 'AsyncImage|Gemini' -count=1`、`go test ./internal/handler -run 'AsyncImage|Gateway' -count=1`、`go test ./internal/repository -run 'AsyncImage|Migration' -count=1`、三包 `-run '^$'` 编译检查、`frontend pnpm typecheck`、`frontend pnpm build`。Build 仅有既有 chunk/Browserslist/动态导入警告。
-- 后续重点：网关若提供按上游 request ID 查询接口，再实现 `reconciliation_status=pending` 的主动对账；在此之前禁止自动重放 `execution_unknown`。补充真实网关账号轮换和容量耗尽端到端测试。
+- 本轮额外通过：`go test ./migrations -count=1`、`go vet ./migrations`、前端异步 Vitest 4 文件共 14 项和目标文件 ESLint；`git diff --check` 通过。
+- 后续重点：网关若提供按上游 request ID 查询接口，再实现 `reconciliation_status=pending` 的主动对账；在此之前禁止自动重放 `execution_unknown`。补充真实网关账号轮换、容量耗尽和上游成本对账端到端测试；为管理员审计历史补充真实上游对账运行时演练。

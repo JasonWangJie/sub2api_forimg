@@ -209,7 +209,9 @@ func TestAsyncImageTaskCenterUserListScopesAndAddsResultSummary(t *testing.T) {
 		Platform: service.PlatformGemini, RequestType: service.AsyncImageRequestTypeTextToImage,
 		Model: "gemini-image", Status: service.AsyncImageTaskStatusSucceeded,
 		BillingStatus: service.AsyncImageBillingStatusSucceeded, ImageCount: 1,
-		SubmittedAt: now, CreatedAt: now, UpdatedAt: now,
+		UpstreamRequestID: stringPointerForAsyncImageTaskTest("user-list-upstream-id"),
+		AccountAttempts:   json.RawMessage(`[{"account_id":99,"account_name":"internal-account","status":"succeeded"}]`),
+		SubmittedAt:       now, CreatedAt: now, UpdatedAt: now,
 	}
 	result := service.AsyncImageResult{
 		TaskID: task.TaskID, ImageIndex: 0, Provider: service.ImageStorageProviderQiniu,
@@ -261,6 +263,8 @@ func TestAsyncImageTaskCenterUserListScopesAndAddsResultSummary(t *testing.T) {
 	require.Equal(t, "https://cdn.example/image.png", item["preview_url"])
 	require.Equal(t, "/api/v1/user/async-image-tasks/asyncimg_abc/results/0/view", item["view_url"])
 	require.NotContains(t, item, "account_id")
+	require.NotContains(t, recorder.Body.String(), "user-list-upstream-id")
+	require.NotContains(t, recorder.Body.String(), "internal-account")
 	require.Equal(t, "private-bucket", durable.ref.Bucket)
 }
 
@@ -279,7 +283,7 @@ func TestAsyncImageTaskCenterDetailRedactsAndDoesNotExposeObjectIdentity(t *test
 	details := &service.AsyncImageTaskDetails{
 		Task:    task,
 		Results: []service.AsyncImageResult{{TaskID: task.TaskID, ImageIndex: 1, Provider: service.ImageStorageProviderAliyun, Bucket: "secret-bucket", ObjectKey: "secret/key.png", ContentType: "image/png", CreatedAt: now}},
-		Events:  []service.AsyncImageEvent{{ID: 1, TaskID: task.TaskID, EventType: "storage_failed", ToStatus: stringPointerForAsyncImageTaskTest(service.AsyncImageTaskStatusStorageFailed), Payload: json.RawMessage(`{"error":"access_token=another-secret"}`), CreatedAt: now}},
+		Events:  []service.AsyncImageEvent{{ID: 1, TaskID: task.TaskID, EventType: "storage_failed", ToStatus: stringPointerForAsyncImageTaskTest(service.AsyncImageTaskStatusStorageFailed), Payload: json.RawMessage(`{"error":"access_token=another-secret request_id=event-upstream-id"}`), CreatedAt: now}},
 	}
 	tasks := &asyncImageTaskCenterServiceStub{details: details}
 	h := &AsyncImageTaskCenterHandler{tasks: tasks}
@@ -297,6 +301,7 @@ func TestAsyncImageTaskCenterDetailRedactsAndDoesNotExposeObjectIdentity(t *test
 	body := recorder.Body.String()
 	require.NotContains(t, body, "secret-value")
 	require.NotContains(t, body, "another-secret")
+	require.NotContains(t, body, "event-upstream-id")
 	require.NotContains(t, body, "secret-bucket")
 	require.NotContains(t, body, "secret/key.png")
 	require.NotContains(t, body, "account_id")
@@ -343,6 +348,65 @@ func TestAsyncImageTaskCenterAdminDetailIncludesRoutingNames(t *testing.T) {
 	require.Equal(t, "workbench-key", envelope.Data.Task["api_key_name"])
 	require.Equal(t, "openai-image", envelope.Data.Task["group_name"])
 	require.Equal(t, "openai-prod-1", envelope.Data.Task["account_name"])
+}
+
+func TestAsyncImageTaskCenterAccountAuditIsAdminOnlyAndRedacted(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	now := time.Now().UTC()
+	task := &service.AsyncImageTask{
+		TaskID: "asyncimg_audit", UserID: 42, AccountID: int64PointerForAsyncImageTaskTest(8),
+		Status: service.AsyncImageTaskStatusFailed, BillingStatus: service.AsyncImageBillingStatusFailed,
+		UpstreamRequestID:    stringPointerForAsyncImageTaskTest("upstream-task-full"),
+		ReconciliationStatus: "confirmed_failure",
+		AccountAttempts: json.RawMessage(`[
+			{"account_id":8,"account_name":"prod-account","status":"failed","status_code":429,"upstream_request_id":"upstream-attempt-1","error":"{\"authorization\":\"Bearer secret-token\",\"api-key\":\"raw-api-key\"}","attempted_at":"2026-08-25T00:00:00Z"},
+			{"account_id":9,"account_name":"backup-account","status":"succeeded","status_code":200,"upstream_request_id":"upstream-attempt-2","attempted_at":"2026-08-25T00:00:01Z"}
+		]`),
+		AttemptedAccountIDs: json.RawMessage(`[9,8,8]`),
+		SubmittedAt:         now, CreatedAt: now, UpdatedAt: now,
+	}
+	tasks := &asyncImageTaskCenterServiceStub{details: &service.AsyncImageTaskDetails{Task: task}}
+	h := &AsyncImageTaskCenterHandler{tasks: tasks}
+
+	adminRouter := gin.New()
+	adminRouter.GET("/api/v1/admin/async-image-tasks/:task_id", h.GetForAdmin)
+	adminRecorder := httptest.NewRecorder()
+	adminRouter.ServeHTTP(adminRecorder, httptest.NewRequest(http.MethodGet, "/api/v1/admin/async-image-tasks/asyncimg_audit", nil))
+	require.Equal(t, http.StatusOK, adminRecorder.Code)
+	var adminEnvelope struct {
+		Data struct {
+			Task map[string]any `json:"task"`
+		} `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(adminRecorder.Body.Bytes(), &adminEnvelope))
+	adminTask := adminEnvelope.Data.Task
+	require.Equal(t, float64(2), adminTask["account_attempt_count"])
+	require.Equal(t, []any{float64(8), float64(9)}, adminTask["attempted_account_ids"])
+	require.Equal(t, "confirmed_failure", adminTask["reconciliation_status"])
+	require.Equal(t, "upstream-task-full", adminTask["upstream_request_id"])
+	require.Contains(t, adminTask["last_failure_reason"], `"authorization":"***"`)
+	require.NotContains(t, adminRecorder.Body.String(), "secret-token")
+	require.NotContains(t, adminRecorder.Body.String(), "raw-api-key")
+	require.Contains(t, adminRecorder.Body.String(), "prod-account")
+	require.Contains(t, adminRecorder.Body.String(), "upstream-attempt-1")
+
+	userRouter := gin.New()
+	userRouter.Use(func(c *gin.Context) {
+		c.Set(string(middleware.ContextKeyUser), middleware.AuthSubject{UserID: 42})
+		c.Next()
+	})
+	userRouter.GET("/api/v1/user/async-image-tasks/:task_id", h.GetForUser)
+	userRecorder := httptest.NewRecorder()
+	userRouter.ServeHTTP(userRecorder, httptest.NewRequest(http.MethodGet, "/api/v1/user/async-image-tasks/asyncimg_audit", nil))
+	require.Equal(t, http.StatusOK, userRecorder.Code)
+	userBody := userRecorder.Body.String()
+	require.NotContains(t, userBody, "account_attempt_count")
+	require.NotContains(t, userBody, "attempted_account_ids")
+	require.NotContains(t, userBody, "account_attempts")
+	require.NotContains(t, userBody, "reconciliation_status")
+	require.NotContains(t, userBody, "last_failure_reason")
+	require.NotContains(t, userBody, "upstream-task-full")
+	require.NotContains(t, userBody, "prod-account")
 }
 
 func TestAsyncImageTaskCenterAdminResumeRejectsNonPostProcessingState(t *testing.T) {

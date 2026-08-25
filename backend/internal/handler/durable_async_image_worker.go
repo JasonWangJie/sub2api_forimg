@@ -1932,13 +1932,14 @@ func asyncImageRecentFailedAccountIDs(task *service.AsyncImageTask) map[int64]st
 		return nil
 	}
 	ids := make(map[int64]struct{})
-	seen := 0
-	for i := len(attempts) - 1; i >= 0 && seen < 3; i-- {
+	for i := len(attempts) - 1; i >= 0 && len(ids) < 3; i-- {
 		if attempts[i].Status != service.AsyncImageAccountAttemptFailed || attempts[i].AccountID <= 0 {
 			continue
 		}
+		if _, exists := ids[attempts[i].AccountID]; exists {
+			continue
+		}
 		ids[attempts[i].AccountID] = struct{}{}
-		seen++
 	}
 	return ids
 }
