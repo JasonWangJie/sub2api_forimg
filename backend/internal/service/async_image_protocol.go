@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/base64"
+	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -16,6 +17,7 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -433,6 +435,25 @@ func ParseAsyncImageRetryAfter(value string, now time.Time) time.Duration {
 	return when.Sub(now)
 }
 
+// IsAsyncImageReferenceFetchFailureMessage identifies provider responses that
+// specifically say the upstream tried and failed to fetch a reference URL.
+// Durable Gemini hybrid transport uses this to bypass generic 5xx account
+// failover so the worker can persistently switch to local inlineData.
+func IsAsyncImageReferenceFetchFailureMessage(message string) bool {
+	lower := strings.ToLower(strings.TrimSpace(message))
+	for _, fragment := range []string{
+		"image_url fetch failed", "image url fetch failed", "fileuri fetch failed",
+		"fileuri download failed", "failed to fetch image", "failed to download image",
+		"download reference image", "fetch reference image", "could not fetch image",
+		"unable to fetch image",
+	} {
+		if strings.Contains(lower, fragment) {
+			return true
+		}
+	}
+	return false
+}
+
 func (r *AsyncImageReference) DataURI() string {
 	if r == nil {
 		return ""
@@ -448,6 +469,91 @@ type AsyncImageReferenceDownloader struct {
 	Resolver     *net.Resolver
 	Budget       *AsyncImageReferenceBudget
 	BoundLoader  AsyncImageBoundReferenceLoader
+	FetchGate    *AsyncImageFetchGate
+	Cache        *AsyncImageReferenceCache
+}
+
+// AsyncImageFetchGate limits only local reference downloads; it never holds a
+// gateway image slot while waiting on a CDN.
+type AsyncImageFetchGate struct{ slots chan struct{} }
+
+func NewAsyncImageFetchGate(limit int) *AsyncImageFetchGate {
+	if limit <= 0 {
+		return nil
+	}
+	return &AsyncImageFetchGate{slots: make(chan struct{}, limit)}
+}
+func (g *AsyncImageFetchGate) acquire(ctx context.Context) (func(), error) {
+	if g == nil || g.slots == nil {
+		return func() {}, nil
+	}
+	select {
+	case g.slots <- struct{}{}:
+		return func() { <-g.slots }, nil
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+}
+
+type asyncImageReferenceCacheEntry struct {
+	reference *AsyncImageReference
+	expires   time.Time
+	size      int64
+}
+type AsyncImageReferenceCache struct {
+	mu       sync.Mutex
+	ttl      time.Duration
+	maxBytes int64
+	bytes    int64
+	entries  map[string]asyncImageReferenceCacheEntry
+}
+
+func NewAsyncImageReferenceCache(ttl time.Duration, maxBytes int64) *AsyncImageReferenceCache {
+	if ttl <= 0 || maxBytes <= 0 {
+		return nil
+	}
+	return &AsyncImageReferenceCache{ttl: ttl, maxBytes: maxBytes, entries: make(map[string]asyncImageReferenceCacheEntry)}
+}
+func (c *AsyncImageReferenceCache) get(key string, now time.Time) *AsyncImageReference {
+	if c == nil {
+		return nil
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	e, ok := c.entries[key]
+	if !ok {
+		return nil
+	}
+	if !e.expires.After(now) {
+		delete(c.entries, key)
+		c.bytes -= e.size
+		return nil
+	}
+	copyRef := *e.reference
+	copyRef.Data = append([]byte(nil), e.reference.Data...)
+	return &copyRef
+}
+func (c *AsyncImageReferenceCache) put(key string, ref *AsyncImageReference, now time.Time) {
+	if c == nil || ref == nil || int64(len(ref.Data)) > c.maxBytes {
+		return
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if old, ok := c.entries[key]; ok {
+		c.bytes -= old.size
+	}
+	for c.bytes+int64(len(ref.Data)) > c.maxBytes && len(c.entries) > 0 {
+		for k, old := range c.entries {
+			delete(c.entries, k)
+			c.bytes -= old.size
+			break
+		}
+	}
+	copyRef := *ref
+	copyRef.Data = append([]byte(nil), ref.Data...)
+	size := int64(len(copyRef.Data))
+	c.entries[key] = asyncImageReferenceCacheEntry{reference: &copyRef, expires: now.Add(c.ttl), size: size}
+	c.bytes += size
 }
 
 type AsyncImageBoundReferenceLoader func(ctx context.Context, rawURL string) (reference *AsyncImageReference, handled bool, err error)
@@ -560,12 +666,26 @@ func (d AsyncImageReferenceDownloader) Download(ctx context.Context, rawURL stri
 	}
 	parsed, err := url.Parse(rawURL)
 	if err != nil {
-		return nil, errors.New("reference image URL must be an absolute HTTPS URL or an image data URI")
+		return nil, &AsyncImageReferenceDownloadError{Phase: "validate", Err: errors.New("reference image URL must be an absolute HTTPS URL or an image data URI")}
+	}
+	if cached := d.Cache.get(parsed.String(), time.Now()); cached != nil {
+		return d.accept(cached)
+	}
+	release, err := d.FetchGate.acquire(ctx)
+	if err != nil {
+		return nil, &AsyncImageReferenceDownloadError{Phase: "download", Err: err}
+	}
+	defer release()
+	// Another request may have filled the cache while this request waited for
+	// the download gate. Re-check before opening a second connection to the
+	// same CDN URL.
+	if cached := d.Cache.get(parsed.String(), time.Now()); cached != nil {
+		return d.accept(cached)
 	}
 
 	baseTransport, ok := http.DefaultTransport.(*http.Transport)
 	if !ok {
-		return nil, errors.New("reference image downloader requires an HTTP transport")
+		return nil, &AsyncImageReferenceDownloadError{Phase: "setup", Err: errors.New("reference image downloader requires an HTTP transport")}
 	}
 	transport := baseTransport.Clone()
 	transport.Proxy = nil
@@ -585,7 +705,7 @@ func (d AsyncImageReferenceDownloader) Download(ctx context.Context, rawURL stri
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, parsed.String(), nil)
 	if err != nil {
-		return nil, err
+		return nil, &AsyncImageReferenceDownloadError{Phase: "request", Err: err}
 	}
 	req.Header.Set("Accept", "image/webp,image/png,image/jpeg")
 	resp, err := client.Do(req)
@@ -600,19 +720,20 @@ func (d AsyncImageReferenceDownloader) Download(ctx context.Context, rawURL stri
 		}
 	}
 	if resp.ContentLength > d.maxBytes() {
-		return nil, errors.New("reference image exceeds the configured size limit")
+		return nil, &AsyncImageReferenceDownloadError{Phase: "validate", Err: errors.New("reference image exceeds the configured size limit")}
 	}
 	data, err := io.ReadAll(io.LimitReader(resp.Body, d.maxBytes()+1))
 	if err != nil {
 		return nil, &AsyncImageReferenceDownloadError{Phase: "read", Err: err}
 	}
 	if int64(len(data)) > d.maxBytes() {
-		return nil, errors.New("reference image exceeds the configured size limit")
+		return nil, &AsyncImageReferenceDownloadError{Phase: "validate", Err: errors.New("reference image exceeds the configured size limit")}
 	}
-	reference, err := d.validateImage(data, resp.Header.Get("Content-Type"))
+	reference, err := d.validateDownloadedImage(data, resp.Header.Get("Content-Type"))
 	if err != nil {
-		return nil, err
+		return nil, &AsyncImageReferenceDownloadError{Phase: "validate", Err: err}
 	}
+	d.Cache.put(parsed.String(), reference, time.Now())
 	return d.accept(reference)
 }
 
@@ -659,6 +780,64 @@ func (d AsyncImageReferenceDownloader) validateImage(data []byte, declaredType s
 		Height:   validated.Height,
 		SHA256:   validated.SHA256,
 	}, nil
+}
+
+func (d AsyncImageReferenceDownloader) validateDownloadedImage(data []byte, declaredType string) (*AsyncImageReference, error) {
+	ref, err := d.validateImage(data, declaredType)
+	if err == nil {
+		return ref, nil
+	}
+	if normalized := normalizeAsyncImageTrailingData(data, declaredType, err); normalized != nil {
+		return d.validateImage(normalized, declaredType)
+	}
+	return nil, err
+}
+
+// normalizeAsyncImageTrailingData removes only bytes that are provably after
+// a complete PNG/JPEG/WebP container. It is intentionally limited to the
+// downloader path; the general image-library validator remains strict.
+func normalizeAsyncImageTrailingData(data []byte, declaredType string, cause error) []byte {
+	if cause == nil || !strings.Contains(strings.ToLower(cause.Error()), "trailing") && !strings.Contains(strings.ToLower(cause.Error()), "terminator") && !strings.Contains(strings.ToLower(cause.Error()), "container length") {
+		return nil
+	}
+	format := ""
+	if len(data) >= 8 && bytes.Equal(data[:8], []byte("\x89PNG\r\n\x1a\n")) {
+		format = "png"
+	}
+	if len(data) >= 12 && string(data[:4]) == "RIFF" && string(data[8:12]) == "WEBP" {
+		format = "webp"
+	}
+	if len(data) >= 2 && data[0] == 0xff && data[1] == 0xd8 {
+		format = "jpeg"
+	}
+	if format == "png" {
+		pos := 8
+		for pos+12 <= len(data) {
+			length := int64(binary.BigEndian.Uint32(data[pos : pos+4]))
+			if length < 0 || int64(pos)+12+length > int64(len(data)) {
+				return nil
+			}
+			kind := string(data[pos+4 : pos+8])
+			pos += int(12 + length)
+			if kind == "IEND" {
+				return append([]byte(nil), data[:pos]...)
+			}
+		}
+	}
+	if format == "webp" && len(data) >= 12 {
+		declared := int(binary.LittleEndian.Uint32(data[4:8])) + 8
+		if declared >= 12 && declared <= len(data) {
+			return append([]byte(nil), data[:declared]...)
+		}
+	}
+	if format == "jpeg" {
+		for i := 2; i+1 < len(data); i++ {
+			if data[i] == 0xff && data[i+1] == 0xd9 {
+				return append([]byte(nil), data[:i+2]...)
+			}
+		}
+	}
+	return nil
 }
 
 func imageFormatMIME(format string) string {

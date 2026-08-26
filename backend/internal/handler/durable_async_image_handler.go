@@ -39,16 +39,22 @@ type durableAsyncImagePayload struct {
 // The legacy Redis-only AsyncImageHandler remains separately wired and keeps
 // its routes and response contracts unchanged.
 type DurableAsyncImageHandler struct {
-	tasks         *service.AsyncImageTaskService
-	queue         service.AsyncImageQueue
-	storage       *service.ImageStorageSettingService
-	encryptor     service.SecretEncryptor
-	gateway       *GatewayHandler
-	openAI        *OpenAIGatewayHandler
-	apiKeys       *service.APIKeyService
-	subscriptions *service.SubscriptionService
-	accounts      *service.AccountService
-	library       *service.ImageLibraryService
+	tasks                  *service.AsyncImageTaskService
+	queue                  service.AsyncImageQueue
+	storage                *service.ImageStorageSettingService
+	encryptor              service.SecretEncryptor
+	gateway                *GatewayHandler
+	openAI                 *OpenAIGatewayHandler
+	apiKeys                *service.APIKeyService
+	subscriptions          *service.SubscriptionService
+	accounts               *service.AccountService
+	library                *service.ImageLibraryService
+	referenceMu            sync.Mutex
+	referenceGate          *service.AsyncImageFetchGate
+	referenceCache         *service.AsyncImageReferenceCache
+	referenceGateLimit     int
+	referenceCacheTTL      time.Duration
+	referenceCacheMaxBytes int64
 
 	startOnce sync.Once
 	stopOnce  sync.Once

@@ -340,6 +340,27 @@ WHERE task_id = $1 AND status = ANY($2)`, taskID, pq.Array(statuses))
 	return err
 }
 
+func (r *asyncImageTaskRepository) PersistAsyncImageAccountAttempt(ctx context.Context, taskID string, attempt service.AsyncImageAccountAttempt) error {
+	if r == nil || r.sql == nil || strings.TrimSpace(taskID) == "" || attempt.AccountID <= 0 {
+		return service.ErrAsyncImageInvalidInput
+	}
+	if attempt.AttemptedAt.IsZero() {
+		attempt.AttemptedAt = time.Now().UTC()
+	}
+	entry, _ := json.Marshal(attempt)
+	ids, _ := json.Marshal([]int64{attempt.AccountID})
+	_, err := r.sql.ExecContext(ctx, `
+UPDATE async_image_tasks
+SET account_id = $2,
+    upstream_request_id = CASE WHEN NULLIF($3,'') IS NULL THEN upstream_request_id ELSE $3 END,
+    account_attempts = COALESCE(account_attempts, '[]'::jsonb) || $4::jsonb,
+    attempted_account_ids = CASE WHEN COALESCE(attempted_account_ids, '[]'::jsonb) @> $5::jsonb
+      THEN attempted_account_ids ELSE COALESCE(attempted_account_ids, '[]'::jsonb) || $5::jsonb END,
+    updated_at = NOW()
+WHERE task_id = $1 AND status = 'invoking'`, taskID, attempt.AccountID, attempt.UpstreamRequestID, json.RawMessage("["+string(entry)+"]"), json.RawMessage(string(ids)))
+	return err
+}
+
 func (r *asyncImageTaskRepository) TransitionAsyncImageTask(ctx context.Context, transition service.AsyncImageTaskTransition) (*service.AsyncImageTask, error) {
 	if r == nil || r.db == nil {
 		return nil, errors.New("async image task repository is not configured")
@@ -523,7 +544,7 @@ UPDATE async_image_tasks SET
     billing_status = 'prepared',
     progress = GREATEST(progress, 60),
     account_id = $2,
-    upstream_request_id = $3,
+    upstream_request_id = CASE WHEN NULLIF($3,'') IS NULL THEN upstream_request_id ELSE $3 END,
     actual_image_size = CASE WHEN $4::boolean THEN $5 ELSE actual_image_size END,
     image_count = $6,
     billing_request_id = $7,

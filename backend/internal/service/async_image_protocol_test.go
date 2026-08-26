@@ -221,6 +221,31 @@ func TestAsyncImageReferenceDownloadErrorCarriesCauseAndRetryAfter(t *testing.T)
 	require.True(t, errors.Is(err, io.ErrUnexpectedEOF))
 }
 
+func TestAsyncImageReferenceCacheCopiesAndExpires(t *testing.T) {
+	cache := NewAsyncImageReferenceCache(time.Minute, 10)
+	ref := &AsyncImageReference{MIMEType: "image/png", Data: []byte{1, 2, 3}}
+	cache.put("https://cdn.example/a", ref, time.Unix(100, 0))
+	got := cache.get("https://cdn.example/a", time.Unix(101, 0))
+	require.Equal(t, ref.Data, got.Data)
+	got.Data[0] = 9
+	require.Equal(t, byte(1), cache.get("https://cdn.example/a", time.Unix(101, 0)).Data[0])
+	require.Nil(t, cache.get("https://cdn.example/a", time.Unix(161, 0)))
+}
+
+func TestAsyncImageFetchGateHonorsLimitAndCancellation(t *testing.T) {
+	gate := NewAsyncImageFetchGate(1)
+	release, err := gate.acquire(context.Background())
+	require.NoError(t, err)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	_, err = gate.acquire(ctx)
+	require.ErrorIs(t, err, context.Canceled)
+	release()
+	next, err := gate.acquire(context.Background())
+	require.NoError(t, err)
+	next()
+}
+
 func mustDecodeAsyncImagePNG(t *testing.T) []byte {
 	t.Helper()
 	data, err := base64.StdEncoding.DecodeString(asyncImageOnePixelPNG)
@@ -242,6 +267,20 @@ func TestAsyncImageReferenceValidationRejectsGIFTrailingDataAndForgedMIME(t *tes
 	require.Error(t, err)
 
 	_, err = downloader.ValidateBytes(pngData, "image/jpeg")
+	require.Error(t, err)
+}
+
+func TestAsyncImageReferenceDownloadedValidationTrimsOnlyVerifiedTrailingContainerData(t *testing.T) {
+	pngData := testPNG(t)
+	withTrailing := append(append([]byte(nil), pngData...), []byte("\n<!-- CDN metadata -->")...)
+	downloader := AsyncImageReferenceDownloader{MaxBytes: 1 << 20, MaxPixels: 100}
+
+	ref, err := downloader.validateDownloadedImage(withTrailing, "image/png")
+	require.NoError(t, err)
+	require.Equal(t, pngData, ref.Data)
+
+	// The public validator remains strict for uploads and data URIs.
+	_, err = downloader.ValidateBytes(withTrailing, "image/png")
 	require.Error(t, err)
 }
 

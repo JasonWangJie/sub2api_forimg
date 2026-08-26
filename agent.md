@@ -4,12 +4,12 @@
 
 这是 `JasonWangJie/sub2api_forimg` Fork，默认在 `main` 开发。交接基线：
 
-- HEAD：`b958648186fd9079d21111a7f32fa2a2a1a7566a`
-- `git describe --tags --always --dirty`：`v0.1.173.33-2-gb958648-dirty`
-- `backend/cmd/server/VERSION`：`0.1.173.33`
-- 最近功能：异步生图账号尝试审计、Gemini 快速换号、容量重试排除最近失败账号、`execution_unknown` 对账待处理状态，以及异步 API 文档同步
-- 本次交接维护：同步 `/guides/async-image-api` 与 `docs/DURABLE_ASYNC_IMAGE_API.md` 到当前 BB/SC 路由、状态、限制和存储契约，并补齐管理员任务账号尝试/对账审计展示；工作树包含本次页面、后端和交接记录改动
-- 本次冒烟结论：最近三次提交的后端异步/Gemini/网关/迁移定向测试、迁移包测试、`go vet`、编译检查、前端异步 14/14、类型检查、目标 ESLint 和生产构建均通过；管理员审计 Handler 边界测试、前端异步 API/date 7/7 以及唯一失败账号排除回归测试通过；超时成本对账、真实端到端验收仍未完成。最近失败账号排除已改为按唯一账号 ID 计数
+- HEAD：`22fc75bb1e8f231e57b953cfc7c0aad3e5c50a9a`
+- `git describe --tags --always --dirty`：`v0.1.173.34-1-g22fc75b-dirty`
+- `backend/cmd/server/VERSION`：`0.1.173.34`
+- 最近功能：异步生图账号尝试审计、Gemini 快速换号、容量重试排除最近失败账号、`execution_unknown` 对账待处理、参考图混合传输回退与下载闸门
+- 本次交接维护：补齐 Gemini messages 路径的异步 400 换号与参考图抓取错误分类；确认 OpenAI/Gemini 上游 CDN 抓取失败会交给 Worker 持久化切换本地 multipart/inlineData；同步三份交接记录
+- 本次冒烟结论：后端 handler/service/repository 异步定向测试、前端全量 Vitest（239 文件/1620 断言）、类型检查和生产构建均通过；构建只有既有警告；超时成本对账、真实上游/存储端到端验收仍未完成
 - 生产环境：本轮未连接、未修改、未重启
 
 开始工作前必须运行：
@@ -85,3 +85,11 @@ Get-Content backend\cmd\server\VERSION
 - 已执行并通过：`go test ./internal/service -run 'AsyncImage|Gemini' -count=1`、`go test ./internal/handler -run 'AsyncImage|Gateway' -count=1`、`go test ./internal/repository -run 'AsyncImage|Migration' -count=1`、三包 `-run '^$'` 编译检查、`frontend pnpm typecheck`、`frontend pnpm build`。Build 仅有既有 chunk/Browserslist/动态导入警告。
 - 本轮额外通过：`go test ./migrations -count=1`、`go vet ./migrations`、前端异步 Vitest 4 文件共 14 项和目标文件 ESLint；`git diff --check` 通过。
 - 后续重点：网关若提供按上游 request ID 查询接口，再实现 `reconciliation_status=pending` 的主动对账；在此之前禁止自动重放 `execution_unknown`。补充真实网关账号轮换、容量耗尽和上游成本对账端到端测试；为管理员审计历史补充真实上游对账运行时演练。
+
+## 2026-08-26 本轮交接
+
+- 实际状态：分支 `main`；HEAD `22fc75bb1e8f231e57b953cfc7c0aad3e5c50a9a`；`git describe`=`v0.1.173.34-1-g22fc75b-dirty`；VERSION=`0.1.173.34`。工作树含用户既有改动和 `diff-review.txt`，不得回滚或删除。
+- 新增修正：OpenAI/Gemini 异步普通 `400 Invalid request` 触发换号；明确 `image_url fetch failed`、`download ... reference image`、带远程抓取上下文的 `INVALID_IMAGE` 容器错误不走通用换号，而由混合模式切换本地参考图；裸 multipart 图片损坏不回退；Gemini messages 和 Chat Completions 路径行为一致。
+- 本地参考图下载保持独立并发闸门与短时缓存，闸门获得后再次检查缓存；OpenAI 本地回退为 multipart，Gemini 为 inlineData。单账号异步超时默认 300 秒，超过后重新选择账号；无完整响应仍为 `execution_unknown`，不自动重放。
+- 验证已通过：`go test ./internal/handler -run 'AsyncImage|Failover|Gemini.*Async|OpenAI.*Image' -count=1`；`go test ./internal/service -run 'AsyncImage|Gemini.*(Async|Image)|OpenAI.*(Image|Upstream)|Reference|Failover' -count=1`；`go test ./internal/repository -run 'AsyncImage|Migration' -count=1`；`pnpm vitest run`（239/1620）；`pnpm typecheck`；`pnpm build`；`git diff --check`。
+- 未做事项：未连接生产服务器，未做真实网关账号轮换/请求 ID 对账、Redis/PostgreSQL、OSS 或 Fork CI 验收。构建的 Browserslist、动态导入和大 chunk 警告为既有提示。

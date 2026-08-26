@@ -323,6 +323,13 @@ type AsyncImageTaskRepository interface {
 	MarkAsyncImageOutboxFailed(ctx context.Context, id int64, claimToken string, availableAt time.Time, message string) error
 }
 
+// AsyncImageAccountAttemptRepository persists account selection immediately
+// while a task is invoking upstream. Implementations must not advance the
+// task version so the in-flight worker's terminal CAS remains valid.
+type AsyncImageAccountAttemptRepository interface {
+	PersistAsyncImageAccountAttempt(ctx context.Context, taskID string, attempt AsyncImageAccountAttempt) error
+}
+
 // AsyncImageLibraryArchiveOutboxRepository is implemented by persistent
 // repositories after the image library migration. Keeping it separate lets
 // alternate/test task repositories continue to implement the core contract.

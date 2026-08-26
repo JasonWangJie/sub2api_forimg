@@ -26,6 +26,12 @@ func TestAsyncImageExecutionTimeoutDefaultsToTwentyMinutes(t *testing.T) {
 	require.Equal(t, 5*time.Minute, asyncImageExecutionTimeout(service.AsyncImageRuntimeConfig{ExecutionTimeoutSeconds: 300}))
 }
 
+func TestAsyncImageAccountAttemptTimeoutDefaultsAndClampsToTaskTimeout(t *testing.T) {
+	require.Equal(t, 5*time.Minute, asyncImageAccountAttemptTimeout(service.AsyncImageRuntimeConfig{}))
+	require.Equal(t, 5*time.Minute, asyncImageAccountAttemptTimeout(service.AsyncImageRuntimeConfig{AccountAttemptTimeoutSeconds: 300, ExecutionTimeoutSeconds: 1200}))
+	require.Equal(t, 2*time.Minute, asyncImageAccountAttemptTimeout(service.AsyncImageRuntimeConfig{AccountAttemptTimeoutSeconds: 600, ExecutionTimeoutSeconds: 120}))
+}
+
 func TestAsyncImageRecentFailedAccountIDsCountsUniqueAccounts(t *testing.T) {
 	task := &service.AsyncImageTask{
 		AccountAttempts: json.RawMessage(`[
@@ -51,6 +57,9 @@ func TestAsyncImageExplicitReferenceFetchFailure(t *testing.T) {
 	require.True(t, isAsyncImageExplicitReferenceFetchFailure("failed to download image from CDN"))
 	require.False(t, isAsyncImageExplicitReferenceFetchFailure("Internal error encountered"))
 	require.False(t, isAsyncImageExplicitReferenceFetchFailure("All available accounts exhausted"))
+	require.True(t, isAsyncImageExplicitReferenceFetchFailure("download OpenAI reference image: error: reason=INVALID_IMAGE message=image container is invalid or contains trailing data"))
+	require.True(t, isAsyncImageExplicitReferenceFetchFailure("download OpenAI reference image: net/http: TLS handshake timeout"))
+	require.False(t, isAsyncImageExplicitReferenceFetchFailure("image container is invalid or contains trailing data"))
 }
 
 func TestFormatAsyncImageUpstreamFailureUsesChinesePrefix(t *testing.T) {
@@ -159,6 +168,20 @@ func TestPrepareAsyncOpenAIReferenceImagesPassthroughKeepsHTTPSURL(t *testing.T)
 	require.NoError(t, err)
 	require.False(t, local)
 	require.JSONEq(t, string(body), string(prepared))
+}
+
+func TestPrepareAsyncOpenAIReferenceImagesDataURIDoesNotForceCDNDownload(t *testing.T) {
+	body := []byte(`{"model":"gpt-image-2","image_urls":["data:image/png;base64,` + durableAsyncImageOnePixelPNG + `","https://1.1.1.1/ref.png"]}`)
+	prepared, local, err := (&DurableAsyncImageHandler{}).prepareAsyncOpenAIReferenceImagesForTransport(
+		context.Background(), body, service.AsyncImageRuntimeConfig{MaxReferenceImages: 8}, false,
+	)
+	require.NoError(t, err)
+	require.True(t, local, "the data URI is validated and normalized locally")
+	var decoded map[string]any
+	require.NoError(t, json.Unmarshal(prepared, &decoded))
+	urls := decoded["image_urls"].([]any)
+	require.Contains(t, urls[0].(string), "data:image/png;base64,")
+	require.Equal(t, "https://1.1.1.1/ref.png", urls[1].(string), "unrelated HTTPS references remain passthrough")
 }
 
 func TestAsyncImageTypedRetryPolicies(t *testing.T) {

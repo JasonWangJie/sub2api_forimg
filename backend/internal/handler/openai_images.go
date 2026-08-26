@@ -263,14 +263,26 @@ func (h *OpenAIGatewayHandler) Images(c *gin.Context) {
 		}
 		forwardStart := time.Now()
 		writerSizeBeforeForward := service.OpenAIImagesJSONKeepaliveAdjustedWrittenSize(c)
+		accountForwardCtx := requestCtx
+		accountAttemptCancel := func() {}
+		if asyncImageGeneration {
+			if timeout, ok := service.AsyncImageAccountAttemptTimeout(requestCtx); ok {
+				accountForwardCtx, accountAttemptCancel = context.WithTimeout(requestCtx, timeout)
+			}
+		}
 		result, err := func() (*service.OpenAIForwardResult, error) {
 			defer func() {
 				if accountReleaseFunc != nil {
 					accountReleaseFunc()
 				}
 			}()
-			return h.gatewayService.ForwardImages(requestCtx, c, account, body, parsed, channelMapping.MappedModel)
+			return h.gatewayService.ForwardImages(accountForwardCtx, c, account, body, parsed, channelMapping.MappedModel)
 		}()
+		attemptTimedOut := errors.Is(accountForwardCtx.Err(), context.DeadlineExceeded)
+		accountAttemptCancel()
+		if asyncImageGeneration && attemptTimedOut && requestCtx.Err() == nil && result == nil && err != nil {
+			err = &service.UpstreamFailoverError{StatusCode: http.StatusGatewayTimeout, ResponseBody: []byte("upstream account attempt timed out"), ResponseHeaders: c.Writer.Header().Clone()}
+		}
 		forwardDurationMs := time.Since(forwardStart).Milliseconds()
 		upstreamLatencyMs, _ := getContextInt64(c, service.OpsUpstreamLatencyMsKey)
 		responseLatencyMs := forwardDurationMs

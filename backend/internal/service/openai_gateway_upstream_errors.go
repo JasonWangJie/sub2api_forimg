@@ -231,6 +231,33 @@ func (s *OpenAIGatewayService) shouldFailoverOpenAIUpstreamResponse(statusCode i
 	return isOpenAITransientProcessingError(statusCode, upstreamMsg, upstreamBody)
 }
 
+// isOpenAIAsyncAccountFailover400 identifies account/provider-specific 400s
+// that are safe to try on another configured account for durable image tasks.
+// Reference-fetch and multipart contract errors intentionally remain outside
+// this helper: the Durable Worker needs their original response text to
+// trigger a persisted local transport fallback.
+func isOpenAIAsyncAccountFailover400(message string) bool {
+	lower := strings.ToLower(strings.TrimSpace(message))
+	// These are transport/encoding mismatches, not account capability
+	// failures. The durable worker must see the original response so the
+	// hybrid reference strategy can persistently fall back to local multipart.
+	for _, fragment := range []string{
+		"requires multipart/form-data", "image_url fetch failed", "image url fetch failed",
+		"failed to fetch image", "failed to download image", "download openai reference image",
+		"download reference image", "fetch reference image", "fileuri fetch failed",
+	} {
+		if strings.Contains(lower, fragment) {
+			return false
+		}
+	}
+	for _, fragment := range []string{"invalid request", "invalid_request"} {
+		if strings.Contains(lower, fragment) {
+			return true
+		}
+	}
+	return false
+}
+
 // OpenAIRequestBodyTooLargeClientMessage is the fixed downstream message used
 // after all account-specific request body limit failovers are exhausted.
 const OpenAIRequestBodyTooLargeClientMessage = "Request payload is too large"

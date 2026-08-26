@@ -224,6 +224,7 @@ type AsyncImageRuntimeConfig struct {
 	WorkerLeaseSeconds                int      `json:"worker_lease_seconds"`
 	RecoveryIntervalSeconds           int      `json:"recovery_interval_seconds"`
 	ExecutionTimeoutSeconds           int      `json:"execution_timeout_seconds"`
+	AccountAttemptTimeoutSeconds      int      `json:"account_attempt_timeout_seconds"`
 	StorageRetryAttempts              int      `json:"storage_retry_attempts"`
 	BillingRetryAttempts              int      `json:"billing_retry_attempts"`
 	RetryBackoffSeconds               int      `json:"retry_backoff_seconds"`
@@ -248,6 +249,9 @@ type AsyncImageRuntimeConfig struct {
 	MaxReferenceTotalBytes            int64    `json:"max_reference_total_bytes"`
 	MaxReferenceTotalPixels           int64    `json:"max_reference_total_pixels"`
 	DownloadTimeoutSeconds            int      `json:"download_timeout_seconds"`
+	ReferenceFetchConcurrency         int      `json:"reference_fetch_concurrency"`
+	ReferenceCacheTTLSeconds          int      `json:"reference_cache_ttl_seconds"`
+	ReferenceCacheMaxBytes            int64    `json:"reference_cache_max_bytes"`
 	DownloadMaxRedirects              int      `json:"download_max_redirects"`
 	UploadTimeoutSeconds              int      `json:"upload_timeout_seconds"`
 	UploadPerMinute                   int      `json:"upload_per_minute"`
@@ -1017,6 +1021,7 @@ func asyncRuntimeFromConfig(in config.AsyncImageConfig) AsyncImageRuntimeConfig 
 	out.WorkerLeaseSeconds = in.WorkerLeaseSeconds
 	out.RecoveryIntervalSeconds = in.RecoveryIntervalSeconds
 	out.ExecutionTimeoutSeconds = in.ExecutionTimeoutSeconds
+	out.AccountAttemptTimeoutSeconds = in.AccountAttemptTimeoutSeconds
 	out.StorageRetryAttempts = in.StorageRetryAttempts
 	out.BillingRetryAttempts = in.BillingRetryAttempts
 	out.RetryBackoffSeconds = in.RetryBackoffSeconds
@@ -1059,6 +1064,9 @@ func asyncRuntimeFromConfig(in config.AsyncImageConfig) AsyncImageRuntimeConfig 
 	out.MaxReferenceTotalBytes = in.MaxReferenceTotalBytes
 	out.MaxReferenceTotalPixels = in.MaxReferenceTotalPixels
 	out.DownloadTimeoutSeconds = in.DownloadTimeoutSeconds
+	out.ReferenceFetchConcurrency = in.ReferenceFetchConcurrency
+	out.ReferenceCacheTTLSeconds = in.ReferenceCacheTTLSeconds
+	out.ReferenceCacheMaxBytes = in.ReferenceCacheMaxBytes
 	out.DownloadMaxRedirects = in.DownloadMaxRedirects
 	out.UploadTimeoutSeconds = in.UploadTimeoutSeconds
 	out.UploadPerMinute = in.UploadPerMinute
@@ -1080,6 +1088,7 @@ func defaultAsyncImageRuntimeConfig() AsyncImageRuntimeConfig {
 		WorkerLeaseSeconds:                120,
 		RecoveryIntervalSeconds:           30,
 		ExecutionTimeoutSeconds:           1200,
+		AccountAttemptTimeoutSeconds:      300,
 		StorageRetryAttempts:              5,
 		BillingRetryAttempts:              10,
 		RetryBackoffSeconds:               30,
@@ -1104,6 +1113,9 @@ func defaultAsyncImageRuntimeConfig() AsyncImageRuntimeConfig {
 		MaxReferenceTotalBytes:            64 << 20,
 		MaxReferenceTotalPixels:           80_000_000,
 		DownloadTimeoutSeconds:            30,
+		ReferenceFetchConcurrency:         8,
+		ReferenceCacheTTLSeconds:          60,
+		ReferenceCacheMaxBytes:            128 << 20,
 		DownloadMaxRedirects:              3,
 		UploadTimeoutSeconds:              300,
 		UploadPerMinute:                   20,
@@ -1247,6 +1259,11 @@ func normalizeAsyncImageRuntimeConfig(in *AsyncImageRuntimeConfig) {
 	if in.ExecutionTimeoutSeconds <= 0 {
 		in.ExecutionTimeoutSeconds = defaults.ExecutionTimeoutSeconds
 	}
+	if in.AccountAttemptTimeoutSeconds <= 0 {
+		in.AccountAttemptTimeoutSeconds = defaults.AccountAttemptTimeoutSeconds
+	} else if in.AccountAttemptTimeoutSeconds > in.ExecutionTimeoutSeconds {
+		in.AccountAttemptTimeoutSeconds = in.ExecutionTimeoutSeconds
+	}
 	if in.StorageRetryAttempts <= 0 {
 		in.StorageRetryAttempts = defaults.StorageRetryAttempts
 	}
@@ -1285,6 +1302,21 @@ func normalizeAsyncImageRuntimeConfig(in *AsyncImageRuntimeConfig) {
 	}
 	if in.DownloadTimeoutSeconds <= 0 {
 		in.DownloadTimeoutSeconds = defaults.DownloadTimeoutSeconds
+	}
+	if in.ReferenceFetchConcurrency <= 0 {
+		in.ReferenceFetchConcurrency = defaults.ReferenceFetchConcurrency
+	} else if in.ReferenceFetchConcurrency > 128 {
+		in.ReferenceFetchConcurrency = 128
+	}
+	if in.ReferenceCacheTTLSeconds <= 0 {
+		in.ReferenceCacheTTLSeconds = defaults.ReferenceCacheTTLSeconds
+	} else if in.ReferenceCacheTTLSeconds > 3600 {
+		in.ReferenceCacheTTLSeconds = 3600
+	}
+	if in.ReferenceCacheMaxBytes <= 0 {
+		in.ReferenceCacheMaxBytes = defaults.ReferenceCacheMaxBytes
+	} else if in.ReferenceCacheMaxBytes > 1<<30 {
+		in.ReferenceCacheMaxBytes = 1 << 30
 	}
 	if in.DownloadMaxRedirects <= 0 {
 		in.DownloadMaxRedirects = defaults.DownloadMaxRedirects

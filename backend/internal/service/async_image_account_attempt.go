@@ -29,6 +29,7 @@ const (
 type asyncImageAccountAttemptContextKey struct{}
 type asyncImageExcludedAccountsContextKey struct{}
 type asyncImageGeminiMaxSwitchesContextKey struct{}
+type asyncImageAccountAttemptTimeoutContextKey struct{}
 
 func WithAsyncImageExcludedAccountIDs(ctx context.Context, ids map[int64]struct{}) context.Context {
 	if len(ids) == 0 {
@@ -68,12 +69,37 @@ func AsyncImageGeminiMaxAccountSwitches(ctx context.Context) (int, bool) {
 	return max, ok
 }
 
+func WithAsyncImageAccountAttemptTimeout(ctx context.Context, timeout time.Duration) context.Context {
+	if timeout <= 0 {
+		return ctx
+	}
+	return context.WithValue(ctx, asyncImageAccountAttemptTimeoutContextKey{}, timeout)
+}
+
+func AsyncImageAccountAttemptTimeout(ctx context.Context) (time.Duration, bool) {
+	if ctx == nil {
+		return 0, false
+	}
+	timeout, ok := ctx.Value(asyncImageAccountAttemptTimeoutContextKey{}).(time.Duration)
+	return timeout, ok && timeout > 0
+}
+
 // AsyncImageAccountAttemptCapture collects attempts from all failover loops
 // belonging to one worker invocation. It is intentionally context-scoped so
 // synchronous requests do not allocate or persist this state.
 type AsyncImageAccountAttemptCapture struct {
 	mu       sync.RWMutex
 	attempts []AsyncImageAccountAttempt
+	persist  func(context.Context, AsyncImageAccountAttempt)
+}
+
+func (c *AsyncImageAccountAttemptCapture) SetPersistor(fn func(context.Context, AsyncImageAccountAttempt)) {
+	if c == nil {
+		return
+	}
+	c.mu.Lock()
+	c.persist = fn
+	c.mu.Unlock()
 }
 
 func WithAsyncImageAccountAttemptCapture(ctx context.Context, capture *AsyncImageAccountAttemptCapture) context.Context {
@@ -101,7 +127,20 @@ func RecordAsyncImageAccountAttempt(ctx context.Context, attempt AsyncImageAccou
 	}
 	capture.mu.Lock()
 	capture.attempts = append(capture.attempts, attempt)
+	persist := capture.persist
 	capture.mu.Unlock()
+	if persist != nil {
+		// Account-attempt auditing is part of task durability, not the client
+		// request lifecycle. Keep the write alive briefly when an upstream
+		// timeout or worker cancellation has already canceled the parent.
+		persistCtx := context.Background()
+		if ctx != nil {
+			persistCtx = context.WithoutCancel(ctx)
+		}
+		persistCtx, cancel := context.WithTimeout(persistCtx, 5*time.Second)
+		persist(persistCtx, attempt)
+		cancel()
+	}
 }
 
 func (c *AsyncImageAccountAttemptCapture) Attempts() []AsyncImageAccountAttempt {

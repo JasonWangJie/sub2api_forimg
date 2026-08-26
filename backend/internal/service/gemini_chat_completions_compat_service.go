@@ -155,8 +155,9 @@ func (s *GeminiMessagesCompatService) forwardClaudeBodyAsChatCompletions(
 			setOpsUpstreamError(c, 0, safeErr, "")
 			if asyncImageGeneration {
 				return nil, &UpstreamFailoverError{
-					StatusCode:   http.StatusBadGateway,
-					ResponseBody: []byte(`{"error":{"message":"Upstream request failed","type":"upstream_error"}}`),
+					StatusCode:      http.StatusBadGateway,
+					ResponseBody:    []byte(`{"error":{"message":"Upstream request failed","type":"upstream_error"}}`),
+					ResponseHeaders: c.Writer.Header().Clone(),
 				}
 			}
 			return nil, s.writeChatCompletionsError(c, http.StatusBadGateway, "upstream_error", "Upstream request failed after retries: "+safeErr)
@@ -240,9 +241,17 @@ func (s *GeminiMessagesCompatService) forwardClaudeBodyAsChatCompletions(
 			s.handleGeminiUpstreamError(ctx, account, resp.StatusCode, resp.Header, respBody)
 		}
 		evBody := unwrapIfNeeded(account.Type == AccountTypeOAuth, respBody)
+		if asyncImageGeneration && resp.StatusCode == http.StatusBadRequest {
+			msg := strings.ToLower(strings.TrimSpace(extractUpstreamErrorMessage(evBody)))
+			if (strings.Contains(msg, "invalid request") || strings.Contains(msg, "invalid_request")) && !IsAsyncImageReferenceFetchFailureMessage(msg) {
+				return nil, &UpstreamFailoverError{StatusCode: resp.StatusCode, ResponseBody: evBody, ResponseHeaders: resp.Header.Clone(), NextAccountAction: NextAccountRetry, Reason: GatewayFailureReason(msg)}
+			}
+		}
 
-		if s.shouldFailoverGeminiUpstreamError(resp.StatusCode) {
-			upstreamMsg := sanitizeUpstreamErrorMessage(strings.TrimSpace(extractUpstreamErrorMessage(evBody)))
+		upstreamMessage := strings.TrimSpace(extractUpstreamErrorMessage(evBody))
+		if s.shouldFailoverGeminiUpstreamError(resp.StatusCode) &&
+			!(asyncImageGeneration && IsAsyncImageReferenceFetchFailureMessage(upstreamMessage)) {
+			upstreamMsg := sanitizeUpstreamErrorMessage(upstreamMessage)
 			appendOpsUpstreamError(c, OpsUpstreamErrorEvent{
 				Platform:           account.Platform,
 				AccountID:          account.ID,

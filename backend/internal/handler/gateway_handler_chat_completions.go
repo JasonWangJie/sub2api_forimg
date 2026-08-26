@@ -314,6 +314,12 @@ func (h *GatewayHandler) ChatCompletions(c *gin.Context) {
 		var result *service.ForwardResult
 		setActualUpstreamEndpoint(c, "")
 		forwardCtx := c.Request.Context()
+		var accountAttemptCancel context.CancelFunc
+		if asyncImageGeneration {
+			if timeout, ok := service.AsyncImageAccountAttemptTimeout(forwardCtx); ok {
+				forwardCtx, accountAttemptCancel = context.WithTimeout(forwardCtx, timeout)
+			}
+		}
 		if asyncImageGeneration && fs.SwitchCount > 0 {
 			forwardCtx = service.WithAccountSwitchCount(forwardCtx, fs.SwitchCount, false)
 		}
@@ -335,9 +341,16 @@ func (h *GatewayHandler) ChatCompletions(c *gin.Context) {
 				return
 			}
 			setActualUpstreamEndpoint(c, EndpointAntigravityGenerateContent)
-			result, err = h.antigravityGatewayService.ForwardAsChatCompletions(c.Request.Context(), c, account, forwardBody, parsedReq)
+			result, err = h.antigravityGatewayService.ForwardAsChatCompletions(forwardCtx, c, account, forwardBody, parsedReq)
 		} else {
-			result, err = h.gatewayService.ForwardAsChatCompletions(c.Request.Context(), c, account, forwardBody, parsedReq)
+			result, err = h.gatewayService.ForwardAsChatCompletions(forwardCtx, c, account, forwardBody, parsedReq)
+		}
+		attemptTimedOut := errors.Is(forwardCtx.Err(), context.DeadlineExceeded)
+		if accountAttemptCancel != nil {
+			accountAttemptCancel()
+		}
+		if asyncImageGeneration && attemptTimedOut && c.Request.Context().Err() == nil && result == nil && err != nil {
+			err = &service.UpstreamFailoverError{StatusCode: http.StatusGatewayTimeout, ResponseBody: []byte("upstream account attempt timed out"), ResponseHeaders: c.Writer.Header().Clone()}
 		}
 
 		if accountReleaseFunc != nil {

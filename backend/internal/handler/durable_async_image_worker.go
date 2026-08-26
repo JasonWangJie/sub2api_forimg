@@ -211,30 +211,9 @@ func (h *DurableAsyncImageHandler) recoverAsyncImageTasks(ctx context.Context, c
 		}
 	}
 
-	executionTimeout := asyncImageExecutionTimeout(cfg)
-	startedBefore := time.Now().UTC().Add(-executionTimeout)
-	if timeoutRepo, ok := repo.(service.AsyncImageInvocationTimeoutRepository); ok {
-		timedOut, err := timeoutRepo.ListTimedOutInvokingAsyncImageTasks(ctx, startedBefore, 100)
-		if err == nil {
-			for _, task := range timedOut {
-				code := "execution_timeout"
-				message := asyncImageSafeError(fmt.Errorf("image generation timed out after %s", executionTimeout.Round(time.Second)))
-				finished := time.Now().UTC()
-				_, transitionErr := h.tasks.Transition(ctx, service.AsyncImageTaskTransition{
-					TaskID: task.TaskID, ExpectedVersion: task.Version,
-					FromStatuses: []string{service.AsyncImageTaskStatusInvoking},
-					ToStatus:     service.AsyncImageTaskStatusFailed,
-					ErrorCode:    &code, ErrorMessage: &message, FinishedAt: &finished,
-					ClearRequestPayload: true, EventType: "execution_timeout",
-				})
-				if transitionErr != nil && !errors.Is(transitionErr, service.ErrAsyncImageInvalidTransition) {
-					logger.L().Warn("async_image.mark_execution_timeout_failed", zap.String("task_id", task.TaskID), zap.Error(transitionErr))
-				}
-			}
-		} else if ctx.Err() == nil {
-			logger.L().Warn("async_image.list_execution_timeouts_failed", zap.Error(err))
-		}
-	}
+	// Active workers own the configured per-account timeout. The recovery scanner
+	// only handles rows that have lost their heartbeat/lease; its UpdatedBefore
+	// CAS prevents it from racing a live worker's final transition.
 
 	staleBefore := time.Now().UTC().Add(-lease)
 	invoking, err := repo.ListRecoverableAsyncImageTasks(ctx, []string{service.AsyncImageTaskStatusInvoking}, staleBefore, 0, 0, 100)
@@ -392,6 +371,17 @@ func asyncImageExecutionTimeout(cfg service.AsyncImageRuntimeConfig) time.Durati
 	return 20 * time.Minute
 }
 
+func asyncImageAccountAttemptTimeout(cfg service.AsyncImageRuntimeConfig) time.Duration {
+	if cfg.AccountAttemptTimeoutSeconds > 0 {
+		attempt := time.Duration(cfg.AccountAttemptTimeoutSeconds) * time.Second
+		if total := asyncImageExecutionTimeout(cfg); attempt > total {
+			return total
+		}
+		return attempt
+	}
+	return 5 * time.Minute
+}
+
 func asyncImageInvocationTimedOut(task *service.AsyncImageTask, timeout time.Duration, now time.Time) bool {
 	if task == nil || timeout <= 0 {
 		return false
@@ -492,6 +482,17 @@ func asyncImageInvocationHeartbeatFresh(task *service.AsyncImageTask, cfg servic
 
 func (h *DurableAsyncImageHandler) invokeAsyncImageTask(parent context.Context, task *service.AsyncImageTask, cfg service.AsyncImageRuntimeConfig) asyncImageWorkerDisposition {
 	attemptCapture := &service.AsyncImageAccountAttemptCapture{}
+	if repo := h.tasks.Repository(); repo != nil {
+		if attemptRepo, ok := repo.(service.AsyncImageAccountAttemptRepository); ok {
+			attemptRepoRef := attemptRepo
+			taskID := task.TaskID
+			attemptCapture.SetPersistor(func(ctx context.Context, attempt service.AsyncImageAccountAttempt) {
+				if err := attemptRepoRef.PersistAsyncImageAccountAttempt(ctx, taskID, attempt); err != nil && !errors.Is(err, service.ErrAsyncImageInvalidTransition) {
+					logger.L().Warn("async_image.account_attempt_persist_failed", zap.String("task_id", taskID), zap.Int64("account_id", attempt.AccountID), zap.Error(err))
+				}
+			})
+		}
+	}
 	parent = service.WithAsyncImageAccountAttemptCapture(parent, attemptCapture)
 	parent = service.WithAsyncImageExcludedAccountIDs(parent, asyncImageRecentFailedAccountIDs(task))
 	if task != nil && task.Platform == service.PlatformGemini {
@@ -514,6 +515,7 @@ func (h *DurableAsyncImageHandler) invokeAsyncImageTask(parent context.Context, 
 	}
 
 	executionTimeout := asyncImageExecutionTimeout(cfg)
+	parent = service.WithAsyncImageAccountAttemptTimeout(parent, asyncImageAccountAttemptTimeout(cfg))
 	executionCtx, cancel := context.WithTimeout(parent, executionTimeout)
 	defer cancel()
 	body, path, contentType, err := h.buildAsyncImageUpstreamRequest(executionCtx, task, payload, cfg, storage)
@@ -573,7 +575,10 @@ func (h *DurableAsyncImageHandler) invokeAsyncImageTask(parent context.Context, 
 	if isOpsRoutingCapacityLimited(ginContext) {
 		return h.deferAsyncImageForLocalCapacity(parent, task, cfg)
 	}
-	if executionCtx.Err() != nil {
+	// A deadline racing with response handling must not discard a complete
+	// upstream response. Only an invocation with no response body is unknown;
+	// a received error response still goes through the normal retry classifier.
+	if executionCtx.Err() != nil && recorder.Body.Len() == 0 {
 		h.markAsyncImageExecutionUnknown(parent, task, fmt.Sprintf("image generation timed out after %s; upstream reconciliation pending", executionTimeout.Round(time.Second)))
 		return asyncImageWorkerDisposition{}
 	}
@@ -724,7 +729,7 @@ func isAsyncImageExplicitReferenceFetchFailure(message string) bool {
 	lower := strings.ToLower(message)
 	for _, permanent := range []string{
 		"http 401", "http 403", "http 404", "401 unauthorized", "403 forbidden", "404 not found",
-		"image_too_many_pixels", "exceeds the configured", "invalid image", "corrupt image",
+		"image_too_many_pixels", "exceeds the configured", "corrupt image",
 	} {
 		if strings.Contains(lower, permanent) {
 			return false
@@ -732,14 +737,21 @@ func isAsyncImageExplicitReferenceFetchFailure(message string) bool {
 	}
 	for _, fragment := range []string{
 		"image_url fetch failed", "image url fetch failed", "failed to fetch image",
-		"failed to download image", "download reference image", "fetch reference image",
+		"failed to download image", "download reference image", "download openai reference image",
+		"fetch reference image",
 		"could not fetch image", "unable to fetch image", "fileuri fetch failed",
 	} {
 		if strings.Contains(lower, fragment) {
 			return true
 		}
 	}
-	return false
+	if strings.Contains(lower, "image container is invalid") &&
+		(strings.Contains(lower, "download") || strings.Contains(lower, "fetch") || strings.Contains(lower, "image_url")) {
+		return true
+	}
+	// Provider-side INVALID_IMAGE is retryable only when it is explicitly
+	// attached to URL fetching; a bare malformed-image response is permanent.
+	return strings.Contains(lower, "invalid image") && strings.Contains(lower, "fetch")
 }
 
 func isAsyncImageMultipartRequiredFailure(message string) bool {
@@ -955,6 +967,27 @@ func (h *DurableAsyncImageHandler) retryAsyncImageUpstreamTransient(ctx context.
 	return asyncImageWorkerDisposition{requeue: true, delay: delay}
 }
 
+func (h *DurableAsyncImageHandler) retryAsyncImageAccountAttempt(ctx context.Context, task *service.AsyncImageTask, cfg service.AsyncImageRuntimeConfig, detail string) asyncImageWorkerDisposition {
+	if task == nil || task.RetryCount >= cfg.TotalMaxRetries {
+		if task != nil {
+			h.failAsyncImageTask(ctx, task, "execution_timeout", asyncImageSafeError(errors.New(detail)), false)
+		}
+		return asyncImageWorkerDisposition{}
+	}
+	code := "account_attempt_timeout"
+	message := asyncImageSafeError(errors.New(detail))
+	progress := 0
+	transition := service.AsyncImageTaskTransition{TaskID: task.TaskID, ExpectedVersion: task.Version,
+		FromStatuses: []string{service.AsyncImageTaskStatusInvoking}, ToStatus: service.AsyncImageTaskStatusQueued,
+		Progress: &progress, ErrorCode: &code, ErrorMessage: &message, IncrementRetry: true,
+		EventType: "account_attempt_timeout"}
+	if _, err := h.tasks.Transition(ctx, enrichAsyncImageAttemptTransition(ctx, task, transition)); err != nil {
+		logger.L().Warn("async_image.account_attempt_timeout_transition_failed", zap.String("task_id", task.TaskID), zap.Error(err))
+		return asyncImageWorkerDisposition{}
+	}
+	return asyncImageWorkerDisposition{requeue: true, delay: time.Second}
+}
+
 // forwardAsyncImageUpstream keeps the image concurrency lease scoped to the
 // single upstream invocation. Gemini's compatibility Chat Completions route
 // has no public image gate, so the worker acquires the shared Gateway lease
@@ -1009,7 +1042,9 @@ func (h *DurableAsyncImageHandler) buildAsyncImageUpstreamRequest(
 			return append([]byte(nil), payload.Body...), path, contentType, nil
 		}
 		mode := asyncImageReferenceTransport(task, cfg)
-		downloadRemote := mode == service.AsyncImageReferenceTransportLocal || asyncOpenAIRequestHasDataURI(payload.Body)
+		// Data URIs are always validated locally by the inliner. Their presence
+		// must not force unrelated HTTPS CDN references into local download mode.
+		downloadRemote := mode == service.AsyncImageReferenceTransportLocal
 		body, preparedLocal, err := h.prepareAsyncOpenAIReferenceImagesForTransport(ctx, payload.Body, cfg, downloadRemote)
 		if err == nil && preparedLocal && task.RequestType == service.AsyncImageRequestTypeImageToImage {
 			body, contentType, err = buildAsyncOpenAIEditMultipart(body, contentType)
@@ -1031,9 +1066,39 @@ func (h *DurableAsyncImageHandler) buildAsyncImageUpstreamRequest(
 			MaxImages: cfg.MaxReferenceImages, MaxTotalBytes: cfg.MaxReferenceTotalBytes,
 			MaxTotalPixels: cfg.MaxReferenceTotalPixels,
 		},
+		FetchGate: h.asyncImageReferenceFetchGate(cfg),
+		Cache:     h.asyncImageReferenceCache(cfg),
 	}
 	body, err := service.BuildGeminiAsyncChatBodyWithTransport(ctx, payload.Normalized, downloader, asyncImageReferenceTransport(task, cfg))
 	return body, EndpointChatCompletions, "application/json", err
+}
+
+func (h *DurableAsyncImageHandler) asyncImageReferenceFetchGate(cfg service.AsyncImageRuntimeConfig) *service.AsyncImageFetchGate {
+	if h == nil {
+		return nil
+	}
+	h.referenceMu.Lock()
+	defer h.referenceMu.Unlock()
+	if h.referenceGate == nil || h.referenceGateLimit != cfg.ReferenceFetchConcurrency {
+		h.referenceGate = service.NewAsyncImageFetchGate(cfg.ReferenceFetchConcurrency)
+		h.referenceGateLimit = cfg.ReferenceFetchConcurrency
+	}
+	return h.referenceGate
+}
+
+func (h *DurableAsyncImageHandler) asyncImageReferenceCache(cfg service.AsyncImageRuntimeConfig) *service.AsyncImageReferenceCache {
+	if h == nil {
+		return nil
+	}
+	h.referenceMu.Lock()
+	defer h.referenceMu.Unlock()
+	ttl := time.Duration(cfg.ReferenceCacheTTLSeconds) * time.Second
+	if h.referenceCache == nil || h.referenceCacheTTL != ttl || h.referenceCacheMaxBytes != cfg.ReferenceCacheMaxBytes {
+		h.referenceCache = service.NewAsyncImageReferenceCache(ttl, cfg.ReferenceCacheMaxBytes)
+		h.referenceCacheTTL = ttl
+		h.referenceCacheMaxBytes = cfg.ReferenceCacheMaxBytes
+	}
+	return h.referenceCache
 }
 
 func asyncImageReferenceTransport(task *service.AsyncImageTask, cfg service.AsyncImageRuntimeConfig) string {
@@ -1048,10 +1113,6 @@ func asyncImageReferenceTransport(task *service.AsyncImageTask, cfg service.Asyn
 		return cfg.GeminiReferenceTransportMode
 	}
 	return cfg.OpenAIReferenceTransportMode
-}
-
-func asyncOpenAIRequestHasDataURI(body []byte) bool {
-	return bytes.Contains(bytes.ToLower(body), []byte(`data:image/`))
 }
 
 func isMultipartContentType(contentType string) bool {
@@ -1196,6 +1257,8 @@ func (h *DurableAsyncImageHandler) prepareAsyncOpenAIReferenceImagesForTransport
 			MaxImages: cfg.MaxReferenceImages, MaxTotalBytes: cfg.MaxReferenceTotalBytes,
 			MaxTotalPixels: cfg.MaxReferenceTotalPixels,
 		},
+		FetchGate: h.asyncImageReferenceFetchGate(cfg),
+		Cache:     h.asyncImageReferenceCache(cfg),
 	}
 	changed, err := inlineAsyncOpenAIReferencesWithTransport(ctx, &root, downloader, downloadRemote)
 	if err != nil {

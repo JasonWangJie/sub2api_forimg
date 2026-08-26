@@ -20,13 +20,13 @@ codegraph init
 
 ## 当前版本快照
 
-记录日期：`2026-08-25`（最近三次提交冒烟复验并补齐管理员任务审计展示、修正最近失败账号唯一 ID 计数：异步账号尝试/对账、版本同步、异步 API 文档与前端页面；后端定向测试、迁移检查、前端异步用例、类型检查和生产构建通过；文档与本轮代码同步后工作树 dirty；未部署或重启生产）。
+记录日期：`2026-08-26`（异步生图账号换号、超时切换、参考图透传回退和下载闸门修正；补齐 Gemini messages 路径的 400 换号/参考图错误分类；后端定向测试、迁移检查、前端全量测试、类型检查和生产构建通过；工作树 dirty；未部署或重启生产）。
 
 | 项目 | 当前记录 |
 |---|---|
 | 发布版本文件 | `backend/cmd/server/VERSION`（以仓库文件为准） |
-| 文档记录时 HEAD | `b958648186fd9079d21111a7f32fa2a2a1a7566a` |
-| HEAD 描述 | `v0.1.173.33-2-gb958648-dirty` |
+| 文档记录时 HEAD | `22fc75bb1e8f231e57b953cfc7c0aad3e5c50a9a` |
+| HEAD 描述 | `v0.1.173.34-1-g22fc75b-dirty` |
 | 当前及后续默认分支 | `main` |
 | 已合并原作者主线 | 以 `git log` / `upstream/main` 实际为准 |
 | SC 上传安全迁移 | `backend/migrations/187_ZJ_async_image_upload_reservations.sql` |
@@ -291,3 +291,12 @@ cd frontend
 pnpm run dev
 
 # 默认 http://127.0.0.1:3000 ，/api 与 /v1 代理到 :8080
+
+## 2026-08-26 异步生图错误处置与参考图回退
+
+- OpenAI/Gemini 异步上游 `400 Invalid request` 在排除明确参考图抓取/下载错误后触发换号；不会在同一配置账号上重复消耗重试次数。
+- OpenAI/Gemini 的 `image_url fetch failed`、`download ... reference image`、带远程抓取上下文的 `INVALID_IMAGE` 容器错误和 TLS/网络抓取错误交给混合传输策略：持久化切换到本地参考图，OpenAI 使用 multipart、Gemini 使用 inlineData；裸的 multipart 图片损坏错误不回退；后续 5xx/容量重试保持本地阶段。
+- 参考图本地下载使用独立并发闸门和短时缓存；闸门获得后再次检查缓存，降低并发 miss 导致的重复 CDN 请求。
+- 单账号异步调用默认 300 秒超时，超时后切换可用账号；没有完整响应的中断仍标记 `execution_unknown` 并等待对账，不自动盲目重放。
+- 本轮实际工作树：HEAD `22fc75bb1e8f231e57b953cfc7c0aad3e5c50a9a`，`git describe` 为 `v0.1.173.34-1-g22fc75b-dirty`，版本 `0.1.173.34`。仅修改本地代码/示例配置，未连接、修改或重启生产服务器。
+- 验证：后端 handler/service/repository 异步定向测试通过；前端 Vitest `239` 个文件、`1620` 个断言通过；`pnpm typecheck`、`pnpm build`、`git diff --check` 通过。构建保留既有 Browserslist、动态导入和大 chunk 警告；真实上游、Redis、PostgreSQL、OSS、生产和 Fork CI 未验证。

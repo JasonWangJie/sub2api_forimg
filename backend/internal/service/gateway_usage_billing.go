@@ -533,14 +533,29 @@ func detachStreamUpstreamContext(ctx context.Context, stream bool) (context.Cont
 	if !stream {
 		return ctx, func() {}
 	}
-	return context.WithoutCancel(ctx), func() {}
+	return detachedDeadlineContext(ctx)
 }
 
 func detachUpstreamContext(ctx context.Context) (context.Context, context.CancelFunc) {
 	if ctx == nil {
 		return context.Background(), func() {}
 	}
-	return context.WithoutCancel(ctx), func() {}
+	return detachedDeadlineContext(ctx)
+}
+
+// detachedDeadlineContext ignores caller cancellation while preserving an
+// explicit operation deadline. Async image workers use this to enforce both a
+// per-account timeout and a whole-task timeout without aborting on client exit.
+func detachedDeadlineContext(ctx context.Context) (context.Context, context.CancelFunc) {
+	base := context.WithoutCancel(ctx)
+	if _, async := AsyncImageAccountAttemptTimeout(ctx); async {
+		deadline, ok := ctx.Deadline()
+		if !ok {
+			return base, func() {}
+		}
+		return context.WithDeadline(base, deadline)
+	}
+	return base, func() {}
 }
 
 // billingDeps 扣费逻辑依赖的服务（由各 gateway service 提供）

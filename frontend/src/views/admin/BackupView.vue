@@ -210,10 +210,15 @@
               <label class="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">{{ t('admin.backup.imageStorage.workerConcurrency') }}</label>
               <input v-model.number="imageStorageForm.async_image.worker_concurrency" type="number" min="1" max="64" class="input w-full" />
             </div>
-            <div>
-              <label class="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">{{ t('admin.backup.imageStorage.executionTimeoutSeconds') }}</label>
-              <input v-model.number="imageStorageForm.async_image.execution_timeout_seconds" type="number" min="30" class="input w-full" />
-            </div>
+              <div>
+                <label class="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">{{ t('admin.backup.imageStorage.executionTimeoutSeconds') }}</label>
+                <input v-model.number="imageStorageForm.async_image.execution_timeout_seconds" type="number" min="30" class="input w-full" />
+              </div>
+              <div>
+                <label class="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">{{ t('admin.backup.imageStorage.accountAttemptTimeoutSeconds') }}</label>
+                <input v-model.number="imageStorageForm.async_image.account_attempt_timeout_seconds" type="number" min="30" class="input w-full" />
+                <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">{{ t('admin.backup.imageStorage.accountAttemptTimeoutHint') }}</p>
+              </div>
             <div>
               <label class="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">{{ t('admin.backup.imageStorage.signedUrlExpirySeconds') }}</label>
               <input v-model.number="imageStorageForm.async_image.signed_url_expiry_seconds" type="number" min="60" class="input w-full" />
@@ -371,6 +376,18 @@
               <div>
                 <label class="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">{{ t('admin.backup.imageStorage.downloadTimeoutSeconds') }}</label>
                 <input v-model.number="imageStorageForm.async_image.download_timeout_seconds" type="number" min="1" class="input w-full" />
+              </div>
+              <div>
+                <label class="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">{{ t('admin.backup.imageStorage.referenceFetchConcurrency') }}</label>
+                <input v-model.number="imageStorageForm.async_image.reference_fetch_concurrency" type="number" min="1" max="128" class="input w-full" />
+              </div>
+              <div>
+                <label class="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">{{ t('admin.backup.imageStorage.referenceCacheTTLSeconds') }}</label>
+                <input v-model.number="imageStorageForm.async_image.reference_cache_ttl_seconds" type="number" min="1" max="3600" class="input w-full" />
+              </div>
+              <div>
+                <label class="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">{{ t('admin.backup.imageStorage.referenceCacheMaxBytes') }}</label>
+                <input v-model.number="imageStorageForm.async_image.reference_cache_max_bytes" type="number" min="1048576" max="1073741824" step="1048576" class="input w-full" />
               </div>
               <div>
                 <label class="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">{{ t('admin.backup.imageStorage.uploadTimeoutSeconds') }}</label>
@@ -808,6 +825,9 @@ const imageStorageForm = ref<ImageStorageConfig>({
     max_reference_total_bytes: 67108864,
     max_reference_total_pixels: 80000000,
     download_timeout_seconds: 30,
+    reference_fetch_concurrency: 8,
+    reference_cache_ttl_seconds: 60,
+    reference_cache_max_bytes: 128 * 1024 * 1024,
     download_max_redirects: 3,
     signed_url_expiry_seconds: 3600,
     input_retention_hours: 24,

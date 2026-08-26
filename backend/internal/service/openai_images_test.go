@@ -1060,6 +1060,48 @@ func TestOpenAIGatewayServiceForwardImages_OAuthUpstreamHTTPErrorSurfacesRealErr
 	require.Contains(t, gjson.Get(rec.Body.String(), "error.message").String(), "Invalid value for 'size'")
 }
 
+func TestOpenAIGatewayServiceForwardImages_OAuthAsyncInvalidRequestFailsOverWithRequestID(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	body := []byte(`{"model":"gpt-image-2","prompt":"draw a cat","response_format":"b64_json"}`)
+	req := httptest.NewRequest(http.MethodPost, "/v1/images/generations", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = req
+
+	svc := &OpenAIGatewayService{httpUpstream: &httpUpstreamRecorder{resp: &http.Response{
+		StatusCode: http.StatusBadRequest,
+		Header: http.Header{
+			"Content-Type": []string{"application/json"},
+			"X-Request-Id": []string{"rid-async-invalid-request"},
+		},
+		Body: io.NopCloser(strings.NewReader(`{"error":{"type":"invalid_request_error","message":"Invalid request for this image account"}}`)),
+	}}}
+	parsed, err := svc.ParseOpenAIImagesRequest(c, body)
+	require.NoError(t, err)
+	account := &Account{
+		ID: 101, Name: "openai-oauth-async", Platform: PlatformOpenAI, Type: AccountTypeOAuth,
+		Credentials: map[string]any{"access_token": "token-123"},
+	}
+	capture := &AsyncImageAccountAttemptCapture{}
+	ctx := WithAsyncImageAccountAttemptCapture(context.Background(), capture)
+
+	result, err := svc.ForwardImages(ctx, c, account, body, parsed, "")
+	require.Nil(t, result)
+	var failoverErr *UpstreamFailoverError
+	require.ErrorAs(t, err, &failoverErr)
+	require.Equal(t, http.StatusBadRequest, failoverErr.StatusCode)
+	require.Equal(t, "rid-async-invalid-request", failoverErr.ResponseHeaders.Get("x-request-id"))
+	require.False(t, failoverErr.RetryableOnSameAccount, "async Invalid request must switch accounts instead of retrying the same account")
+	require.Empty(t, rec.Body.Bytes(), "async invalid request must remain failoverable")
+}
+
+func TestOpenAIAsyncAccountFailover400LeavesReferenceTransportErrorsForWorker(t *testing.T) {
+	require.True(t, isOpenAIAsyncAccountFailover400("Invalid request for this image account"))
+	require.False(t, isOpenAIAsyncAccountFailover400("Invalid request: images/edits requires multipart/form-data"))
+	require.False(t, isOpenAIAsyncAccountFailover400("image_url fetch failed: curl: (28) Connection timed out"))
+}
+
 func TestOpenAIGatewayServiceForwardImages_OAuthNonStreamModerationBlockedReturnsClientError(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	body := []byte(`{"model":"gpt-image-2","prompt":"draw blocked image","response_format":"b64_json"}`)

@@ -1741,7 +1741,16 @@ func (s *OpenAIGatewayService) forwardOpenAIImagesOAuth(
 		resp.Body = io.NopCloser(bytes.NewReader(respBody))
 		upstreamMsg := strings.TrimSpace(extractUpstreamErrorMessage(respBody))
 		upstreamMsg = sanitizeUpstreamErrorMessage(upstreamMsg)
-		if s.shouldFailoverOpenAIUpstreamResponse(resp.StatusCode, upstreamMsg, respBody) {
+		shouldFailover := s.shouldFailoverOpenAIUpstreamResponse(resp.StatusCode, upstreamMsg, respBody)
+		// Async image requests must treat provider-side 400 "Invalid request"
+		// responses as account-scoped failures. Different configured gateway
+		// accounts can expose different image capabilities or request policies;
+		// the durable worker should therefore try another account before
+		// returning a terminal client error.
+		if !shouldFailover && resp.StatusCode == http.StatusBadRequest && AsyncImageAccountAttemptCaptureFromContext(ctx) != nil {
+			shouldFailover = isOpenAIAsyncAccountFailover400(upstreamMsg)
+		}
+		if shouldFailover {
 			appendOpsUpstreamError(c, OpsUpstreamErrorEvent{
 				Platform:           account.Platform,
 				AccountID:          account.ID,
@@ -1753,10 +1762,19 @@ func (s *OpenAIGatewayService) forwardOpenAIImagesOAuth(
 				Message:            upstreamMsg,
 			})
 			shouldDisable := s.handleFailoverSideEffects(upstreamCtx, resp, account, respBody, requestModel)
+			retrySameAccount := !shouldDisable && account.IsPoolMode() && account.IsPoolModeRetryableStatus(resp.StatusCode)
+			// Durable async image requests must move to another configured
+			// account for provider-side 400 Invalid request responses. A 400 is
+			// account-scoped here (the synchronous endpoint keeps its legacy
+			// pool retry policy), and retrying the same account cannot repair it.
+			if AsyncImageAccountAttemptCaptureFromContext(ctx) != nil && resp.StatusCode == http.StatusBadRequest {
+				retrySameAccount = false
+			}
 			return nil, &UpstreamFailoverError{
 				StatusCode:             resp.StatusCode,
 				ResponseBody:           respBody,
-				RetryableOnSameAccount: !shouldDisable && account.IsPoolMode() && account.IsPoolModeRetryableStatus(resp.StatusCode),
+				ResponseHeaders:        resp.Header.Clone(),
+				RetryableOnSameAccount: retrySameAccount,
 			}
 		}
 		return s.handleOpenAIImagesErrorResponse(upstreamCtx, resp, c, account, requestModel)

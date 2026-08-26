@@ -10,6 +10,10 @@ export const ASYNC_IMAGE_REFERENCE_RETRY_DEFAULTS = {
   openai_reference_transport_mode: 'passthrough_fallback_local',
   gemini_reference_transport_mode: 'passthrough',
   gemini_async_max_account_switches: 3,
+  account_attempt_timeout_seconds: 300,
+  reference_fetch_concurrency: 8,
+  reference_cache_ttl_seconds: 60,
+  reference_cache_max_bytes: 128 * 1024 * 1024,
   reference_fetch_max_retries: 2,
   reference_fetch_retry_base_seconds: 15,
   reference_fetch_retry_max_seconds: 60,
@@ -29,6 +33,10 @@ export const ASYNC_IMAGE_REFERENCE_RETRY_DEFAULTS = {
   | 'openai_reference_transport_mode'
   | 'gemini_reference_transport_mode'
   | 'gemini_async_max_account_switches'
+  | 'account_attempt_timeout_seconds'
+  | 'reference_fetch_concurrency'
+  | 'reference_cache_ttl_seconds'
+  | 'reference_cache_max_bytes'
   | 'reference_fetch_max_retries'
   | 'reference_fetch_retry_base_seconds'
   | 'reference_fetch_retry_max_seconds'

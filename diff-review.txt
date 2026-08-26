@@ -1,0 +1,551 @@
+﻿diff --git a/backend/internal/handler/durable_async_image_handler.go b/backend/internal/handler/durable_async_image_handler.go
+index d242f1c..511ed61 100644
+--- a/backend/internal/handler/durable_async_image_handler.go
++++ b/backend/internal/handler/durable_async_image_handler.go
+@@ -39,16 +39,22 @@ type durableAsyncImagePayload struct {
+ // The legacy Redis-only AsyncImageHandler remains separately wired and keeps
+ // its routes and response contracts unchanged.
+ type DurableAsyncImageHandler struct {
+-	tasks         *service.AsyncImageTaskService
+-	queue         service.AsyncImageQueue
+-	storage       *service.ImageStorageSettingService
+-	encryptor     service.SecretEncryptor
+-	gateway       *GatewayHandler
+-	openAI        *OpenAIGatewayHandler
+-	apiKeys       *service.APIKeyService
+-	subscriptions *service.SubscriptionService
+-	accounts      *service.AccountService
+-	library       *service.ImageLibraryService
++	tasks                  *service.AsyncImageTaskService
++	queue                  service.AsyncImageQueue
++	storage                *service.ImageStorageSettingService
++	encryptor              service.SecretEncryptor
++	gateway                *GatewayHandler
++	openAI                 *OpenAIGatewayHandler
++	apiKeys                *service.APIKeyService
++	subscriptions          *service.SubscriptionService
++	accounts               *service.AccountService
++	library                *service.ImageLibraryService
++	referenceMu            sync.Mutex
++	referenceGate          *service.AsyncImageFetchGate
++	referenceCache         *service.AsyncImageReferenceCache
++	referenceGateLimit     int
++	referenceCacheTTL      time.Duration
++	referenceCacheMaxBytes int64
+ 
+ 	startOnce sync.Once
+ 	stopOnce  sync.Once
+diff --git a/backend/internal/handler/durable_async_image_worker.go b/backend/internal/handler/durable_async_image_worker.go
+index aa5d468..f7e850d 100644
+--- a/backend/internal/handler/durable_async_image_worker.go
++++ b/backend/internal/handler/durable_async_image_worker.go
+@@ -211,30 +211,9 @@ func (h *DurableAsyncImageHandler) recoverAsyncImageTasks(ctx context.Context, c
+ 		}
+ 	}
+ 
+-	executionTimeout := asyncImageExecutionTimeout(cfg)
+-	startedBefore := time.Now().UTC().Add(-executionTimeout)
+-	if timeoutRepo, ok := repo.(service.AsyncImageInvocationTimeoutRepository); ok {
+-		timedOut, err := timeoutRepo.ListTimedOutInvokingAsyncImageTasks(ctx, startedBefore, 100)
+-		if err == nil {
+-			for _, task := range timedOut {
+-				code := "execution_timeout"
+-				message := asyncImageSafeError(fmt.Errorf("image generation timed out after %s", executionTimeout.Round(time.Second)))
+-				finished := time.Now().UTC()
+-				_, transitionErr := h.tasks.Transition(ctx, service.AsyncImageTaskTransition{
+-					TaskID: task.TaskID, ExpectedVersion: task.Version,
+-					FromStatuses: []string{service.AsyncImageTaskStatusInvoking},
+-					ToStatus:     service.AsyncImageTaskStatusFailed,
+-					ErrorCode:    &code, ErrorMessage: &message, FinishedAt: &finished,
+-					ClearRequestPayload: true, EventType: "execution_timeout",
+-				})
+-				if transitionErr != nil && !errors.Is(transitionErr, service.ErrAsyncImageInvalidTransition) {
+-					logger.L().Warn("async_image.mark_execution_timeout_failed", zap.String("task_id", task.TaskID), zap.Error(transitionErr))
+-				}
+-			}
+-		} else if ctx.Err() == nil {
+-			logger.L().Warn("async_image.list_execution_timeouts_failed", zap.Error(err))
+-		}
+-	}
++	// Active workers own timeout cancellation. The recovery scanner deliberately
++	// does not transition invoking rows: doing so races the worker's final CAS
++	// and can turn a recoverable account timeout into a duplicate invocation.
+ 
+ 	staleBefore := time.Now().UTC().Add(-lease)
+ 	invoking, err := repo.ListRecoverableAsyncImageTasks(ctx, []string{service.AsyncImageTaskStatusInvoking}, staleBefore, 0, 0, 100)
+@@ -392,6 +371,17 @@ func asyncImageExecutionTimeout(cfg service.AsyncImageRuntimeConfig) time.Durati
+ 	return 20 * time.Minute
+ }
+ 
++func asyncImageAccountAttemptTimeout(cfg service.AsyncImageRuntimeConfig) time.Duration {
++	if cfg.AccountAttemptTimeoutSeconds > 0 {
++		attempt := time.Duration(cfg.AccountAttemptTimeoutSeconds) * time.Second
++		if total := asyncImageExecutionTimeout(cfg); attempt > total {
++			return total
++		}
++		return attempt
++	}
++	return 5 * time.Minute
++}
++
+ func asyncImageInvocationTimedOut(task *service.AsyncImageTask, timeout time.Duration, now time.Time) bool {
+ 	if task == nil || timeout <= 0 {
+ 		return false
+@@ -492,6 +482,17 @@ func asyncImageInvocationHeartbeatFresh(task *service.AsyncImageTask, cfg servic
+ 
+ func (h *DurableAsyncImageHandler) invokeAsyncImageTask(parent context.Context, task *service.AsyncImageTask, cfg service.AsyncImageRuntimeConfig) asyncImageWorkerDisposition {
+ 	attemptCapture := &service.AsyncImageAccountAttemptCapture{}
++	if repo := h.tasks.Repository(); repo != nil {
++		if attemptRepo, ok := repo.(service.AsyncImageAccountAttemptRepository); ok {
++			attemptRepoRef := attemptRepo
++			taskID := task.TaskID
++			attemptCapture.SetPersistor(func(ctx context.Context, attempt service.AsyncImageAccountAttempt) {
++				if err := attemptRepoRef.PersistAsyncImageAccountAttempt(ctx, taskID, attempt); err != nil && !errors.Is(err, service.ErrAsyncImageInvalidTransition) {
++					logger.L().Warn("async_image.account_attempt_persist_failed", zap.String("task_id", taskID), zap.Int64("account_id", attempt.AccountID), zap.Error(err))
++				}
++			})
++		}
++	}
+ 	parent = service.WithAsyncImageAccountAttemptCapture(parent, attemptCapture)
+ 	parent = service.WithAsyncImageExcludedAccountIDs(parent, asyncImageRecentFailedAccountIDs(task))
+ 	if task != nil && task.Platform == service.PlatformGemini {
+@@ -514,6 +515,7 @@ func (h *DurableAsyncImageHandler) invokeAsyncImageTask(parent context.Context,
+ 	}
+ 
+ 	executionTimeout := asyncImageExecutionTimeout(cfg)
++	parent = service.WithAsyncImageAccountAttemptTimeout(parent, asyncImageAccountAttemptTimeout(cfg))
+ 	executionCtx, cancel := context.WithTimeout(parent, executionTimeout)
+ 	defer cancel()
+ 	body, path, contentType, err := h.buildAsyncImageUpstreamRequest(executionCtx, task, payload, cfg, storage)
+@@ -724,7 +726,7 @@ func isAsyncImageExplicitReferenceFetchFailure(message string) bool {
+ 	lower := strings.ToLower(message)
+ 	for _, permanent := range []string{
+ 		"http 401", "http 403", "http 404", "401 unauthorized", "403 forbidden", "404 not found",
+-		"image_too_many_pixels", "exceeds the configured", "invalid image", "corrupt image",
++		"image_too_many_pixels", "exceeds the configured", "corrupt image",
+ 	} {
+ 		if strings.Contains(lower, permanent) {
+ 			return false
+@@ -739,7 +741,9 @@ func isAsyncImageExplicitReferenceFetchFailure(message string) bool {
+ 			return true
+ 		}
+ 	}
+-	return false
++	// Provider-side INVALID_IMAGE is retryable only when it is explicitly
++	// attached to URL fetching; a bare malformed-image response is permanent.
++	return strings.Contains(lower, "invalid image") && strings.Contains(lower, "fetch")
+ }
+ 
+ func isAsyncImageMultipartRequiredFailure(message string) bool {
+@@ -955,6 +959,27 @@ func (h *DurableAsyncImageHandler) retryAsyncImageUpstreamTransient(ctx context.
+ 	return asyncImageWorkerDisposition{requeue: true, delay: delay}
+ }
+ 
++func (h *DurableAsyncImageHandler) retryAsyncImageAccountAttempt(ctx context.Context, task *service.AsyncImageTask, cfg service.AsyncImageRuntimeConfig, detail string) asyncImageWorkerDisposition {
++	if task == nil || task.RetryCount >= cfg.TotalMaxRetries {
++		if task != nil {
++			h.failAsyncImageTask(ctx, task, "execution_timeout", asyncImageSafeError(errors.New(detail)), false)
++		}
++		return asyncImageWorkerDisposition{}
++	}
++	code := "account_attempt_timeout"
++	message := asyncImageSafeError(errors.New(detail))
++	progress := 0
++	transition := service.AsyncImageTaskTransition{TaskID: task.TaskID, ExpectedVersion: task.Version,
++		FromStatuses: []string{service.AsyncImageTaskStatusInvoking}, ToStatus: service.AsyncImageTaskStatusQueued,
++		Progress: &progress, ErrorCode: &code, ErrorMessage: &message, IncrementRetry: true,
++		EventType: "account_attempt_timeout"}
++	if _, err := h.tasks.Transition(ctx, enrichAsyncImageAttemptTransition(ctx, task, transition)); err != nil {
++		logger.L().Warn("async_image.account_attempt_timeout_transition_failed", zap.String("task_id", task.TaskID), zap.Error(err))
++		return asyncImageWorkerDisposition{}
++	}
++	return asyncImageWorkerDisposition{requeue: true, delay: time.Second}
++}
++
+ // forwardAsyncImageUpstream keeps the image concurrency lease scoped to the
+ // single upstream invocation. Gemini's compatibility Chat Completions route
+ // has no public image gate, so the worker acquires the shared Gateway lease
+@@ -1031,11 +1056,41 @@ func (h *DurableAsyncImageHandler) buildAsyncImageUpstreamRequest(
+ 			MaxImages: cfg.MaxReferenceImages, MaxTotalBytes: cfg.MaxReferenceTotalBytes,
+ 			MaxTotalPixels: cfg.MaxReferenceTotalPixels,
+ 		},
++		FetchGate: h.asyncImageReferenceFetchGate(cfg),
++		Cache:     h.asyncImageReferenceCache(cfg),
+ 	}
+ 	body, err := service.BuildGeminiAsyncChatBodyWithTransport(ctx, payload.Normalized, downloader, asyncImageReferenceTransport(task, cfg))
+ 	return body, EndpointChatCompletions, "application/json", err
+ }
+ 
++func (h *DurableAsyncImageHandler) asyncImageReferenceFetchGate(cfg service.AsyncImageRuntimeConfig) *service.AsyncImageFetchGate {
++	if h == nil {
++		return nil
++	}
++	h.referenceMu.Lock()
++	defer h.referenceMu.Unlock()
++	if h.referenceGate == nil || h.referenceGateLimit != cfg.ReferenceFetchConcurrency {
++		h.referenceGate = service.NewAsyncImageFetchGate(cfg.ReferenceFetchConcurrency)
++		h.referenceGateLimit = cfg.ReferenceFetchConcurrency
++	}
++	return h.referenceGate
++}
++
++func (h *DurableAsyncImageHandler) asyncImageReferenceCache(cfg service.AsyncImageRuntimeConfig) *service.AsyncImageReferenceCache {
++	if h == nil {
++		return nil
++	}
++	h.referenceMu.Lock()
++	defer h.referenceMu.Unlock()
++	ttl := time.Duration(cfg.ReferenceCacheTTLSeconds) * time.Second
++	if h.referenceCache == nil || h.referenceCacheTTL != ttl || h.referenceCacheMaxBytes != cfg.ReferenceCacheMaxBytes {
++		h.referenceCache = service.NewAsyncImageReferenceCache(ttl, cfg.ReferenceCacheMaxBytes)
++		h.referenceCacheTTL = ttl
++		h.referenceCacheMaxBytes = cfg.ReferenceCacheMaxBytes
++	}
++	return h.referenceCache
++}
++
+ func asyncImageReferenceTransport(task *service.AsyncImageTask, cfg service.AsyncImageRuntimeConfig) string {
+ 	if task != nil && task.ReferenceTransport != nil {
+ 		mode := strings.ToLower(strings.TrimSpace(*task.ReferenceTransport))
+@@ -1196,6 +1251,8 @@ func (h *DurableAsyncImageHandler) prepareAsyncOpenAIReferenceImagesForTransport
+ 			MaxImages: cfg.MaxReferenceImages, MaxTotalBytes: cfg.MaxReferenceTotalBytes,
+ 			MaxTotalPixels: cfg.MaxReferenceTotalPixels,
+ 		},
++		FetchGate: h.asyncImageReferenceFetchGate(cfg),
++		Cache:     h.asyncImageReferenceCache(cfg),
+ 	}
+ 	changed, err := inlineAsyncOpenAIReferencesWithTransport(ctx, &root, downloader, downloadRemote)
+ 	if err != nil {
+diff --git a/backend/internal/service/async_image_protocol.go b/backend/internal/service/async_image_protocol.go
+index 117e051..0a55eae 100644
+--- a/backend/internal/service/async_image_protocol.go
++++ b/backend/internal/service/async_image_protocol.go
+@@ -5,6 +5,7 @@ import (
+ 	"context"
+ 	"crypto/sha256"
+ 	"encoding/base64"
++	"encoding/binary"
+ 	"encoding/hex"
+ 	"encoding/json"
+ 	"errors"
+@@ -16,6 +17,7 @@ import (
+ 	"net/url"
+ 	"strconv"
+ 	"strings"
++	"sync"
+ 	"time"
+ )
+ 
+@@ -448,6 +450,91 @@ type AsyncImageReferenceDownloader struct {
+ 	Resolver     *net.Resolver
+ 	Budget       *AsyncImageReferenceBudget
+ 	BoundLoader  AsyncImageBoundReferenceLoader
++	FetchGate    *AsyncImageFetchGate
++	Cache        *AsyncImageReferenceCache
++}
++
++// AsyncImageFetchGate limits only local reference downloads; it never holds a
++// gateway image slot while waiting on a CDN.
++type AsyncImageFetchGate struct{ slots chan struct{} }
++
++func NewAsyncImageFetchGate(limit int) *AsyncImageFetchGate {
++	if limit <= 0 {
++		return nil
++	}
++	return &AsyncImageFetchGate{slots: make(chan struct{}, limit)}
++}
++func (g *AsyncImageFetchGate) acquire(ctx context.Context) (func(), error) {
++	if g == nil || g.slots == nil {
++		return func() {}, nil
++	}
++	select {
++	case g.slots <- struct{}{}:
++		return func() { <-g.slots }, nil
++	case <-ctx.Done():
++		return nil, ctx.Err()
++	}
++}
++
++type asyncImageReferenceCacheEntry struct {
++	reference *AsyncImageReference
++	expires   time.Time
++	size      int64
++}
++type AsyncImageReferenceCache struct {
++	mu       sync.Mutex
++	ttl      time.Duration
++	maxBytes int64
++	bytes    int64
++	entries  map[string]asyncImageReferenceCacheEntry
++}
++
++func NewAsyncImageReferenceCache(ttl time.Duration, maxBytes int64) *AsyncImageReferenceCache {
++	if ttl <= 0 || maxBytes <= 0 {
++		return nil
++	}
++	return &AsyncImageReferenceCache{ttl: ttl, maxBytes: maxBytes, entries: make(map[string]asyncImageReferenceCacheEntry)}
++}
++func (c *AsyncImageReferenceCache) get(key string, now time.Time) *AsyncImageReference {
++	if c == nil {
++		return nil
++	}
++	c.mu.Lock()
++	defer c.mu.Unlock()
++	e, ok := c.entries[key]
++	if !ok {
++		return nil
++	}
++	if !e.expires.After(now) {
++		delete(c.entries, key)
++		c.bytes -= e.size
++		return nil
++	}
++	copyRef := *e.reference
++	copyRef.Data = append([]byte(nil), e.reference.Data...)
++	return &copyRef
++}
++func (c *AsyncImageReferenceCache) put(key string, ref *AsyncImageReference, now time.Time) {
++	if c == nil || ref == nil || int64(len(ref.Data)) > c.maxBytes {
++		return
++	}
++	c.mu.Lock()
++	defer c.mu.Unlock()
++	if old, ok := c.entries[key]; ok {
++		c.bytes -= old.size
++	}
++	for c.bytes+int64(len(ref.Data)) > c.maxBytes && len(c.entries) > 0 {
++		for k, old := range c.entries {
++			delete(c.entries, k)
++			c.bytes -= old.size
++			break
++		}
++	}
++	copyRef := *ref
++	copyRef.Data = append([]byte(nil), ref.Data...)
++	size := int64(len(copyRef.Data))
++	c.entries[key] = asyncImageReferenceCacheEntry{reference: &copyRef, expires: now.Add(c.ttl), size: size}
++	c.bytes += size
+ }
+ 
+ type AsyncImageBoundReferenceLoader func(ctx context.Context, rawURL string) (reference *AsyncImageReference, handled bool, err error)
+@@ -562,6 +649,14 @@ func (d AsyncImageReferenceDownloader) Download(ctx context.Context, rawURL stri
+ 	if err != nil {
+ 		return nil, errors.New("reference image URL must be an absolute HTTPS URL or an image data URI")
+ 	}
++	if cached := d.Cache.get(parsed.String(), time.Now()); cached != nil {
++		return d.accept(cached)
++	}
++	release, err := d.FetchGate.acquire(ctx)
++	if err != nil {
++		return nil, &AsyncImageReferenceDownloadError{Phase: "download", Err: err}
++	}
++	defer release()
+ 
+ 	baseTransport, ok := http.DefaultTransport.(*http.Transport)
+ 	if !ok {
+@@ -609,10 +704,11 @@ func (d AsyncImageReferenceDownloader) Download(ctx context.Context, rawURL stri
+ 	if int64(len(data)) > d.maxBytes() {
+ 		return nil, errors.New("reference image exceeds the configured size limit")
+ 	}
+-	reference, err := d.validateImage(data, resp.Header.Get("Content-Type"))
++	reference, err := d.validateDownloadedImage(data, resp.Header.Get("Content-Type"))
+ 	if err != nil {
+ 		return nil, err
+ 	}
++	d.Cache.put(parsed.String(), reference, time.Now())
+ 	return d.accept(reference)
+ }
+ 
+@@ -661,6 +757,64 @@ func (d AsyncImageReferenceDownloader) validateImage(data []byte, declaredType s
+ 	}, nil
+ }
+ 
++func (d AsyncImageReferenceDownloader) validateDownloadedImage(data []byte, declaredType string) (*AsyncImageReference, error) {
++	ref, err := d.validateImage(data, declaredType)
++	if err == nil {
++		return ref, nil
++	}
++	if normalized := normalizeAsyncImageTrailingData(data, declaredType, err); normalized != nil {
++		return d.validateImage(normalized, declaredType)
++	}
++	return nil, err
++}
++
++// normalizeAsyncImageTrailingData removes only bytes that are provably after
++// a complete PNG/JPEG/WebP container. It is intentionally limited to the
++// downloader path; the general image-library validator remains strict.
++func normalizeAsyncImageTrailingData(data []byte, declaredType string, cause error) []byte {
++	if cause == nil || !strings.Contains(strings.ToLower(cause.Error()), "trailing") && !strings.Contains(strings.ToLower(cause.Error()), "terminator") && !strings.Contains(strings.ToLower(cause.Error()), "container length") {
++		return nil
++	}
++	format := ""
++	if len(data) >= 8 && bytes.Equal(data[:8], []byte("\x89PNG\r\n\x1a\n")) {
++		format = "png"
++	}
++	if len(data) >= 12 && string(data[:4]) == "RIFF" && string(data[8:12]) == "WEBP" {
++		format = "webp"
++	}
++	if len(data) >= 2 && data[0] == 0xff && data[1] == 0xd8 {
++		format = "jpeg"
++	}
++	if format == "png" {
++		pos := 8
++		for pos+12 <= len(data) {
++			length := int64(binary.BigEndian.Uint32(data[pos : pos+4]))
++			if length < 0 || int64(pos)+12+length > int64(len(data)) {
++				return nil
++			}
++			kind := string(data[pos+4 : pos+8])
++			pos += int(12 + length)
++			if kind == "IEND" {
++				return append([]byte(nil), data[:pos]...)
++			}
++		}
++	}
++	if format == "webp" && len(data) >= 12 {
++		declared := int(binary.LittleEndian.Uint32(data[4:8])) + 8
++		if declared >= 12 && declared <= len(data) {
++			return append([]byte(nil), data[:declared]...)
++		}
++	}
++	if format == "jpeg" {
++		for i := 2; i+1 < len(data); i++ {
++			if data[i] == 0xff && data[i+1] == 0xd9 {
++				return append([]byte(nil), data[:i+2]...)
++			}
++		}
++	}
++	return nil
++}
++
+ func imageFormatMIME(format string) string {
+ 	switch strings.ToLower(strings.TrimSpace(format)) {
+ 	case "jpg", "jpeg":
+diff --git a/backend/internal/service/gateway_usage_billing.go b/backend/internal/service/gateway_usage_billing.go
+index 1518b3e..d245904 100644
+--- a/backend/internal/service/gateway_usage_billing.go
++++ b/backend/internal/service/gateway_usage_billing.go
+@@ -533,14 +533,29 @@ func detachStreamUpstreamContext(ctx context.Context, stream bool) (context.Cont
+ 	if !stream {
+ 		return ctx, func() {}
+ 	}
+-	return context.WithoutCancel(ctx), func() {}
++	return detachedDeadlineContext(ctx)
+ }
+ 
+ func detachUpstreamContext(ctx context.Context) (context.Context, context.CancelFunc) {
+ 	if ctx == nil {
+ 		return context.Background(), func() {}
+ 	}
+-	return context.WithoutCancel(ctx), func() {}
++	return detachedDeadlineContext(ctx)
++}
++
++// detachedDeadlineContext ignores caller cancellation while preserving an
++// explicit operation deadline. Async image workers use this to enforce both a
++// per-account timeout and a whole-task timeout without aborting on client exit.
++func detachedDeadlineContext(ctx context.Context) (context.Context, context.CancelFunc) {
++	base := context.WithoutCancel(ctx)
++	if _, async := AsyncImageAccountAttemptTimeout(ctx); async {
++		deadline, ok := ctx.Deadline()
++		if !ok {
++			return base, func() {}
++		}
++		return context.WithDeadline(base, deadline)
++	}
++	return base, func() {}
+ }
+ 
+ // billingDeps 扣费逻辑依赖的服务（由各 gateway service 提供）
+diff --git a/backend/internal/service/image_storage_settings.go b/backend/internal/service/image_storage_settings.go
+index 8416824..78fe044 100644
+--- a/backend/internal/service/image_storage_settings.go
++++ b/backend/internal/service/image_storage_settings.go
+@@ -224,6 +224,7 @@ type AsyncImageRuntimeConfig struct {
+ 	WorkerLeaseSeconds                int      `json:"worker_lease_seconds"`
+ 	RecoveryIntervalSeconds           int      `json:"recovery_interval_seconds"`
+ 	ExecutionTimeoutSeconds           int      `json:"execution_timeout_seconds"`
++	AccountAttemptTimeoutSeconds      int      `json:"account_attempt_timeout_seconds"`
+ 	StorageRetryAttempts              int      `json:"storage_retry_attempts"`
+ 	BillingRetryAttempts              int      `json:"billing_retry_attempts"`
+ 	RetryBackoffSeconds               int      `json:"retry_backoff_seconds"`
+@@ -248,6 +249,9 @@ type AsyncImageRuntimeConfig struct {
+ 	MaxReferenceTotalBytes            int64    `json:"max_reference_total_bytes"`
+ 	MaxReferenceTotalPixels           int64    `json:"max_reference_total_pixels"`
+ 	DownloadTimeoutSeconds            int      `json:"download_timeout_seconds"`
++	ReferenceFetchConcurrency         int      `json:"reference_fetch_concurrency"`
++	ReferenceCacheTTLSeconds          int      `json:"reference_cache_ttl_seconds"`
++	ReferenceCacheMaxBytes            int64    `json:"reference_cache_max_bytes"`
+ 	DownloadMaxRedirects              int      `json:"download_max_redirects"`
+ 	UploadTimeoutSeconds              int      `json:"upload_timeout_seconds"`
+ 	UploadPerMinute                   int      `json:"upload_per_minute"`
+@@ -1017,6 +1021,7 @@ func asyncRuntimeFromConfig(in config.AsyncImageConfig) AsyncImageRuntimeConfig
+ 	out.WorkerLeaseSeconds = in.WorkerLeaseSeconds
+ 	out.RecoveryIntervalSeconds = in.RecoveryIntervalSeconds
+ 	out.ExecutionTimeoutSeconds = in.ExecutionTimeoutSeconds
++	out.AccountAttemptTimeoutSeconds = in.AccountAttemptTimeoutSeconds
+ 	out.StorageRetryAttempts = in.StorageRetryAttempts
+ 	out.BillingRetryAttempts = in.BillingRetryAttempts
+ 	out.RetryBackoffSeconds = in.RetryBackoffSeconds
+@@ -1059,6 +1064,9 @@ func asyncRuntimeFromConfig(in config.AsyncImageConfig) AsyncImageRuntimeConfig
+ 	out.MaxReferenceTotalBytes = in.MaxReferenceTotalBytes
+ 	out.MaxReferenceTotalPixels = in.MaxReferenceTotalPixels
+ 	out.DownloadTimeoutSeconds = in.DownloadTimeoutSeconds
++	out.ReferenceFetchConcurrency = in.ReferenceFetchConcurrency
++	out.ReferenceCacheTTLSeconds = in.ReferenceCacheTTLSeconds
++	out.ReferenceCacheMaxBytes = in.ReferenceCacheMaxBytes
+ 	out.DownloadMaxRedirects = in.DownloadMaxRedirects
+ 	out.UploadTimeoutSeconds = in.UploadTimeoutSeconds
+ 	out.UploadPerMinute = in.UploadPerMinute
+@@ -1080,6 +1088,7 @@ func defaultAsyncImageRuntimeConfig() AsyncImageRuntimeConfig {
+ 		WorkerLeaseSeconds:                120,
+ 		RecoveryIntervalSeconds:           30,
+ 		ExecutionTimeoutSeconds:           1200,
++		AccountAttemptTimeoutSeconds:      300,
+ 		StorageRetryAttempts:              5,
+ 		BillingRetryAttempts:              10,
+ 		RetryBackoffSeconds:               30,
+@@ -1104,6 +1113,9 @@ func defaultAsyncImageRuntimeConfig() AsyncImageRuntimeConfig {
+ 		MaxReferenceTotalBytes:            64 << 20,
+ 		MaxReferenceTotalPixels:           80_000_000,
+ 		DownloadTimeoutSeconds:            30,
++		ReferenceFetchConcurrency:         8,
++		ReferenceCacheTTLSeconds:          60,
++		ReferenceCacheMaxBytes:            128 << 20,
+ 		DownloadMaxRedirects:              3,
+ 		UploadTimeoutSeconds:              300,
+ 		UploadPerMinute:                   20,
+@@ -1247,6 +1259,11 @@ func normalizeAsyncImageRuntimeConfig(in *AsyncImageRuntimeConfig) {
+ 	if in.ExecutionTimeoutSeconds <= 0 {
+ 		in.ExecutionTimeoutSeconds = defaults.ExecutionTimeoutSeconds
+ 	}
++	if in.AccountAttemptTimeoutSeconds <= 0 {
++		in.AccountAttemptTimeoutSeconds = defaults.AccountAttemptTimeoutSeconds
++	} else if in.AccountAttemptTimeoutSeconds > in.ExecutionTimeoutSeconds {
++		in.AccountAttemptTimeoutSeconds = in.ExecutionTimeoutSeconds
++	}
+ 	if in.StorageRetryAttempts <= 0 {
+ 		in.StorageRetryAttempts = defaults.StorageRetryAttempts
+ 	}
+@@ -1286,6 +1303,21 @@ func normalizeAsyncImageRuntimeConfig(in *AsyncImageRuntimeConfig) {
+ 	if in.DownloadTimeoutSeconds <= 0 {
+ 		in.DownloadTimeoutSeconds = defaults.DownloadTimeoutSeconds
+ 	}
++	if in.ReferenceFetchConcurrency <= 0 {
++		in.ReferenceFetchConcurrency = defaults.ReferenceFetchConcurrency
++	} else if in.ReferenceFetchConcurrency > 128 {
++		in.ReferenceFetchConcurrency = 128
++	}
++	if in.ReferenceCacheTTLSeconds <= 0 {
++		in.ReferenceCacheTTLSeconds = defaults.ReferenceCacheTTLSeconds
++	} else if in.ReferenceCacheTTLSeconds > 3600 {
++		in.ReferenceCacheTTLSeconds = 3600
++	}
++	if in.ReferenceCacheMaxBytes <= 0 {
++		in.ReferenceCacheMaxBytes = defaults.ReferenceCacheMaxBytes
++	} else if in.ReferenceCacheMaxBytes > 1<<30 {
++		in.ReferenceCacheMaxBytes = 1 << 30
++	}
+ 	if in.DownloadMaxRedirects <= 0 {
+ 		in.DownloadMaxRedirects = defaults.DownloadMaxRedirects
+ 	}

@@ -1520,6 +1520,9 @@ async_image:
   # 单次上游图片生成调用的最大执行时间，单位秒（默认 1200 = 20 分钟）。
   # 超时后任务会失败结束；恢复环按 started_at 墙钟时间判定，不依赖心跳。
   execution_timeout_seconds: 1200
+  # 单个上游账号尝试的最大执行时间，单位秒（默认 300 = 5 分钟）。
+  # 到达上限后释放当前账号并切换其他可用账号；受任务总超时约束。
+  account_attempt_timeout_seconds: 300
   # OSS 上传/后处理最大尝试次数（默认 5）；不会因此重新调用生图上游。
   storage_retry_attempts: 5
   # 已固定账单命令的同步扣费最大尝试次数（默认 10）；不会重复生成图片或重复扣费。
@@ -1558,6 +1561,11 @@ async_image:
   max_reference_total_pixels: 80000000
   # 下载单张 HTTPS 参考图的总超时，单位秒（默认 30）。
   download_timeout_seconds: 30
+  # 本地参考图下载并发闸门（默认 8）；不占用上游图片并发槽位。
+  reference_fetch_concurrency: 8
+  # 本地参考图短时缓存，按 URL 缓存已校验字节（默认 60 秒/128 MiB）。
+  reference_cache_ttl_seconds: 60
+  reference_cache_max_bytes: 134217728
   # 下载参考图允许跟随的最大 HTTPS 重定向次数（默认 3）；每跳都会重新做 SSRF 检查。
   download_max_redirects: 3
   # 单次 SC 参考图写入 OSS 的超时，单位秒（默认 300，最大 600）。

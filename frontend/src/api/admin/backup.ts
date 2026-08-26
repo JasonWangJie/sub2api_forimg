@@ -133,6 +133,7 @@ export interface AsyncImageRuntimeConfig {
   worker_lease_seconds: number
   recovery_interval_seconds: number
   execution_timeout_seconds: number
+  account_attempt_timeout_seconds: number
   storage_retry_attempts: number
   billing_retry_attempts: number
   retry_backoff_seconds: number
@@ -157,6 +158,9 @@ export interface AsyncImageRuntimeConfig {
   max_reference_total_bytes: number
   max_reference_total_pixels: number
   download_timeout_seconds: number
+  reference_fetch_concurrency: number
+  reference_cache_ttl_seconds: number
+  reference_cache_max_bytes: number
   download_max_redirects: number
   signed_url_expiry_seconds: number
   input_retention_hours: number
