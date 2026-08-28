@@ -950,7 +950,10 @@ func (s *GeminiMessagesCompatService) Forward(ctx context.Context, c *gin.Contex
 				if upstreamReqID == "" {
 					upstreamReqID = resp.Header.Get("x-goog-request-id")
 				}
-				if failoverErr := s.poolModeSkippedFailoverError(c, account, resp.StatusCode, respBody, upstreamReqID); failoverErr != nil {
+				if IsGeminiAsyncImageGeneration(ctx) && resp.StatusCode == http.StatusBadRequest && isGeminiAsyncAccountFailover400(respBody) {
+					return nil, newGeminiAsyncAccountFailover400(respBody, resp.Header)
+				}
+				if failoverErr := s.poolModeSkippedFailoverError(c, account, resp.StatusCode, resp.Header, respBody, upstreamReqID); failoverErr != nil {
 					return nil, failoverErr
 				}
 				return nil, s.writeGeminiMappedError(c, account, http.StatusInternalServerError, upstreamReqID, respBody)
@@ -990,13 +993,10 @@ func (s *GeminiMessagesCompatService) Forward(ctx context.Context, c *gin.Contex
 		s.handleGeminiUpstreamError(ctx, account, resp.StatusCode, resp.Header, respBody)
 		// 精确匹配服务端配置类 400 错误，触发 failover + 临时封禁
 		if resp.StatusCode == http.StatusBadRequest {
-			msg400 := strings.ToLower(strings.TrimSpace(extractUpstreamErrorMessage(respBody)))
-			if IsGeminiAsyncImageGeneration(ctx) &&
-				(strings.Contains(msg400, "invalid request") || strings.Contains(msg400, "invalid_request")) &&
-				!IsAsyncImageReferenceFetchFailureMessage(msg400) {
-				upstreamMsg := sanitizeUpstreamErrorMessage(strings.TrimSpace(extractUpstreamErrorMessage(respBody)))
-				return nil, &UpstreamFailoverError{StatusCode: resp.StatusCode, ResponseBody: respBody, ResponseHeaders: resp.Header.Clone(), NextAccountAction: NextAccountRetry, Reason: GatewayFailureReason(upstreamMsg)}
+			if IsGeminiAsyncImageGeneration(ctx) && isGeminiAsyncAccountFailover400(respBody) {
+				return nil, newGeminiAsyncAccountFailover400(respBody, resp.Header)
 			}
+			msg400 := strings.ToLower(strings.TrimSpace(extractUpstreamErrorMessage(respBody)))
 			if isGoogleProjectConfigError(msg400) {
 				upstreamReqID := resp.Header.Get(requestIDHeader)
 				if upstreamReqID == "" {
@@ -1469,7 +1469,10 @@ func (s *GeminiMessagesCompatService) ForwardNative(ctx context.Context, c *gin.
 			policy := s.rateLimitService.CheckErrorPolicy(ctx, account, resp.StatusCode, respBody, mappedModel)
 			switch policy {
 			case ErrorPolicySkipped:
-				if failoverErr := s.poolModeSkippedFailoverError(c, account, resp.StatusCode, respBody, requestID); failoverErr != nil {
+				if IsGeminiAsyncImageGeneration(ctx) && resp.StatusCode == http.StatusBadRequest && isGeminiAsyncAccountFailover400(respBody) {
+					return nil, newGeminiAsyncAccountFailover400(respBody, resp.Header)
+				}
+				if failoverErr := s.poolModeSkippedFailoverError(c, account, resp.StatusCode, resp.Header, respBody, requestID); failoverErr != nil {
 					return nil, failoverErr
 				}
 				respBody = unwrapIfNeeded(isOAuth, respBody)
@@ -1505,7 +1508,7 @@ func (s *GeminiMessagesCompatService) ForwardNative(ctx context.Context, c *gin.
 					Message:            upstreamMsg,
 					Detail:             upstreamDetail,
 				})
-				return nil, &UpstreamFailoverError{StatusCode: resp.StatusCode, ResponseBody: respBody}
+				return nil, &UpstreamFailoverError{StatusCode: resp.StatusCode, ResponseBody: respBody, ResponseHeaders: resp.Header.Clone()}
 			}
 		}
 
@@ -1513,13 +1516,10 @@ func (s *GeminiMessagesCompatService) ForwardNative(ctx context.Context, c *gin.
 		s.handleGeminiUpstreamError(ctx, account, resp.StatusCode, resp.Header, respBody)
 		// 精确匹配服务端配置类 400 错误，触发 failover + 临时封禁
 		if resp.StatusCode == http.StatusBadRequest {
-			msg400 := strings.ToLower(strings.TrimSpace(extractUpstreamErrorMessage(respBody)))
-			if IsGeminiAsyncImageGeneration(ctx) &&
-				(strings.Contains(msg400, "invalid request") || strings.Contains(msg400, "invalid_request")) &&
-				!IsAsyncImageReferenceFetchFailureMessage(msg400) {
-				upstreamMsg := sanitizeUpstreamErrorMessage(strings.TrimSpace(extractUpstreamErrorMessage(respBody)))
-				return nil, &UpstreamFailoverError{StatusCode: resp.StatusCode, ResponseBody: respBody, ResponseHeaders: resp.Header.Clone(), NextAccountAction: NextAccountRetry, Reason: GatewayFailureReason(upstreamMsg)}
+			if IsGeminiAsyncImageGeneration(ctx) && isGeminiAsyncAccountFailover400(respBody) {
+				return nil, newGeminiAsyncAccountFailover400(respBody, resp.Header)
 			}
+			msg400 := strings.ToLower(strings.TrimSpace(extractUpstreamErrorMessage(respBody)))
 			if isGoogleProjectConfigError(msg400) {
 				evBody := unwrapIfNeeded(isOAuth, respBody)
 				upstreamMsg := sanitizeUpstreamErrorMessage(strings.TrimSpace(extractUpstreamErrorMessage(evBody)))
@@ -1718,7 +1718,7 @@ func (s *GeminiMessagesCompatService) shouldFailoverGeminiUpstreamError(statusCo
 // poolModeSkippedFailoverError 池模式账号命中 ErrorPolicySkipped 时构造 failover 错误：
 // 可 failover 的状态码返回 UpstreamFailoverError，交给 handler 层按 pool_mode_retry_count
 // 同账号重试后换号；返回 nil 表示不适用（非池模式或状态码不可 failover），由调用方透传。
-func (s *GeminiMessagesCompatService) poolModeSkippedFailoverError(c *gin.Context, account *Account, statusCode int, respBody []byte, upstreamRequestID string) *UpstreamFailoverError {
+func (s *GeminiMessagesCompatService) poolModeSkippedFailoverError(c *gin.Context, account *Account, statusCode int, headers http.Header, respBody []byte, upstreamRequestID string) *UpstreamFailoverError {
 	if !account.IsPoolMode() || !s.shouldFailoverGeminiUpstreamError(statusCode) {
 		return nil
 	}
@@ -1744,6 +1744,7 @@ func (s *GeminiMessagesCompatService) poolModeSkippedFailoverError(c *gin.Contex
 	return &UpstreamFailoverError{
 		StatusCode:             statusCode,
 		ResponseBody:           respBody,
+		ResponseHeaders:        headers.Clone(),
 		RetryableOnSameAccount: account.IsPoolModeRetryableStatus(statusCode),
 	}
 }

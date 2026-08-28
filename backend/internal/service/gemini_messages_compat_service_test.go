@@ -163,6 +163,29 @@ func TestGeminiForwardAsChatCompletionsAsyncImageFailsOverAfterOneAttempt(t *tes
 	})
 }
 
+func TestGeminiForwardAsChatCompletionsAsyncInvalidRequestDoesNotCommitResponse(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	httpStub := &geminiCompatHTTPUpstreamStub{response: &http.Response{
+		StatusCode: http.StatusBadRequest,
+		Header:     http.Header{"Content-Type": []string{"application/json"}, "X-Goog-Request-Id": []string{"req-invalid"}},
+		Body:       io.NopCloser(strings.NewReader(`{"error":{"message":"Invalid request"}}`)),
+	}}
+	svc := &GeminiMessagesCompatService{httpUpstream: httpStub, cfg: &config.Config{}}
+	account := &Account{ID: 103, Platform: PlatformGemini, Type: AccountTypeAPIKey, Concurrency: 1, Credentials: map[string]any{"api_key": "gemini-api-key"}}
+	body := []byte(`{"model":"gemini-3-pro-image-preview","messages":[{"role":"user","content":"draw a skyline"}]}`)
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", bytes.NewReader(body))
+
+	_, err := svc.ForwardAsChatCompletions(WithGeminiAsyncImageGeneration(context.Background()), c, account, body)
+	var failoverErr *UpstreamFailoverError
+	require.ErrorAs(t, err, &failoverErr)
+	require.Equal(t, http.StatusBadRequest, failoverErr.StatusCode)
+	require.Equal(t, "req-invalid", failoverErr.ResponseHeaders.Get("X-Goog-Request-Id"))
+	require.False(t, recorder.Flushed)
+	require.Equal(t, 0, recorder.Body.Len(), "async failover must not write the final client error before account switching")
+}
+
 func TestGeminiForwardAsChatCompletions_StreamsOpenAIChunksFromGeminiSSE(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 

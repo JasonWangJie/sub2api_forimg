@@ -619,6 +619,10 @@ func (h *DurableAsyncImageHandler) invokeAsyncImageTask(parent context.Context, 
 	// ValidatePreparedUsageBilling with "prepared usage request id mismatch".
 	outputs, prepared, accountID, upstreamRequestID, actualSize, err := h.captureAsyncImageInvocation(ginContext.Request.Context(), task, recorder.Body.Bytes(), usageCapture, geminiCapture, cfg)
 	if err != nil {
+		if isAsyncImageInvalidOutputError(err) {
+			h.failAsyncImageTask(parent, task, "upstream_invalid_output", asyncImageSafeError(err), false)
+			return asyncImageWorkerDisposition{}
+		}
 		h.markAsyncImageExecutionUnknown(parent, task, asyncImageSafeError(err))
 		return asyncImageWorkerDisposition{}
 	}
@@ -1517,6 +1521,26 @@ func validateGeneratedAsyncImage(data []byte, contentType string, cfg service.As
 		Data: validated.Data, ContentType: validated.MIMEType, Checksum: validated.SHA256,
 		Width: validated.Width, Height: validated.Height,
 	}, nil
+}
+
+// isAsyncImageInvalidOutputError distinguishes a complete upstream response
+// that contains unusable image bytes from an interrupted/ambiguous invocation.
+// The former is deterministic and must not enter reconciliation as unknown.
+func isAsyncImageInvalidOutputError(err error) bool {
+	if err == nil {
+		return false
+	}
+	lower := strings.ToLower(err.Error())
+	for _, fragment := range []string{
+		"invalid generated image", "image_mime_mismatch", "image_signature_mismatch",
+		"declared image type does not match image bytes", "image container is invalid",
+		"invalid base64 image data", "invalid image response", "response did not contain an image",
+	} {
+		if strings.Contains(lower, fragment) {
+			return true
+		}
+	}
+	return false
 }
 
 func extractOpenAIAsyncImageOutputs(ctx context.Context, body []byte, cfg service.AsyncImageRuntimeConfig) ([]asyncImageCapturedOutput, error) {

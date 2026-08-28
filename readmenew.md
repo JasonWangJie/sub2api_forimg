@@ -20,7 +20,7 @@ codegraph init
 
 ## 当前版本快照
 
-记录日期：`2026-08-26`（异步生图账号换号、超时切换、参考图透传回退和下载闸门修正；补齐 Gemini messages 路径的 400 换号/参考图错误分类；后端定向测试、迁移检查、前端全量测试、类型检查和生产构建通过；工作树 dirty；未部署或重启生产）。
+记录日期：`2026-08-27`（异步 Gemini 400 换号与完整输出错误分类修复；补齐池模式 failover 的上游 request ID 透传；后端定向测试、迁移检查、前端既有验证、类型检查和带 embed 的生产构建通过；工作树 dirty；未部署或重启生产）。
 
 | 项目 | 当前记录 |
 |---|---|
@@ -300,3 +300,12 @@ pnpm run dev
 - 单账号异步调用默认 300 秒超时，超时后切换可用账号；没有完整响应的中断仍标记 `execution_unknown` 并等待对账，不自动盲目重放。
 - 本轮实际工作树：HEAD `22fc75bb1e8f231e57b953cfc7c0aad3e5c50a9a`，`git describe` 为 `v0.1.173.34-1-g22fc75b-dirty`，版本 `0.1.173.34`。仅修改本地代码/示例配置，未连接、修改或重启生产服务器。
 - 验证：后端 handler/service/repository 异步定向测试通过；前端 Vitest `239` 个文件、`1620` 个断言通过；`pnpm typecheck`、`pnpm build`、`git diff --check` 通过。构建保留既有 Browserslist、动态导入和大 chunk 警告；真实上游、Redis、PostgreSQL、OSS、生产和 Fork CI 未验证。
+
+## 2026-08-27 Gemini 异步 400 换号与输出错误分类修复
+
+- Gemini 异步 Chat Completions、Messages 和 ErrorPolicy 路径在响应映射前识别账号级 `400 Invalid request`，返回未提交响应的 `UpstreamFailoverError`，保留上游请求 ID，避免 `gateway.cc.forward_failed` 的已提交响应状态短路后续换号。
+- 明确参考图抓取、像素/格式、内容政策和参数错误不进入账号级 400 换号；普通或未包装的 `Invalid request` 才交由异步账号 failover。
+- 已收到完整上游响应但生成图片 MIME、容器、Base64 或图片缺失校验失败的任务标记为 `upstream_invalid_output`，不再误标记 `execution_unknown`；真正的中断/无完整响应仍保持 `execution_unknown` 和对账语义。
+- 本轮工作树基线按实际命令为 HEAD `3c682ec2e346042229b6551d3346e3e8e363cff9`，`git describe` 为 `v0.1.173.35-1-g3c682ec-dirty`，版本 `0.1.173.35`；仅修改本地代码和测试，未部署、修改或重启生产服务器。
+- 补充修复：池模式 ErrorPolicy failover 保留完整上游响应头，异步账号尝试可持久化 `x-goog-request-id` 等 request ID；空响应不再被误判为账号级 `Invalid request`。
+- 验证：Gemini 异步 400 定向 Service 测试、`go test ./internal/service -run 'Gemini|ErrorPolicy' -count=1`、Handler 异步输出/换号定向测试、完整 `go test ./internal/handler`、`go test ./internal/repository ./internal/server/routes ./internal/server/middleware`、`go build -tags embed ./cmd/server` 均通过；Service 全包的既有外部凭证用例仍需单独看最终结果；`git diff --check` 通过。

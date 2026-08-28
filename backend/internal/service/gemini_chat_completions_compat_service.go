@@ -242,9 +242,8 @@ func (s *GeminiMessagesCompatService) forwardClaudeBodyAsChatCompletions(
 		}
 		evBody := unwrapIfNeeded(account.Type == AccountTypeOAuth, respBody)
 		if asyncImageGeneration && resp.StatusCode == http.StatusBadRequest {
-			msg := strings.ToLower(strings.TrimSpace(extractUpstreamErrorMessage(evBody)))
-			if (strings.Contains(msg, "invalid request") || strings.Contains(msg, "invalid_request")) && !IsAsyncImageReferenceFetchFailureMessage(msg) {
-				return nil, &UpstreamFailoverError{StatusCode: resp.StatusCode, ResponseBody: evBody, ResponseHeaders: resp.Header.Clone(), NextAccountAction: NextAccountRetry, Reason: GatewayFailureReason(msg)}
+			if isGeminiAsyncAccountFailover400(evBody) {
+				return nil, newGeminiAsyncAccountFailover400(evBody, resp.Header)
 			}
 		}
 

@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"io"
 	"mime"
 	"mime/multipart"
@@ -214,6 +215,13 @@ func TestAsyncImageTransientRetryPolicy(t *testing.T) {
 	require.False(t, shouldRetryAsyncImageUpstreamTransient(task, cfg, http.StatusBadGateway, "Upstream service temporarily unavailable"))
 	require.True(t, isAsyncImageAmbiguousUpstreamFailure(http.StatusBadGateway, "upstream request failed: unexpected EOF"))
 	require.False(t, isAsyncImageAmbiguousUpstreamFailure(http.StatusBadGateway, "Internal error encountered"))
+}
+
+func TestAsyncImageInvalidOutputErrorIsNotExecutionUnknown(t *testing.T) {
+	require.True(t, isAsyncImageInvalidOutputError(errors.New(`invalid generated image: error: code="IMAGE_MIME_MISMATCH" message="declared image type does not match image bytes"`)))
+	require.True(t, isAsyncImageInvalidOutputError(errors.New("OpenAI returned invalid base64 image data")))
+	require.True(t, isAsyncImageInvalidOutputError(errors.New("upstream response did not contain an image")))
+	require.False(t, isAsyncImageInvalidOutputError(errors.New("upstream request failed: unexpected EOF")))
 }
 
 func TestAsyncImageRetryDelayUsesJitterAndRetryAfter(t *testing.T) {

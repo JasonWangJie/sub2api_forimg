@@ -4,9 +4,9 @@
 
 这是 `JasonWangJie/sub2api_forimg` Fork，默认在 `main` 开发。交接基线：
 
-- HEAD：`22fc75bb1e8f231e57b953cfc7c0aad3e5c50a9a`
-- `git describe --tags --always --dirty`：`v0.1.173.34-1-g22fc75b-dirty`
-- `backend/cmd/server/VERSION`：`0.1.173.34`
+- HEAD：`3c682ec2e346042229b6551d3346e3e8e363cff9`
+- `git describe --tags --always --dirty`：`v0.1.173.35-1-g3c682ec-dirty`
+- `backend/cmd/server/VERSION`：`0.1.173.35`
 - 最近功能：异步生图账号尝试审计、Gemini 快速换号、容量重试排除最近失败账号、`execution_unknown` 对账待处理、参考图混合传输回退与下载闸门
 - 本次交接维护：补齐 Gemini messages 路径的异步 400 换号与参考图抓取错误分类；确认 OpenAI/Gemini 上游 CDN 抓取失败会交给 Worker 持久化切换本地 multipart/inlineData；同步三份交接记录
 - 本次冒烟结论：后端 handler/service/repository 异步定向测试、前端全量 Vitest（239 文件/1620 断言）、类型检查和生产构建均通过；构建只有既有警告；超时成本对账、真实上游/存储端到端验收仍未完成
@@ -57,6 +57,17 @@ Get-Content backend\cmd\server\VERSION
 3. 更新 [开发台账.md](开发台账.md) 的任务条目、完整 SHA、验证证据和未完成项。
 4. 更新本 `agent.md` 的当前上下文和下一步，避免下一位助手依赖过期摘要。
 5. 运行 `git diff --check`，检查 Markdown 链接和文档命名；没有真实证据的项目保留为“未验证”。
+
+## 2026-08-27 本轮交接：Gemini 异步 400 与输出错误分类
+
+- 当前实际基线：分支 `main`，HEAD `3c682ec2e346042229b6551d3346e3e8e363cff9`，`git describe`=`v0.1.173.35-1-g3c682ec-dirty`，`backend/cmd/server/VERSION`=`0.1.173.35`。工作树包含本轮未提交代码/测试和文档变更；不要回滚用户已有改动。
+- 已修改 `backend/internal/service/gemini_async_image_errors.go`：异步 Gemini 400 在响应映射前分类；账号级/未包装 `Invalid request` 返回 `UpstreamFailoverError`，保留响应体、响应头和 request ID；参考图抓取、像素、格式、内容政策、参数错误排除。
+- 已修改 `gemini_chat_completions_compat_service.go` 与 `gemini_messages_compat_service.go`：ErrorPolicy `Skipped`、`Matched` 和普通路径都先处理异步账号级 400，避免先写 `Invalid request` 导致外层 `upstream_error_response_already_written` 而停止换号。
+- 已修改 `durable_async_image_worker.go`：完整上游响应的 MIME/图片容器/Base64/空图片错误记为 `upstream_invalid_output`；真正没有完整响应的请求继续标记 `execution_unknown` 并等待对账。
+- 新增测试：`gemini_async_image_errors_test.go`；补充 Gemini 兼容服务不提交响应的 400 测试、Handler 输出错误分类测试。
+- 已通过：Gemini/Handler 定向测试；完整 `go test ./internal/handler`；`go test ./internal/service -run 'Gemini|ErrorPolicy' -count=1`；`go test ./internal/repository ./internal/server/routes ./internal/server/middleware`；`go build -tags embed ./cmd/server`；`git diff --check`。Service 完整包仍可能包含既有外部 OpenAI token 对比用例失败，不能据此宣称全包通过；未执行生产部署、重启或真实上游账号轮换。
+- 本轮补充修复：池模式 ErrorPolicy failover 现在保留完整上游响应头，异步任务可持久化 `x-goog-request-id`；Gemini 400 分类器不再把空响应误判为 `Invalid request`，仅明确错误文本触发换号。
+- 下一步：如需生产生效，必须另行授权构建、备份、部署、重启和冒烟验收；部署后重点观察 `account_attempts`、`attempted_account_ids`、`upstream_request_id` 及 `upstream_invalid_output`/`execution_unknown` 分类。
 
 该要求同时写入根目录 [AGENTS.md](AGENTS.md) 和 [.cursor/rules/fork-release-deploy.mdc](.cursor/rules/fork-release-deploy.mdc)，属于仓库协作规则，不是可选建议。
 
