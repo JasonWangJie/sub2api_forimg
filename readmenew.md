@@ -354,5 +354,7 @@ pnpm run dev
 
 - 本地冒烟覆盖异步 Handler/Service 状态转换、超时终态、恢复扫描、管理员终止、路由注册和前端类型检查；Handler/Service 定向测试、完整 `go test ./internal/handler`、`pnpm typecheck` 均通过。
 - `go vet ./internal/handler ./internal/service` 通过；并修复异步 Chat Completions 兼容服务未配置时提前返回路径的 account-attempt context 泄漏。
+- 补充 601 内容安全关键词：真实人物露骨亲密、性化、情色/色情、裸露等 HTTP 400 拦截文案归 601，不再落入 610。
+- 精确回归覆盖“违反了关于裸露、色情或情色内容的防护限制”提示，分类保持 `601`。
 - 安全结论：管理员终止受 AdminAuth/合规中间件及状态+版本 CAS 保护；`execution_unknown` 不自动重放；`610` 不建议盲目重试。真实上游、Redis/PostgreSQL/OSS 端到端及部署后告警仍未验证。
 - 生产复核（2026-08-31 14:50 UTC）：当前 `invoking=3`，超过 1 小时为 `0`；均为分钟级新任务，只读查询，生产仍运行旧二进制。

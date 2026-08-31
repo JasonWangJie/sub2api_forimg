@@ -153,6 +153,8 @@ Get-Content backend\cmd\server\VERSION
 
 - 冒烟通过：异步 Handler/Service 状态转换、超时终态、恢复扫描、管理员终止、路由注册；完整 Handler 测试、异步 Service 定向测试、`pnpm typecheck`、`go vet ./internal/handler ./internal/service`、`git diff --check` 均通过。
 - 修复异步 Chat Completions 兼容服务未配置时提前返回路径的 account-attempt context 泄漏；该问题会留下超时计时器，现已显式取消。
+- 真实人物露骨亲密、性化、情色/色情、裸露等 HTTP 400 内容安全拦截已补入 601 关键词，未知错误仍使用 610。
+- “违反了关于裸露、色情或情色内容的防护限制”已加入精确回归测试，分类为 601。
 - 安全结论：管理员接口由 AdminAuth/合规中间件保护，终止操作使用状态+版本 CAS；`execution_unknown` 禁止自动重放；`610` 未知错误仅用于保留原文和排查，不应盲目重试。
 - 剩余边界：生产服务器仍运行旧二进制；真实上游、Redis/PostgreSQL/OSS 端到端、部署后告警和账单对账尚未验证。
 - 生产只读复核 `2026-08-31 14:50 UTC`：`invoking=3`，超过 1 小时为 `0`；当前任务均为分钟级，未见新的长时间卡住任务。

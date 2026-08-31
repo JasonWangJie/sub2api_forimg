@@ -141,6 +141,8 @@ func TestAsyncImageFailureBusinessCodeClassifiesStoredUpstreamMessages(t *testin
 		{name: "reference pixel limit", code: "invalid_reference_image", message: "download OpenAI reference image: validate reference image: error: code=*** reason=\"IMAGE_TOO_MANY_PIXELS\" message=\"image exceeds the configured pixel limit\"", want: 604},
 		{name: "reference mime mismatch", code: "invalid_reference_image", message: "download OpenAI reference image: validate reference image: error: code=*** reason=\"IMAGE_MIME_MISMATCH\" message=\"declared image type does not match image bytes\"", want: 604},
 		{name: "temporary upstream", code: "upstream_failed", message: "上游生图失败（HTTP 503）：service temporarily unavailable", want: 606},
+		{name: "sexualized real person policy", code: "upstream_failed", message: "上游生图失败（HTTP 400）：抱歉，我不能帮助制作或编辑包含真实人物的露骨亲密/性化场景图像（例如让真实人物进行特写接吻、只穿泳裤等情色化描绘）。", want: 601},
+		{name: "nudity sexual content policy", code: "upstream_failed", message: "上游生图失败（HTTP 400）：非常抱歉，该提示可能违反了关于裸露、色情或情色内容的防护限制。如果你认为此判断有误，请重试或修改提示语。", want: 601},
 		{name: "unclassified upstream", code: "upstream_failed", message: "上游生图失败（HTTP 400）：由于我这边发生了错误，我未能生成图片。", want: 610},
 	}
 	for _, test := range tests {

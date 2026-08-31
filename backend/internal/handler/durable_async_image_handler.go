@@ -924,7 +924,9 @@ func asyncImageFailureBusinessCode(task *service.AsyncImageTask) int {
 	// failures even when the upstream only reports a generic 400.
 	if containsAnyAsyncImageFailure(message,
 		"third-party", "third party", "similarity", "content policy", "safety policy",
-		"policy violation", "第三方", "相似性", "防护限制", "内容政策", "内容安全", "安全策略", "安全政策", "内容审核", "安全拦截", "违反政策", "违反了我们的政策") {
+		"policy violation", "explicit", "sexual", "nudity", "erotic", "intimate",
+		"第三方", "相似性", "防护限制", "内容政策", "内容安全", "安全策略", "安全政策", "内容审核", "安全拦截", "违反政策", "违反了我们的政策",
+		"露骨", "性化", "情色", "色情", "裸露", "亲密", "真实人物") {
 		return asyncImageBusinessCodeContentPolicy
 	}
 	if containsAnyAsyncImageFailure(message,
