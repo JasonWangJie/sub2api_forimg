@@ -322,7 +322,7 @@ export function getAsyncImageApiDoc(locale: string, apiRoot: string) {
           { status: 'queued', meaning: 'Accepted, waiting for worker' },
           { status: 'processing', meaning: 'Upstream / upload / billing in progress' },
           { status: 'succeeded', meaning: 'Done — read data[].url (signed or public URL according to storage settings)' },
-          { status: 'failed', meaning: 'Terminal failure — read fail_reason' },
+          { status: 'failed', meaning: 'Terminal failure — read error_code and fail_reason' },
         ],
         queuedExample: `{
   "status": "queued",
@@ -338,8 +338,14 @@ export function getAsyncImageApiDoc(locale: string, apiRoot: string) {
         failedExample: `{
   "status": "failed",
   "task_id": "asyncimg_0123456789abcdef",
-  "fail_reason": "image generation failed"
+  "error_code": 601,
+  "fail_reason": "Upstream image generation failed (HTTP 400): content policy or third-party similarity protection rejected the prompt"
 }`,
+        notes: [
+          'Failed task queries still return HTTP 200. error_code is an application code, not an HTTP 6xx status.',
+          'error_code: 601 policy/similarity, 602 reference fetch, 603 account capacity, 604 invalid input, 605 rate limit, 606 upstream unavailable, 607 invalid image output, 608 timeout/unknown, 609 storage or billing post-processing, 610 unclassified upstream (fallback).',
+          'Display fail_reason as returned. Upstream failures preserve the sanitized upstream message (subject to the existing length limit), including content-policy and reference-image errors.',
+        ],
       },
       oss: {
         title: 'OSS result links',
@@ -676,7 +682,7 @@ export function getAsyncImageApiDoc(locale: string, apiRoot: string) {
         { status: 'queued', meaning: '已受理，等待执行' },
         { status: 'processing', meaning: '上游生成 / 上传 OSS / 计费确认中' },
         { status: 'succeeded', meaning: '成功，读取 data[].url（签名或公开 URL 的有效期按存储配置）' },
-        { status: 'failed', meaning: '失败终态，读取 fail_reason' },
+        { status: 'failed', meaning: '失败终态，读取 error_code 和 fail_reason' },
       ],
       queuedExample: `{
   "status": "queued",
@@ -692,8 +698,14 @@ export function getAsyncImageApiDoc(locale: string, apiRoot: string) {
       failedExample: `{
   "status": "failed",
   "task_id": "asyncimg_0123456789abcdef",
-  "fail_reason": "image generation failed"
+  "error_code": 601,
+  "fail_reason": "上游生图失败（HTTP 400）：非常抱歉，生成的图片可能违反了关于与第三方内容相似性的防护限制。如果你认为此判断有误，请重试或修改提示语。"
 }`,
+      notes: [
+        '失败查询仍返回 HTTP 200；error_code 是应用层对照码，不是 HTTP 6xx 状态码。',
+        'error_code：601 内容安全/第三方相似性，602 参考图拉取，603 账号容量，604 请求输入，605 上游限流，606 上游不可用，607 图片输出解析，608 超时/未知，609 存储或计费后处理，610 未分类上游错误（容错码）。',
+        '请原样展示返回的 fail_reason；上游失败会在现有脱敏和长度限制内保留上游提示，包括内容政策和参考图错误。',
+      ],
     },
     oss: {
       title: 'OSS 链接说明',

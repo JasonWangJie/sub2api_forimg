@@ -30,6 +30,10 @@ type asyncImageTaskCenterService interface {
 	ResumePostProcessing(context.Context, string) (*service.AsyncImageTaskDetails, error)
 }
 
+type asyncImageTaskTerminator interface {
+	TerminateAsFailed(context.Context, string) (*service.AsyncImageTaskDetails, error)
+}
+
 type asyncImageTaskCenterPage struct {
 	Items    []asyncImageTaskCenterView  `json:"items"`
 	Total    int64                       `json:"total"`
@@ -301,6 +305,28 @@ func (h *AsyncImageTaskCenterHandler) ResumePostProcessing(c *gin.Context) {
 	response.Success(c, out)
 }
 
+// TerminateAsFailed lets an administrator close a task whose automatic
+// processing cannot make progress. It uses the service's version/status CAS,
+// so a concurrent worker completion wins and is never overwritten.
+func (h *AsyncImageTaskCenterHandler) TerminateAsFailed(c *gin.Context) {
+	terminator, ok := h.tasks.(asyncImageTaskTerminator)
+	if !ok {
+		response.ErrorFrom(c, service.ErrAsyncImageTaskTerminationNotAllowed)
+		return
+	}
+	details, err := terminator.TerminateAsFailed(c.Request.Context(), strings.TrimSpace(c.Param("task_id")))
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	out, err := h.detailView(c.Request.Context(), details, true)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, out)
+}
+
 type asyncImageTaskCenterView struct {
 	ID                   string                         `json:"id"`
 	TaskID               string                         `json:"task_id"`
@@ -343,6 +369,7 @@ type asyncImageTaskCenterView struct {
 	ErrorCode            *string                        `json:"error_code,omitempty"`
 	ErrorMessage         *string                        `json:"error_message,omitempty"`
 	CanResume            bool                           `json:"can_resume"`
+	CanTerminate         bool                           `json:"can_terminate"`
 	DurationMS           *int64                         `json:"duration_ms,omitempty"`
 	SubmittedAt          time.Time                      `json:"submitted_at"`
 	StartedAt            *time.Time                     `json:"started_at,omitempty"`
@@ -494,8 +521,9 @@ func newAsyncImageTaskCenterView(task *service.AsyncImageTask, results []service
 		PromptSummary: promptPreview, PromptPreview: promptPreview,
 		RetryCount: task.RetryCount,
 		ErrorCode:  task.ErrorCode, ErrorMessage: errorMessage,
-		CanResume:  admin && (task.Status == service.AsyncImageTaskStatusStorageFailed || task.Status == service.AsyncImageTaskStatusBillingFailed),
-		DurationMS: durationMS, SubmittedAt: task.SubmittedAt, StartedAt: task.StartedAt,
+		CanResume:    admin && (task.Status == service.AsyncImageTaskStatusStorageFailed || task.Status == service.AsyncImageTaskStatusBillingFailed),
+		CanTerminate: admin && service.CanTerminateAsyncImageTask(task.Status),
+		DurationMS:   durationMS, SubmittedAt: task.SubmittedAt, StartedAt: task.StartedAt,
 		UpstreamSucceededAt: task.UpstreamSucceededAt, FinishedAt: task.FinishedAt,
 		ExpiresAt: task.ExpiresAt, CreatedAt: task.CreatedAt, UpdatedAt: task.UpdatedAt,
 	}

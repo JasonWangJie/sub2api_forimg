@@ -1,5 +1,18 @@
 # Sub2API Fork 二次开发总览
 
+## 2026-08-31 生产卡住任务清理
+
+- 经用户明确授权，在 `108.186.246.14` PostgreSQL（近 7 天范围）筛选并结束 7 个 `invoking` 且执行/更新时间均超过 1 小时的任务。
+- 事务将任务标记为 `failed`，写入 `error_code=admin_terminated`、结束时间、清空加密请求载荷，并追加 `admin_task_terminated` 事件；未修改已处于 `execution_unknown` 的终态任务。
+- 清理后复核：近 7 天非终态且超过 1 小时任务数为 `0`；当前 `invoking` 仅剩刚开始的实时任务，未重启服务、未部署新二进制。
+
+## 2026-08-31 异步任务卡住修复与管理员终止
+
+- 新增按 `started_at`/`created_at` 扫描执行超时 `invoking` 任务的恢复兜底；心跳刷新 `updated_at` 也不会再让任务无限卡住。
+- 终态 transition 使用独立短超时 context，避免超时取消 `processCtx` 后数据库写入因 `context canceled` 失败。
+- 管理员 `/admin/async-image-tasks` 现支持 `POST /api/v1/admin/async-image-tasks/{task_id}/terminate`，以 CAS 将可终止状态结束为 `failed`，记录 `admin_terminated` 和事件审计；前端详情/列表提供确认按钮。
+- 本地验证：异步 Service、Handler 定向 Go 测试通过；前端 API 用例 7/7、`pnpm typecheck` 通过。完整 Service 包测试仍受既有外部 OpenAI token 对比用例 `TestEstimateOpenAIInputTokens_CompareWithOpenAIAPI` 失败影响；未部署或重启生产。
+
 > 本文件只记录 `JasonWangJie/sub2api_forimg` Fork 的二次开发与交接信息。安装、升级、在线更新和 Release 以当前仓库文档为准；原作者文档仅作为上游参考。
 
 ## 从这里开始
@@ -20,13 +33,13 @@ codegraph init
 
 ## 当前版本快照
 
-记录日期：`2026-08-27`（异步 Gemini 400 换号与完整输出错误分类修复；补齐池模式 failover 的上游 request ID 透传；后端定向测试、迁移检查、前端既有验证、类型检查和带 embed 的生产构建通过；工作树 dirty；未部署或重启生产）。
+记录日期：`2026-08-31`（更新《异步生图接口文档new》：补齐失败响应、HTTP 状态与 601-609 对照码、上游原文样例、轮询策略和生产错误快照；补充 7 个超时后卡在 `invoking` 的生产诊断；异步错误透传代码与测试已在工作树；未部署或重启生产）。
 
 | 项目 | 当前记录 |
 |---|---|
 | 发布版本文件 | `backend/cmd/server/VERSION`（以仓库文件为准） |
-| 文档记录时 HEAD | `22fc75bb1e8f231e57b953cfc7c0aad3e5c50a9a` |
-| HEAD 描述 | `v0.1.173.34-1-g22fc75b-dirty` |
+| 文档记录时 HEAD | `fd10de10fb3fe22e92e0ba7916ccd0433a8316c5` |
+| HEAD 描述 | `v0.1.173.36-1-gfd10de1-dirty` |
 | 当前及后续默认分支 | `main` |
 | 已合并原作者主线 | 以 `git log` / `upstream/main` 实际为准 |
 | SC 上传安全迁移 | `backend/migrations/187_ZJ_async_image_upload_reservations.sql` |
@@ -38,6 +51,26 @@ codegraph init
 | 异步图库自动归档 | `async_image.auto_archive_to_library`，默认 `false`；结果对象和查询 URL 不受影响 |
 | 异步生图用户统计 | `GET /v1/images/tasks_async/stats`；按服务器时区统计用户当天全部异步任务 |
 | Fork CI | 发版时在 `JasonWangJie/sub2api_forimg/actions` 核对实际结果 |
+
+### 2026-08-31 异步生图接口文档与错误对照码同步
+
+- 更新 [异步生图接口文档new.md](异步生图接口文档new.md)：失败状态明确读取 `error_code` + `fail_reason`；补充 `Retry-After` 轮询、HTTP 408/429/502/503/504/524 说明、原始上游提示和生产错误快照。
+- 当前工作树验证：`git diff --check` 通过；本轮未重新执行后端和前端测试，沿用 2026-08-29 已记录的 Handler 测试与 `pnpm typecheck` 结果。
+
+### 2026-08-31 生产卡住任务只读诊断
+
+- 服务器 `108.186.246.14` 在 `2026-08-31T13:25:34Z` 快照：`succeeded=13626`、`failed=1278`、`execution_unknown=60`、`invoking=8`；其中 7 个 `invoking` 已超过 120 秒租约，全部为 Gemini `gemini-3-pro-image-preview`。
+- 7 个任务事件均停在 `queued -> invoking`；日志成对出现 `async_image.execution_timeout_cancel`（`timeout=900000`）和 `async_image.execution_unknown_transition_failed`（`context canceled`）。结论是超时取消后使用已取消 context 写终态失败，任务长期留在 `invoking`。
+- 7 天任务失败分类：`upstream_failed=356`、`invalid_reference_image=297`、`local_capacity_exhausted=63`、`execution_timeout=46`、`upstream_capacity_exhausted=27`、`execution_unknown=34`。恢复扫描配置为租约 120 秒、周期 30 秒，但本次未收敛这些任务；未修改生产状态、配置或服务。
+- 已同步 [异步生图接口文档new.md](异步生图接口文档new.md) 与 [docs/DURABLE_ASYNC_IMAGE_API.md](docs/DURABLE_ASYNC_IMAGE_API.md) 的诊断说明；生产修复待另行授权。
+
+### 2026-08-29 异步生图错误审计与对照码
+
+- 生产只读审计范围：`root@108.186.246.14` 的 `/opt/sub2api/logs/sub2api.log` 及滚动压缩日志，服务器时间 `2026-08-22 00:00` 至 `2026-08-29 11:45`；未修改文件、配置、数据库，未部署或重启。
+- `async_image.upstream_failed` 共 `2312` 次：HTTP `400` 1526、`502` 319、`503` 125、`504` 114、`429` 113、`524` 50、`403` 64、`408` 1。
+- 主要日志分类（关键词分类可能重叠）：参考图 URL 拉取失败 `1231` 次（OpenAI HTTP 400，含 curl 28/35/56、DNS、ProxyError、TLS）；账号或容量耗尽 `733` 次（Gemini 669、OpenAI 64）；Gemini `Invalid request` `154` 次；第三方相似性拦截 `36` 次；内容安全/政策拦截至少 `29` 次；缺少参考图、格式/尺寸输入问题 `16` 次；通用上游失败 `4` 次。
+- 任务查询仍使用 HTTP `200`，失败响应新增应用层整数 `error_code`：`601` 内容安全/第三方相似性、`602` 参考图拉取、`603` 账号或容量、`604` 输入参数、`605` 限流、`606` 通用上游、`607` 图片输出解析、`608` 超时/未知、`609` 存储或计费后处理。`fail_reason` 优先返回 Worker 保存的脱敏原文。
+- 代表性原文见 [docs/DURABLE_ASYNC_IMAGE_API.md](docs/DURABLE_ASYNC_IMAGE_API.md) 的失败对照码章节；用户给出的第三方相似性提示会逐字返回。
 
 最终交付必须同时报告 `VERSION`、完整 SHA、`git describe`、推送分支和 CI 链接/结果。历史 `2026-07-22` 基线与测试证据仍保留在下方「当前完成度」与 [wiki-new/测试与验收记录.md](wiki-new/测试与验收记录.md)。
 
@@ -309,3 +342,17 @@ pnpm run dev
 - 本轮工作树基线按实际命令为 HEAD `3c682ec2e346042229b6551d3346e3e8e363cff9`，`git describe` 为 `v0.1.173.35-1-g3c682ec-dirty`，版本 `0.1.173.35`；仅修改本地代码和测试，未部署、修改或重启生产服务器。
 - 补充修复：池模式 ErrorPolicy failover 保留完整上游响应头，异步账号尝试可持久化 `x-goog-request-id` 等 request ID；空响应不再被误判为账号级 `Invalid request`。
 - 验证：Gemini 异步 400 定向 Service 测试、`go test ./internal/service -run 'Gemini|ErrorPolicy' -count=1`、Handler 异步输出/换号定向测试、完整 `go test ./internal/handler`、`go test ./internal/repository ./internal/server/routes ./internal/server/middleware`、`go build -tags embed ./cmd/server` 均通过；Service 全包的既有外部凭证用例仍需单独看最终结果；`git diff --check` 通过。
+
+### 2026-08-31 近48小时异步生图错误分类补充
+
+- 按用户授权只读检查生产 `root@108.186.246.14` PostgreSQL 与 `journalctl -u sub2api`，范围为服务器 UTC 最近 48 小时；失败任务：`upstream_failed=103`、`invalid_reference_image=70`、`upstream_capacity_exhausted=3`、`execution_unknown=2`，管理员结束 `admin_terminated=6`。
+- 发现未覆盖的上游文案：`上游生图失败（HTTP 400）：由于我这边发生了错误，我未能生成图片。`；新增容错 `error_code=610`（未分类上游错误），未知内部错误也使用 610，并保留脱敏后的 `fail_reason` 原文。
+- 同一时间窗内 `invalid_reference_image` 还包含 `IMAGE_TOO_MANY_PIXELS`、尺寸上限和 `IMAGE_MIME_MISMATCH`；这些明确的图片输入错误现归 `604`，DNS/TLS/下载超时等网络拉取错误继续归 `602`。
+- 已同步代码、测试、接口文档和用户指南；生产二进制未部署、未重启。
+
+### 2026-08-31 异步接口冒烟与安全审查
+
+- 本地冒烟覆盖异步 Handler/Service 状态转换、超时终态、恢复扫描、管理员终止、路由注册和前端类型检查；Handler/Service 定向测试、完整 `go test ./internal/handler`、`pnpm typecheck` 均通过。
+- `go vet ./internal/handler ./internal/service` 通过；并修复异步 Chat Completions 兼容服务未配置时提前返回路径的 account-attempt context 泄漏。
+- 安全结论：管理员终止受 AdminAuth/合规中间件及状态+版本 CAS 保护；`execution_unknown` 不自动重放；`610` 不建议盲目重试。真实上游、Redis/PostgreSQL/OSS 端到端及部署后告警仍未验证。
+- 生产复核（2026-08-31 14:50 UTC）：当前 `invoking=3`，超过 1 小时为 `0`；均为分钟级新任务，只读查询，生产仍运行旧二进制。

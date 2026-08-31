@@ -462,7 +462,11 @@ func (h *DurableAsyncImageHandler) writeBBQuery(c *gin.Context, details *service
 		}
 		c.JSON(http.StatusOK, gin.H{"status": "succeeded", "task_id": task.TaskID, "data": data})
 	case "failed":
-		c.JSON(http.StatusOK, gin.H{"status": "failed", "task_id": task.TaskID, "fail_reason": asyncImageFailureMessage(task)})
+		c.JSON(http.StatusOK, gin.H{
+			"status": "failed", "task_id": task.TaskID,
+			"error_code":  asyncImageFailureBusinessCode(task),
+			"fail_reason": asyncImageFailureMessage(task),
+		})
 	case "queued":
 		c.Header("Retry-After", "3")
 		c.JSON(http.StatusOK, gin.H{"status": "queued", "task_id": task.TaskID})
@@ -821,17 +825,29 @@ func asyncImageFailureMessage(task *service.AsyncImageTask) string {
 	}
 	if task.ErrorCode != nil {
 		switch strings.TrimSpace(*task.ErrorCode) {
-		case "invalid_reference_image", "unsupported_image_dimensions":
+		case "invalid_reference_image":
+			if task.ErrorMessage != nil && strings.TrimSpace(*task.ErrorMessage) != "" {
+				return strings.TrimSpace(*task.ErrorMessage)
+			}
 			return "reference image could not be processed"
+		case "unsupported_image_dimensions":
+			if task.ErrorMessage != nil && strings.TrimSpace(*task.ErrorMessage) != "" {
+				return strings.TrimSpace(*task.ErrorMessage)
+			}
+			return "reference image dimensions are not supported"
 		case "storage_failed", "storage_unavailable":
 			return "image result storage failed"
 		case "billing_failed":
 			return "image billing confirmation failed"
 		case "eligibility_failed":
 			return "image generation eligibility changed before execution"
-		case "local_capacity_exhausted":
-			return "image generation could not be scheduled because no account capacity became available"
-		case "upstream_failed", "gateway_unavailable":
+		case "local_capacity_exhausted", "upstream_capacity_exhausted", "upstream_failed", "gateway_unavailable", "upstream_invalid_output":
+			if task.ErrorMessage != nil && strings.TrimSpace(*task.ErrorMessage) != "" {
+				return strings.TrimSpace(*task.ErrorMessage)
+			}
+			if strings.TrimSpace(*task.ErrorCode) == "local_capacity_exhausted" {
+				return "image generation could not be scheduled because no account capacity became available"
+			}
 			return "upstream image generation failed"
 		case "execution_timeout":
 			if task.ErrorMessage != nil && strings.TrimSpace(*task.ErrorMessage) != "" {
@@ -840,7 +856,110 @@ func asyncImageFailureMessage(task *service.AsyncImageTask) string {
 			return "image generation timed out"
 		}
 	}
+	// Keep a safely stored upstream message visible when a new internal code
+	// has not been added to the classifier yet.
+	if task.ErrorMessage != nil && strings.TrimSpace(*task.ErrorMessage) != "" {
+		return strings.TrimSpace(*task.ErrorMessage)
+	}
 	return "image generation failed"
+}
+
+const (
+	asyncImageBusinessCodeContentPolicy = 601
+	asyncImageBusinessCodeReference     = 602
+	asyncImageBusinessCodeCapacity      = 603
+	asyncImageBusinessCodeInput         = 604
+	asyncImageBusinessCodeRateLimit     = 605
+	asyncImageBusinessCodeUpstream      = 606
+	asyncImageBusinessCodeImageOutput   = 607
+	asyncImageBusinessCodeTimeout       = 608
+	asyncImageBusinessCodePostProcess   = 609
+	// Stable escape hatch for an upstream failure outside known categories.
+	asyncImageBusinessCodeUnclassified = 610
+)
+
+// asyncImageFailureBusinessCode is a stable application-level classification.
+// It deliberately remains separate from HTTP status: task polling always uses
+// HTTP 200, while this integer lets clients distinguish actionable failures.
+func asyncImageFailureBusinessCode(task *service.AsyncImageTask) int {
+	if task == nil {
+		return asyncImageBusinessCodeUpstream
+	}
+	code := ""
+	if task.ErrorCode != nil {
+		code = strings.TrimSpace(*task.ErrorCode)
+	}
+	switch code {
+	case "content_policy_violation", "policy_violation", "safety_policy_violation":
+		return asyncImageBusinessCodeContentPolicy
+	case "invalid_reference_image":
+		if task.ErrorMessage != nil {
+			referenceMessage := strings.ToLower(strings.TrimSpace(*task.ErrorMessage))
+			if containsAnyAsyncImageFailure(referenceMessage,
+				"image_too_many_pixels", "too many pixels", "pixel limit", "configured size limit",
+				"image_mime_mismatch", "mime mismatch", "declared image type", "dimensions are not supported") {
+				return asyncImageBusinessCodeInput
+			}
+		}
+		return asyncImageBusinessCodeReference
+	case "unsupported_image_dimensions", "request_decryption_failed", "eligibility_failed":
+		return asyncImageBusinessCodeInput
+	case "local_capacity_exhausted", "upstream_capacity_exhausted":
+		return asyncImageBusinessCodeCapacity
+	case "upstream_invalid_output":
+		return asyncImageBusinessCodeImageOutput
+	case "gateway_unavailable":
+		return asyncImageBusinessCodeUpstream
+	case "execution_timeout", "execution_unknown", "account_attempt_timeout":
+		return asyncImageBusinessCodeTimeout
+	case "storage_failed", "storage_unavailable", "billing_failed":
+		return asyncImageBusinessCodePostProcess
+	}
+
+	message := ""
+	if task.ErrorMessage != nil {
+		message = strings.ToLower(strings.TrimSpace(*task.ErrorMessage))
+	}
+	// Content-policy and third-party-similarity blocks are actionable prompt
+	// failures even when the upstream only reports a generic 400.
+	if containsAnyAsyncImageFailure(message,
+		"third-party", "third party", "similarity", "content policy", "safety policy",
+		"policy violation", "第三方", "相似性", "防护限制", "内容政策", "内容安全", "安全策略", "安全政策", "内容审核", "安全拦截", "违反政策", "违反了我们的政策") {
+		return asyncImageBusinessCodeContentPolicy
+	}
+	if containsAnyAsyncImageFailure(message,
+		"image_url fetch failed", "image url fetch failed", "download openai reference image",
+		"reference image fetch", "curl: (28)", "curl: (35)", "curl: (56)", "proxyerror", "tls", "dns", "name resolution", "connection reset", "connection closed") {
+		return asyncImageBusinessCodeReference
+	}
+	if containsAnyAsyncImageFailure(message, "all available accounts exhausted", "capacity unavailable", "no account capacity") {
+		return asyncImageBusinessCodeCapacity
+	}
+	if containsAnyAsyncImageFailure(message, "rate limit", "rate limited", "http 429", "status 429") {
+		return asyncImageBusinessCodeRateLimit
+	}
+	if containsAnyAsyncImageFailure(message, "invalid request", "invalid prompt", "prompt is required", "unsupported_image_dimensions") {
+		return asyncImageBusinessCodeInput
+	}
+	if containsAnyAsyncImageFailure(message, "timed out", "timeout", "http 408", "status 408") {
+		return asyncImageBusinessCodeTimeout
+	}
+	if containsAnyAsyncImageFailure(message, "http 502", "http 503", "http 504", "status 502", "status 503", "status 504", "temporarily unavailable", "gateway unavailable") {
+		return asyncImageBusinessCodeUpstream
+	}
+	if code == "upstream_failed" && message == "" {
+		return asyncImageBusinessCodeUpstream
+	}
+	return asyncImageBusinessCodeUnclassified
+}
+
+func containsAnyAsyncImageFailure(value string, terms ...string) bool {
+	for _, term := range terms {
+		if strings.Contains(value, strings.ToLower(term)) {
+			return true
+		}
+	}
+	return false
 }
 
 func asyncImageAbsoluteURL(baseURL, path string) string {

@@ -95,6 +95,7 @@ export interface AsyncImageTask {
   error_code?: string | null
   error_message?: string | null
   can_resume?: boolean
+  can_terminate?: boolean
 
   submitted_at?: string | null
   created_at: string

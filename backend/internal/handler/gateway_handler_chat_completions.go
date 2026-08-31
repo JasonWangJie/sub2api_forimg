@@ -326,6 +326,9 @@ func (h *GatewayHandler) ChatCompletions(c *gin.Context) {
 		if account.Platform == service.PlatformGemini {
 			if h.geminiCompatService == nil {
 				h.chatCompletionsErrorResponse(c, http.StatusBadGateway, "upstream_error", "Gemini compatibility service is not configured")
+				if accountAttemptCancel != nil {
+					accountAttemptCancel()
+				}
 				if accountReleaseFunc != nil {
 					accountReleaseFunc()
 				}
@@ -335,6 +338,9 @@ func (h *GatewayHandler) ChatCompletions(c *gin.Context) {
 		} else if shouldUseAntigravityCompat(account) {
 			if h.antigravityGatewayService == nil {
 				h.chatCompletionsErrorResponse(c, http.StatusBadGateway, "upstream_error", "Antigravity compatibility service is not configured")
+				if accountAttemptCancel != nil {
+					accountAttemptCancel()
+				}
 				if accountReleaseFunc != nil {
 					accountReleaseFunc()
 				}

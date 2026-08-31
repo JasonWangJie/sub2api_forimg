@@ -211,9 +211,37 @@ func (h *DurableAsyncImageHandler) recoverAsyncImageTasks(ctx context.Context, c
 		}
 	}
 
-	// Active workers own the configured per-account timeout. The recovery scanner
-	// only handles rows that have lost their heartbeat/lease; its UpdatedBefore
-	// CAS prevents it from racing a live worker's final transition.
+	// Enforce the wall-clock invocation timeout independently of updated_at.
+	// Heartbeats intentionally keep updated_at fresh, so a provider that ignores
+	// context cancellation must still be moved out of invoking.
+	if timeoutRepo, ok := repo.(service.AsyncImageInvocationTimeoutRepository); ok {
+		startedBefore := time.Now().UTC().Add(-asyncImageExecutionTimeout(cfg))
+		if timedOut, timeoutErr := timeoutRepo.ListTimedOutInvokingAsyncImageTasks(ctx, startedBefore, 200); timeoutErr == nil {
+			for _, task := range timedOut {
+				if task == nil {
+					continue
+				}
+				code, message, finished := "execution_timeout", fmt.Sprintf("image generation timed out after %s; upstream reconciliation pending", asyncImageExecutionTimeout(cfg).Round(time.Second)), time.Now().UTC()
+				reconciliation := "pending"
+				_, transitionErr := h.tasks.Transition(ctx, service.AsyncImageTaskTransition{
+					TaskID: task.TaskID, ExpectedVersion: task.Version,
+					FromStatuses: []string{service.AsyncImageTaskStatusInvoking},
+					ToStatus:     service.AsyncImageTaskStatusExecutionUnknown,
+					ErrorCode:    &code, ErrorMessage: &message, FinishedAt: &finished,
+					ClearRequestPayload: true, EventType: "execution_timeout", ReconciliationStatus: &reconciliation,
+				})
+				if transitionErr != nil && !errors.Is(transitionErr, service.ErrAsyncImageInvalidTransition) {
+					logger.L().Warn("async_image.execution_timeout_transition_failed", zap.String("task_id", task.TaskID), zap.Error(transitionErr))
+				}
+			}
+		} else if ctx.Err() == nil {
+			logger.L().Warn("async_image.execution_timeout_scan_failed", zap.Error(timeoutErr))
+		}
+	}
+
+	// Active workers also own the configured per-account timeout. The recovery
+	// scanner handles rows that have lost their heartbeat/lease; its
+	// UpdatedBefore CAS prevents it from racing a live worker's final transition.
 
 	staleBefore := time.Now().UTC().Add(-lease)
 	invoking, err := repo.ListRecoverableAsyncImageTasks(ctx, []string{service.AsyncImageTaskStatusInvoking}, staleBefore, 0, 0, 100)
@@ -450,7 +478,9 @@ func (h *DurableAsyncImageHandler) processAsyncImageTask(parent context.Context,
 		// prior process may have sent the request and must never be replayed.
 		code, message, finished := "execution_unknown", "generation outcome is unknown after an interrupted upstream request", time.Now().UTC()
 		reconciliation := "pending"
-		_, _ = h.tasks.Transition(parent, service.AsyncImageTaskTransition{
+		terminalCtx, cancel := asyncImageTerminalTransitionContext(parent)
+		defer cancel()
+		_, _ = h.tasks.Transition(terminalCtx, service.AsyncImageTaskTransition{
 			TaskID: task.TaskID, ExpectedVersion: task.Version,
 			FromStatuses: []string{service.AsyncImageTaskStatusInvoking},
 			ToStatus:     service.AsyncImageTaskStatusExecutionUnknown,
@@ -1941,7 +1971,9 @@ func (h *DurableAsyncImageHandler) failAsyncImageTask(ctx context.Context, task 
 		ErrorCode: &code, ErrorMessage: &message, IncrementRetry: incrementRetry,
 		FinishedAt: &finished, ClearRequestPayload: true, EventType: "task_failed",
 	}
-	_, err := h.tasks.Transition(ctx, enrichAsyncImageAttemptTransition(ctx, task, transition))
+	terminalCtx, cancel := asyncImageTerminalTransitionContext(ctx)
+	defer cancel()
+	_, err := h.tasks.Transition(terminalCtx, enrichAsyncImageAttemptTransition(terminalCtx, task, transition))
 	if err != nil {
 		logger.L().Warn("async_image.fail_transition_failed", zap.String("task_id", task.TaskID), zap.Error(err))
 	}
@@ -1961,10 +1993,23 @@ func (h *DurableAsyncImageHandler) markAsyncImageExecutionUnknown(ctx context.Co
 		ErrorCode:    &code, ErrorMessage: &message, FinishedAt: &finished,
 		ClearRequestPayload: true, EventType: "execution_unknown", ReconciliationStatus: &reconciliation,
 	}
-	_, err := h.tasks.Transition(ctx, enrichAsyncImageAttemptTransition(ctx, task, transition))
+	terminalCtx, cancel := asyncImageTerminalTransitionContext(ctx)
+	defer cancel()
+	_, err := h.tasks.Transition(terminalCtx, enrichAsyncImageAttemptTransition(terminalCtx, task, transition))
 	if err != nil {
 		logger.L().Warn("async_image.execution_unknown_transition_failed", zap.String("task_id", task.TaskID), zap.Error(err))
 	}
+}
+
+// Terminal transitions must remain persistable after an upstream timeout has
+// cancelled the worker context. WithoutCancel keeps request-scoped values (for
+// account-attempt auditing) while removing the cancellation signal; the short
+// deadline still bounds shutdown and database stalls.
+func asyncImageTerminalTransitionContext(ctx context.Context) (context.Context, context.CancelFunc) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	return context.WithTimeout(context.WithoutCancel(ctx), 15*time.Second)
 }
 
 func asyncImageAttemptState(task *service.AsyncImageTask, ctx context.Context) (json.RawMessage, json.RawMessage) {

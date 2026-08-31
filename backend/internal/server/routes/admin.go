@@ -164,6 +164,7 @@ func registerAsyncImageTaskCenterRoutes(admin *gin.RouterGroup, h *handler.Handl
 		tasks.GET("/:task_id", h.Admin.AsyncImageTasks.GetForAdmin)
 		tasks.GET("/:task_id/results/:image_index/view", h.Admin.AsyncImageTasks.ViewResultForAdmin)
 		tasks.POST("/:task_id/resume", h.Admin.AsyncImageTasks.ResumePostProcessing)
+		tasks.POST("/:task_id/terminate", h.Admin.AsyncImageTasks.TerminateAsFailed)
 	}
 }
 

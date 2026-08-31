@@ -103,7 +103,7 @@ func TestExtractOpenAIAsyncImageOutputsB64(t *testing.T) {
 func TestWriteBBQueryFailedIncludesTaskIDAndFailReason(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	h := &DurableAsyncImageHandler{}
-	message := "upstream image generation failed"
+	message := "上游生图失败（HTTP 400）：非常抱歉，生成的图片可能违反了关于与第三方内容相似性的防护限制。如果你认为此判断有误，请重试或修改提示语。"
 	code := "upstream_failed"
 	details := &service.AsyncImageTaskDetails{
 		Task: &service.AsyncImageTask{
@@ -120,7 +120,64 @@ func TestWriteBBQueryFailedIncludesTaskIDAndFailReason(t *testing.T) {
 	ctx, _ := gin.CreateTestContext(recorder)
 	h.writeBBQuery(ctx, details, service.AsyncImageRuntimeConfig{})
 	require.Equal(t, http.StatusOK, recorder.Code)
-	require.JSONEq(t, `{"status":"failed","task_id":"asyncimg_failed","fail_reason":"upstream image generation failed"}`, recorder.Body.String())
+	require.JSONEq(t, `{"status":"failed","task_id":"asyncimg_failed","error_code":601,"fail_reason":"上游生图失败（HTTP 400）：非常抱歉，生成的图片可能违反了关于与第三方内容相似性的防护限制。如果你认为此判断有误，请重试或修改提示语。"}`, recorder.Body.String())
+}
+
+func TestAsyncImageFailureBusinessCodeClassifiesStoredUpstreamMessages(t *testing.T) {
+	tests := []struct {
+		name    string
+		code    string
+		message string
+		want    int
+	}{
+		{
+			name:    "reference timeout",
+			message: "上游生图失败（HTTP 400）：image_url fetch failed: Failed to perform, curl: (28) Connection timed out after 60001 milliseconds",
+			want:    602,
+		},
+		{name: "capacity", code: "upstream_failed", message: "上游生图失败（HTTP 502）：All available accounts exhausted", want: 603},
+		{name: "rate limit", code: "upstream_failed", message: "上游生图失败（HTTP 429）：Upstream rate limit exceeded, please retry later", want: 605},
+		{name: "invalid request", code: "upstream_failed", message: "上游生图失败（HTTP 400）：Invalid request", want: 604},
+		{name: "reference pixel limit", code: "invalid_reference_image", message: "download OpenAI reference image: validate reference image: error: code=*** reason=\"IMAGE_TOO_MANY_PIXELS\" message=\"image exceeds the configured pixel limit\"", want: 604},
+		{name: "reference mime mismatch", code: "invalid_reference_image", message: "download OpenAI reference image: validate reference image: error: code=*** reason=\"IMAGE_MIME_MISMATCH\" message=\"declared image type does not match image bytes\"", want: 604},
+		{name: "temporary upstream", code: "upstream_failed", message: "上游生图失败（HTTP 503）：service temporarily unavailable", want: 606},
+		{name: "unclassified upstream", code: "upstream_failed", message: "上游生图失败（HTTP 400）：由于我这边发生了错误，我未能生成图片。", want: 610},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			code := test.code
+			task := &service.AsyncImageTask{ErrorCode: &code, ErrorMessage: &test.message}
+			require.Equal(t, test.want, asyncImageFailureBusinessCode(task))
+			require.Equal(t, test.message, asyncImageFailureMessage(task))
+		})
+	}
+}
+
+func TestAsyncImageFailureMessagePreservesUnknownStoredMessage(t *testing.T) {
+	code := "new_upstream_error"
+	message := "上游生图失败（HTTP 400）：provider returned an undocumented response"
+	task := &service.AsyncImageTask{ErrorCode: &code, ErrorMessage: &message}
+
+	require.Equal(t, 610, asyncImageFailureBusinessCode(task))
+	require.Equal(t, message, asyncImageFailureMessage(task))
+}
+
+func TestAsyncImageFailureBusinessCodeClassifiesInternalStates(t *testing.T) {
+	tests := []struct {
+		errorCode string
+		want      int
+	}{
+		{errorCode: "invalid_reference_image", want: 602},
+		{errorCode: "upstream_capacity_exhausted", want: 603},
+		{errorCode: "unsupported_image_dimensions", want: 604},
+		{errorCode: "upstream_invalid_output", want: 607},
+		{errorCode: "execution_timeout", want: 608},
+		{errorCode: "storage_failed", want: 609},
+	}
+	for _, test := range tests {
+		code := test.errorCode
+		require.Equal(t, test.want, asyncImageFailureBusinessCode(&service.AsyncImageTask{ErrorCode: &code}))
+	}
 }
 
 func TestWriteAsyncImageSubmitResponsesAlignGeminiSCWithOpenAI(t *testing.T) {

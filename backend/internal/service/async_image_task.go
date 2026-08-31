@@ -537,8 +537,13 @@ func IsTerminalAsyncImageTaskStatus(status string) bool {
 }
 
 func CanTransitionAsyncImageTask(from, to string) bool {
-	if !IsAsyncImageTaskStatus(from) || !IsAsyncImageTaskStatus(to) || from == to || IsTerminalAsyncImageTaskStatus(from) {
+	if !IsAsyncImageTaskStatus(from) || !IsAsyncImageTaskStatus(to) || from == to {
 		return false
+	}
+	// An interrupted invocation is terminal for automatic processing, but an
+	// administrator may explicitly close that unknown outcome as failed.
+	if IsTerminalAsyncImageTaskStatus(from) {
+		return from == AsyncImageTaskStatusExecutionUnknown && to == AsyncImageTaskStatusFailed
 	}
 	if to == AsyncImageTaskStatusFailed || to == AsyncImageTaskStatusExpired {
 		return true

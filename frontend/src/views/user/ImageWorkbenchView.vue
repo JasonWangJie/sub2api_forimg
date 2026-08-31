@@ -402,6 +402,7 @@ interface AsyncTaskState {
   protocol: 'bb' | 'sc'
   status: 'queued' | 'processing' | 'succeeded' | 'failed'
   progress: number
+  errorCode?: number
   error: string
 }
 
@@ -463,6 +464,7 @@ const asyncTask = reactive<AsyncTaskState>({
   protocol: 'bb',
   status: 'queued',
   progress: 0,
+  errorCode: undefined,
   error: '',
 })
 
@@ -901,6 +903,7 @@ function beginAsyncTask(submission: imageAPI.AsyncImageSubmission, key: ApiKey, 
     protocol: submission.protocol,
     status: 'queued',
     progress: 0,
+    errorCode: undefined,
     error: '',
   })
   appStore.showSuccess(t('imageWorkflow.workbench.taskSubmitted'))
@@ -955,6 +958,7 @@ async function pollTask(key: ApiKey, current: ImageWorkbenchCapabilities) {
     if (asyncTask.taskId !== trackedTaskId) return
     asyncTask.status = state.status
     asyncTask.progress = Math.max(0, Math.min(100, state.progress))
+    asyncTask.errorCode = state.error_code
     if (state.status === 'succeeded') {
       asyncTask.active = false
       asyncTask.progress = 100

@@ -1,7 +1,8 @@
 # 异步生图接口文档（新）
 
 面向下游对接的持久化异步生图说明。**只覆盖当前在用、推荐对接**的能力：
-Host://https://api.tokensfree.xyz
+Base URL: `https://api.tokensfree.xyz`
+
 | 平台 | 场景 | 方法 | 路径 | 受理 HTTP |
 |---|---|---|---|---|
 | OpenAI | 文生图 / 图生图 | `POST` | `/v1/images/generations_oa` | `202` |
@@ -45,7 +46,7 @@ Content-Type: application/json
 
 ### 2.2 轮询
 
-建议每 **30~60 秒**查询一次（也可按业务改为 30～60 秒，**请勿频繁**）。提交成功响应通常包含：
+提交成功或任务查询响应可能包含 `Retry-After: 3`。客户端应优先遵守该响应头：首次查询可在 3 秒后发起，之后按 3～30 秒退避轮询，避免高频请求。
 
 ```http
 Cache-Control: no-store
@@ -361,7 +362,7 @@ OpenAI 与 Gemini 异步任务均使用此路径；受理响应里的 `query_url
 | `queued` | 已入队，等待执行 | 继续轮询 |
 | `processing` | 上游生成 / 上传 OSS / 计费确认中 | 继续轮询 |
 | `succeeded` | 成功终态 | 读取 `data[].url` |
-| `failed` | 失败终态 | 读取 `fail_reason` |
+| `failed` | 失败终态 | 读取 `error_code` 和 `fail_reason` |
 
 成功与失败查询均返回 HTTP `200`。仅当 `status === "succeeded"` 时可消费图片 URL。
 
@@ -405,9 +406,27 @@ OpenAI 与 Gemini 异步任务均使用此路径；受理响应里的 `query_url
 {
   "status": "failed",
   "task_id": "asyncimg_0123456789abcdef",
-  "fail_reason": "image generation failed"  // 失败原因
+  "error_code": 601,                         // 应用层失败对照码，非 HTTP 6xx
+  "fail_reason": "上游生图失败（HTTP 400）：非常抱歉，生成的图片可能违反了关于与第三方内容相似性的防护限制。如果你认为此判断有误，请重试或修改提示语。"  // 上游失败时保留脱敏后的完整提示
 }
 ```
+
+失败查询仍返回 HTTP `200`，请同时读取 `error_code` 和 `fail_reason`。应用层失败对照码如下：
+
+| `error_code` | 含义 | 建议 |
+|---:|---|---|
+| `601` | 内容安全、内容政策或第三方相似性拦截 | 修改提示词后重试，并原样展示 `fail_reason` |
+| `602` | 参考图 URL 拉取失败（DNS、TLS、超时、连接重置等） | 检查 HTTPS/CDN，或先上传参考图 |
+| `603` | 账号或上游容量耗尽 | 稍后重试并检查账号容量 |
+| `604` | 请求参数、提示词、尺寸、格式或参考图无效 | 按原文修正请求 |
+| `605` | 上游限流（HTTP 429） | 按 `Retry-After` 退避 |
+| `606` | 上游暂时不可用（网关/服务端 5xx） | 稍后重试 |
+| `607` | 上游图片输出无法解析 | 检查模型和响应格式 |
+| `608` | 生图超时或执行结果未知 | 避免自动重复提交，等待对账 |
+| `609` | 存储或计费后处理失败 | 继续查询；不会重新调用上游 |
+| `610` | 未分类上游错误（容错码） | 保留并展示 `fail_reason` 原文，携带任务 ID 联系排查；不要据此重复提交 |
+
+`error_code` 不是 HTTP 状态码；任务查询的 HTTP 状态仍按协议固定为 `200`。
 
 ---
 
@@ -430,13 +449,17 @@ OpenAI 与 Gemini 异步任务均使用此路径；受理响应里的 `query_url
 
 | HTTP | 场景 |
 |---|---|
-| `400` | 参数无效、`stream=true`、非法尺寸/比例、参考图无效等 |
+| `400` | 提交参数无效、`stream=true`、非法尺寸/比例、参考图无效等；任务失败时通常对应 `error_code=601`、`602` 或 `604` |
 | `401` | API Key 无效 |
 | `403` | 平台不匹配，或普通生图 / 异步生图未开启 |
 | `404` | 任务不存在，或非提交所用 API Key |
 | `409` | 幂等冲突 / 输入字节额度不足 |
 | `413` | 请求体或参考图超限 |
-| `503` | 对象存储或运行配置不可用 |
+| `408` | 上游请求超时；任务失败通常对应 `error_code=608` |
+| `429` | 上游限流；任务失败通常对应 `error_code=605` |
+| `502` | 上游网关或账号容量错误；按正文区分 `603` / `606` |
+| `503` | 上游、本地运行依赖或对象存储/运行配置暂时不可用；任务失败通常对应 `error_code=606` 或 `609` |
+| `504` / `524` | 上游或 CDN 超时；任务失败通常对应 `error_code=606` / `608` |
 
 任务查询的 `failed` 是业务终态，仍使用 HTTP `200`。
 
@@ -452,7 +475,94 @@ OpenAI 与 Gemini 异步任务均使用此路径；受理响应里的 `query_url
 }
 ```
 
+### 8.3 上游失败原文
+
+Worker 会在现有脱敏和长度限制内保存上游错误正文。任务查询的 `fail_reason` 应直接展示，不要替换成笼统的 “image generation failed”。常见原文包括：
+
+```text
+上游生图失败（HTTP 400）：非常抱歉，生成的图片可能违反了关于与第三方内容相似性的防护限制。如果你认为此判断有误，请重试或修改提示语。
+```
+
+```text
+上游生图失败（HTTP 400）：image_url fetch failed: Failed to perform, curl: (28) Connection timed out after 60001 milliseconds. See https://***.se/***/***/*** first for more details.
+```
+
+```text
+上游生图失败（HTTP 502）：All available accounts exhausted
+```
+
+```text
+上游生图失败（HTTP 429）：Upstream rate limit exceeded, please retry later
+```
+
+```text
+上游生图失败（HTTP 400）：Invalid request
+```
+
+### 8.4 近期生产错误快照（只读审计）
+
+以下统计来自 `2026-08-22 00:00` 至 `2026-08-29 11:45` 的服务器日志，事件为 `async_image.upstream_failed`，仅用于排查优先级，不代表接口固定配额或 SLA。关键词分类可能重叠。
+
+| 项目 | 统计 |
+|---|---:|
+| 总失败事件 | 2312 |
+| HTTP 400 / 502 / 503 / 504 | 1526 / 319 / 125 / 114 |
+| HTTP 429 / 524 / 403 / 408 | 113 / 50 / 64 / 1 |
+| 参考图 URL 拉取失败 | 1231 |
+| 账号或上游容量耗尽 | 733（Gemini 669、OpenAI 64） |
+| Gemini `Invalid request` | 154 |
+| 第三方相似性拦截 | 36 |
+| 内容安全/政策拦截 | 至少 29 |
+| 缺少参考图、格式或尺寸输入问题 | 16 |
+| 通用上游失败 | 4 |
+
+生产服务器本次仅执行只读日志查询，未修改配置、数据库或服务进程。
+
+### 8.5 卡住任务诊断（2026-08-31，只读）
+
+服务器 `108.186.246.14` 在 `2026-08-31T13:25:34Z` 的数据库快照：`succeeded=13626`、`failed=1278`、`execution_unknown=60`、`invoking=8`。其中 1 个是最近两分钟内的正常执行，另有 **7 个 `invoking` 已超过 2 分钟租约**，最早的任务已停留约 2 天 4 小时；7 个卡住任务全部是 Gemini `gemini-3-pro-image-preview`。
+
+这 7 个任务的事件链都只有 `queued -> invoking (invocation_started)`。日志同时记录了每个任务的：
+
+```text
+async_image.execution_timeout_cancel  timeout: 900000
+async_image.execution_unknown_transition_failed  error: context canceled
+```
+
+含义是：Worker 达到后台设置中的 `execution_timeout_seconds=900`（15 分钟）后取消上游请求；随后 Worker 复用已被取消的 context 写入 `execution_unknown`，数据库状态更新失败，任务截至快照仍长期留在 `invoking`，既没有成功也没有失败终态。当前恢复扫描配置为 `worker_lease_seconds=120`、`recovery_interval_seconds=30`，但这些任务尚未被恢复扫描收敛，属于已知运行风险；不要据此重复提交同一请求，以免产生重复生成或计费。生产修复（改用未取消的父 context、增加超时兜底和告警）尚未执行。
+
+近期 7 天任务表中的失败分类为：`upstream_failed=356`、`invalid_reference_image=297`、`local_capacity_exhausted=63`、`execution_timeout=46`、`upstream_capacity_exhausted=27`；另有 `execution_unknown=34`。失败查询仍返回 HTTP `200`，请以 `status`、`error_code` 和 `fail_reason` 为准。
+
 ---
+
+## 8.5 管理员异步任务中心
+
+管理员页面 `/admin/async-image-tasks` 支持查看全站任务详情、事件时间线、账号尝试和生成结果：
+
+```http
+GET  /api/v1/admin/async-image-tasks
+GET  /api/v1/admin/async-image-tasks/{task_id}
+POST /api/v1/admin/async-image-tasks/{task_id}/terminate
+```
+
+`terminate` 通过任务版本号和当前状态原子校验，将卡住或后处理失败任务结束为 `failed`，记录 `error_code=admin_terminated` 和 `admin_task_terminated` 事件，并清除加密请求载荷。成功、已失败、已过期任务不可重复操作；不会重新调用上游生图。
+
+### 8.6 本轮冒烟、安全与缺陷审查（2026-08-31）
+
+本轮仅在本地工作树执行，未连接生产服务、未部署、未重启。覆盖 Handler/Service 异步任务状态转换、超时终态、恢复扫描、管理员终止、错误码分类、路由注册和前端类型检查。
+
+| 检查项 | 结果 |
+|---|---|
+| 异步错误分类与 `610` 未知兜底 | 通过；未知文案保留脱敏后的 `fail_reason`，明确像素/尺寸/MIME 错误归 `604` |
+| 超时终态写入 | 通过；终态 transition 使用独立短超时且去除已取消信号的 context，不再复用 `context canceled` 的执行 context |
+| 恢复扫描 | 通过；按 `started_at`（缺失时 `created_at`）墙钟时间收敛超时 `invoking`，`updated_at` 心跳不会无限延长任务 |
+| 管理员终止安全性 | 通过；管理员路由受 AdminAuth/合规中间件保护，服务层使用状态+版本 CAS，成功任务不可覆盖，重复操作返回冲突 |
+| 资源泄漏检查 | 已修复；Chat Completions 异步账号超时 context 在兼容服务未配置的提前返回路径显式取消；`go vet ./internal/handler ./internal/service` 通过 |
+| 定向/完整冒烟 | `go test ./internal/handler -run 'AsyncImage|DurableAsyncImage|TaskCenter|GatewayRoutes' -count=1`、`go test ./internal/handler -count=1`、`go test ./internal/service -run 'AsyncImage|Gemini.*Async|Reference|Failover' -count=1`、`pnpm typecheck` 均通过 |
+
+安全边界与剩余风险：`execution_unknown` 仍禁止自动重新调用上游，避免未知结果导致重复生成或重复计费；`610` 只表示“无法归类”，客户端不应据此盲目重试。生产真实上游、Redis/PostgreSQL/OSS 端到端、部署后告警和账单对账尚未验证，生产生效需另行授权。
+
+生产复核（2026-08-31 14:50 UTC）显示当前 `invoking=3`，其中执行时间超过 1 小时的任务为 `0`；现有任务均为分钟级新任务。该查询为只读，生产仍运行旧二进制。
 
 ## 9. 快速对接清单
 
@@ -462,7 +572,7 @@ OpenAI 与 Gemini 异步任务均使用此路径；受理响应里的 `query_url
    - Gemini 文生图 / 图生图 → `POST /v1/images/generations_sc`
 3. 建议携带 `Idempotency-Key`，避免网络重试重复计费。
 4. 查询统一：`GET /v1/images/tasks_async/{task_id}`（OpenAI / Gemini 相同）。
-5. 仅在 `status === "succeeded"` 时下载 `data[].url`；链接约 24小时有效，过期则无效。
+5. 仅在 `status === "succeeded"` 时下载 `data[].url`；任务失败时同时读取 `error_code` 与 `fail_reason`；链接约 24小时有效，过期则无效。
 
 ---
 

@@ -17,19 +17,21 @@ import (
 )
 
 type asyncImageTaskCenterServiceStub struct {
-	userID        int64
-	filter        service.AsyncImageTaskFilter
-	tasks         []*service.AsyncImageTask
-	total         int64
-	details       *service.AsyncImageTaskDetails
-	results       map[string][]service.AsyncImageResult
-	err           error
-	resumeDetails *service.AsyncImageTaskDetails
-	resumeCalls   int
-	stats         service.AsyncImageTaskStats
-	statsErr      error
-	statsUserID   int64
-	statsFilter   service.AsyncImageTaskFilter
+	userID           int64
+	filter           service.AsyncImageTaskFilter
+	tasks            []*service.AsyncImageTask
+	total            int64
+	details          *service.AsyncImageTaskDetails
+	results          map[string][]service.AsyncImageResult
+	err              error
+	resumeDetails    *service.AsyncImageTaskDetails
+	resumeCalls      int
+	terminateDetails *service.AsyncImageTaskDetails
+	terminateCalls   int
+	stats            service.AsyncImageTaskStats
+	statsErr         error
+	statsUserID      int64
+	statsFilter      service.AsyncImageTaskFilter
 }
 
 func (s *asyncImageTaskCenterServiceStub) ListForUser(_ context.Context, userID int64, filter service.AsyncImageTaskFilter) ([]*service.AsyncImageTask, int64, error) {
@@ -59,6 +61,14 @@ func (s *asyncImageTaskCenterServiceStub) ResumePostProcessing(_ context.Context
 	s.resumeCalls++
 	if s.resumeDetails != nil {
 		return s.resumeDetails, s.err
+	}
+	return s.details, s.err
+}
+
+func (s *asyncImageTaskCenterServiceStub) TerminateAsFailed(_ context.Context, _ string) (*service.AsyncImageTaskDetails, error) {
+	s.terminateCalls++
+	if s.terminateDetails != nil {
+		return s.terminateDetails, s.err
 	}
 	return s.details, s.err
 }
@@ -424,6 +434,32 @@ func TestAsyncImageTaskCenterAdminResumeRejectsNonPostProcessingState(t *testing
 
 	require.Equal(t, http.StatusConflict, recorder.Code)
 	require.Zero(t, tasks.resumeCalls)
+}
+
+func TestAsyncImageTaskCenterAdminTerminateReturnsDetails(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	now := time.Now().UTC()
+	tasks := &asyncImageTaskCenterServiceStub{details: &service.AsyncImageTaskDetails{Task: &service.AsyncImageTask{
+		TaskID: "asyncimg_hung", Status: service.AsyncImageTaskStatusInvoking,
+		SubmittedAt: now, CreatedAt: now, UpdatedAt: now,
+	}}}
+	h := &AsyncImageTaskCenterHandler{tasks: tasks}
+	router := gin.New()
+	router.POST("/api/v1/admin/async-image-tasks/:task_id/terminate", h.TerminateAsFailed)
+	recorder := httptest.NewRecorder()
+	router.ServeHTTP(recorder, httptest.NewRequest(http.MethodPost, "/api/v1/admin/async-image-tasks/asyncimg_hung/terminate", nil))
+
+	require.Equal(t, http.StatusOK, recorder.Code)
+	require.Equal(t, 1, tasks.terminateCalls)
+	var envelope struct {
+		Data struct {
+			Task struct {
+				Status string `json:"status"`
+			} `json:"task"`
+		} `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(recorder.Body.Bytes(), &envelope))
+	require.Equal(t, service.AsyncImageTaskStatusInvoking, envelope.Data.Task.Status)
 }
 
 func TestAsyncImageTaskCenterUserResultRedirectSignsAfterOwnershipLookup(t *testing.T) {

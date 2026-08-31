@@ -147,6 +147,22 @@ describe('async image task API', () => {
     expect(client.post).toHaveBeenCalledWith('/admin/async-image-tasks/imgtask_retry/resume')
   })
 
+  it('uses a dedicated admin terminate action', async () => {
+    client.post.mockResolvedValue({
+      data: {
+        task_id: 'imgtask_hung',
+        platform: 'gemini',
+        request_type: 'text_to_image',
+        model: 'gemini-3-pro-image-preview',
+        status: 'failed',
+        created_at: '2026-07-20T00:00:00Z',
+      },
+    })
+
+    await asyncImageTasksAPI.admin.terminate('imgtask_hung')
+    expect(client.post).toHaveBeenCalledWith('/admin/async-image-tasks/imgtask_hung/terminate')
+  })
+
   it('resolves a stable result view through the authenticated API client', async () => {
     client.get.mockResolvedValue({
       data: {

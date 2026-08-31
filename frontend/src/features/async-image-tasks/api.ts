@@ -141,6 +141,13 @@ async function resume(id: string | number): Promise<AsyncImageTask> {
   return normalizeDetails(data)
 }
 
+async function terminate(id: string | number): Promise<AsyncImageTask> {
+  const { data } = await apiClient.post<AsyncImageTask | DetailsWire>(
+    `/admin/async-image-tasks/${encodeURIComponent(String(id))}/terminate`,
+  )
+  return normalizeDetails(data)
+}
+
 async function resolveView(viewUrl: string, signal?: AbortSignal): Promise<AsyncImageResultAccess> {
   const { data } = await apiClient.get<AsyncImageResultAccess>(viewUrl, {
     headers: { Accept: 'application/json' },
@@ -158,6 +165,7 @@ export const asyncImageTasksAPI = {
     list: (params: AsyncImageTaskListParams, signal?: AbortSignal) => list('admin', params, signal),
     get: (id: string | number, signal?: AbortSignal) => get('admin', id, signal),
     resume,
+    terminate,
   },
   resolveView,
 }

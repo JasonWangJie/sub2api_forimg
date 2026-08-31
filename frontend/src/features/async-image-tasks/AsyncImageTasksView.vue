@@ -231,6 +231,15 @@
                 <Icon name="play" size="sm" />
                 {{ t('asyncImageTasks.resume.action') }}
               </button>
+              <button
+                v-if="admin && canTerminate(row)"
+                type="button"
+                class="inline-flex items-center gap-1 text-sm font-medium text-rose-600 hover:text-rose-700 dark:text-rose-400"
+                @click="askTerminate(row)"
+              >
+                <Icon name="ban" size="sm" />
+                {{ t('asyncImageTasks.terminate.action') }}
+              </button>
             </div>
           </template>
 
@@ -295,6 +304,15 @@
             >
               <Icon name="play" size="sm" />
               {{ t('asyncImageTasks.resume.action') }}
+            </button>
+            <button
+              v-if="admin && canTerminate(detail)"
+              type="button"
+              class="btn btn-danger btn-sm inline-flex items-center gap-1.5"
+              @click="askTerminate(detail)"
+            >
+              <Icon name="ban" size="sm" />
+              {{ t('asyncImageTasks.terminate.action') }}
             </button>
           </div>
 
@@ -461,6 +479,17 @@
       @cancel="resumeTarget = null"
     />
 
+    <ConfirmDialog
+      :show="Boolean(terminateTarget)"
+      :title="t('asyncImageTasks.terminate.title')"
+      :message="t('asyncImageTasks.terminate.message', { id: terminateTarget ? taskKey(terminateTarget) : '' })"
+      :confirm-text="t('asyncImageTasks.terminate.action')"
+      :cancel-text="t('common.cancel')"
+      :danger="true"
+      @confirm="terminateTask"
+      @cancel="terminateTarget = null"
+    />
+
     <ImageLightbox :src="lightboxSrc" :alt="lightboxAlt" @close="lightboxSrc = ''" />
   </AppLayout>
 </template>
@@ -539,6 +568,8 @@ const lightboxSrc = ref('')
 const lightboxAlt = ref('')
 const resumeTarget = ref<AsyncImageTask | null>(null)
 const resuming = ref(false)
+const terminateTarget = ref<AsyncImageTask | null>(null)
+const terminating = ref(false)
 const pagination = reactive({ page: 1, page_size: 20, total: 0, pages: 0 })
 const filters = reactive({
   q: '',
@@ -806,6 +837,10 @@ function canResume(task: AsyncImageTask): boolean {
   return task.can_resume === true || ['storage_failed', 'billing_failed'].includes(task.status)
 }
 
+function canTerminate(task: AsyncImageTask): boolean {
+  return task.can_terminate === true || ['queued', 'invoking', 'upstream_succeeded', 'uploading', 'billing_pending', 'execution_unknown', 'storage_failed', 'billing_failed'].includes(task.status)
+}
+
 function buildParams(): AsyncImageTaskListParams {
   return {
     page: pagination.page,
@@ -948,6 +983,27 @@ async function resumeTask(): Promise<void> {
     appStore.showError(extractApiErrorMessage(error, t('asyncImageTasks.errors.resume')))
   } finally {
     resuming.value = false
+  }
+}
+
+function askTerminate(task: AsyncImageTask): void {
+  terminateTarget.value = task
+}
+
+async function terminateTask(): Promise<void> {
+  if (!terminateTarget.value || terminating.value) return
+  terminating.value = true
+  const id = taskKey(terminateTarget.value)
+  try {
+    const updated = await asyncImageTasksAPI.admin.terminate(id)
+    appStore.showSuccess(t('asyncImageTasks.terminate.success'))
+    terminateTarget.value = null
+    detail.value = detailVisible.value ? updated : detail.value
+    await loadTasks(true)
+  } catch (error) {
+    appStore.showError(extractApiErrorMessage(error, t('asyncImageTasks.errors.terminate')))
+  } finally {
+    terminating.value = false
   }
 }
 

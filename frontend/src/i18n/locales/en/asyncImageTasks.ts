@@ -114,10 +114,17 @@ export default {
       message: 'Resume storage or billing for task {id}? The upstream image request will not be sent again.',
       success: 'Task post-processing resumed',
     },
+    terminate: {
+      action: 'End as failed',
+      title: 'End task as failed',
+      message: 'Mark task {id} as failed now? This will not retry image generation and cannot be undone.',
+      success: 'Task ended as failed',
+    },
     errors: {
       load: 'Failed to load async image tasks',
       detail: 'Failed to load task details',
       resume: 'Failed to resume task post-processing',
+      terminate: 'Failed to end task',
       openResult: 'Failed to open the generated image',
     },
   },

@@ -114,10 +114,17 @@ export default {
       message: '确定恢复任务 {id} 的存储或计费阶段吗？不会再次调用上游生图。',
       success: '任务后处理已恢复',
     },
+    terminate: {
+      action: '手动结束为失败',
+      title: '手动结束任务',
+      message: '确定将任务 {id} 标记为失败吗？不会重试生图，且无法撤销。',
+      success: '任务已手动结束为失败',
+    },
     errors: {
       load: '加载异步生图任务失败',
       detail: '加载任务详情失败',
       resume: '恢复任务后处理失败',
+      terminate: '手动结束任务失败',
       openResult: '打开生成图片失败',
     },
   },

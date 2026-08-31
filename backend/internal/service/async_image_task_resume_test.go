@@ -92,3 +92,32 @@ func TestAsyncImageTaskResumeBillingUsesPreparedPlan(t *testing.T) {
 	require.NotNil(t, repo.transition.BillingStatus)
 	require.Equal(t, AsyncImageBillingStatusPrepared, *repo.transition.BillingStatus)
 }
+
+func TestAsyncImageTaskTerminateAsFailedAllowsUnknownAndUsesCAS(t *testing.T) {
+	repo := &asyncImageResumeRepositoryStub{task: &AsyncImageTask{
+		TaskID: "asyncimg_unknown", Status: AsyncImageTaskStatusExecutionUnknown,
+		Version: 9, SubmittedAt: time.Now().UTC(),
+	}}
+	svc := NewAsyncImageTaskService(repo)
+
+	details, err := svc.TerminateAsFailed(context.Background(), "asyncimg_unknown")
+	require.NoError(t, err)
+	require.Equal(t, AsyncImageTaskStatusFailed, details.Task.Status)
+	require.Equal(t, int64(9), repo.transition.ExpectedVersion)
+	require.Equal(t, []string{AsyncImageTaskStatusExecutionUnknown}, repo.transition.FromStatuses)
+	require.Equal(t, AsyncImageTaskTerminationErrorCode, *repo.transition.ErrorCode)
+	require.Equal(t, "admin_task_terminated", repo.transition.EventType)
+	require.True(t, repo.transition.ClearRequestPayload)
+}
+
+func TestAsyncImageTaskTerminateAsFailedRejectsSuccessfulTask(t *testing.T) {
+	repo := &asyncImageResumeRepositoryStub{task: &AsyncImageTask{
+		TaskID: "asyncimg_done", Status: AsyncImageTaskStatusSucceeded,
+		Version: 2, SubmittedAt: time.Now().UTC(),
+	}}
+	svc := NewAsyncImageTaskService(repo)
+
+	_, err := svc.TerminateAsFailed(context.Background(), "asyncimg_done")
+	require.ErrorIs(t, err, ErrAsyncImageTaskTerminationNotAllowed)
+	require.Empty(t, repo.sequence)
+}

@@ -504,11 +504,72 @@ SC 查询与 BB 共用 `status`、`task_id`、`data[].url` 结构。私有存储
 {
   "status": "failed",
   "task_id": "asyncimg_0123456789abcdef",
-  "fail_reason": "image generation failed"
+  "error_code": 601,
+  "fail_reason": "上游生图失败（HTTP 400）：非常抱歉，生成的图片可能违反了关于与第三方内容相似性的防护限制。如果你认为此判断有误，请重试或修改提示语。"
 }
 ```
 
-查询成功、处理中和任务失败都使用 HTTP `200`。以顶层 `status` 为准：`queued` / `processing` 继续轮询，`succeeded` 消费图片，`failed` 停止并读取 `fail_reason`。
+查询成功、处理中和任务失败都使用 HTTP `200`。以顶层 `status` 为准：`queued` / `processing` 继续轮询，`succeeded` 消费图片，`failed` 停止并读取 `error_code` 与 `fail_reason`。`error_code` 是应用层整数，不是 HTTP 6xx 状态码；`fail_reason` 在上游失败时保留 Worker 在现有脱敏和长度限制内保存的上游提示。
+
+### 7.1 失败对照码
+
+| `error_code` | 类别 | 常见提示或处理建议 |
+|---:|---|---|
+| `601` | 内容安全、内容政策或第三方相似性拦截 | 原样展示上游提示；修改提示词后重试，不要反复提交同一提示 |
+| `602` | 参考图 URL 拉取失败 | 检查 HTTPS 可访问性、DNS、TLS、超时和图片 CDN；必要时先上传参考图 |
+| `603` | 账号或上游容量耗尽 | 稍后重试；检查可用账号、额度和分组容量 |
+| `604` | 请求参数、提示词、尺寸、格式或参考图输入无效 | 按 `fail_reason` 修正请求字段、图片格式或尺寸 |
+| `605` | 上游限流（HTTP 429） | 按 `Retry-After` 或指数退避重试 |
+| `606` | 上游暂时不可用（网关/服务端 5xx） | 稍后重试并保留任务 ID 供排查 |
+| `607` | 上游返回内容无法解析为图片 | 检查模型/响应格式；提交任务 ID 与原始提示排查 |
+| `608` | 生图执行超时或执行结果未知 | 不要自动重复提交，先等待对账或人工确认 |
+| `609` | 结果存储或计费后处理失败 | 稍后查询；该类重试不会重新调用上游生图 |
+| `610` | 未分类上游错误（容错码） | 原样展示 `fail_reason` 并携带任务 ID 排查；不要据此重复提交 |
+
+例如第三方相似性拦截会原样返回：
+
+```text
+上游生图失败（HTTP 400）：非常抱歉，生成的图片可能违反了关于与第三方内容相似性的防护限制。如果你认为此判断有误，请重试或修改提示语。
+```
+
+### 7.2 生产卡住任务诊断（2026-08-31，只读）
+
+`108.186.246.14` 在 `2026-08-31T13:25:34Z` 的任务状态快照为：`succeeded=13626`、`failed=1278`、`execution_unknown=60`、`invoking=8`。其中 7 个 `invoking` 任务已超过 120 秒租约，且全部为 Gemini `gemini-3-pro-image-preview`；事件链均停在 `queued -> invoking`。
+
+对应日志为：
+
+```text
+async_image.execution_timeout_cancel  timeout: 900000
+async_image.execution_unknown_transition_failed  error: context canceled
+```
+
+这说明 Worker 在 15 分钟执行超时后取消了上游 context，又使用同一个已取消的 context 写入 `execution_unknown`，导致状态落库失败，任务长期停留在 `invoking`。当前恢复扫描虽配置为 30 秒周期、120 秒租约，但这些任务尚未收敛；这是生产已知风险，不应自动重提同一请求。修复需要让终态更新使用未取消的父 context，并补充超时兜底与告警；本次未执行生产修复或任务清理。
+
+代码侧现已修复：终态落库使用保留请求值的独立短超时 context，恢复环额外按 `started_at`/`created_at` 扫描超过执行时限的 `invoking` 任务并收敛为 `execution_unknown`。修复尚未部署到该生产服务器，也未自动清理上述历史任务。
+
+## 7.5 管理员异步任务中心
+
+管理员页面 `/admin/async-image-tasks` 对应以下接口，可查看全站任务详情、事件时间线、账号尝试和结果。
+
+```http
+GET  /api/v1/admin/async-image-tasks
+GET  /api/v1/admin/async-image-tasks/{task_id}
+POST /api/v1/admin/async-image-tasks/{task_id}/terminate
+```
+
+`terminate` 使用任务版本号和当前状态做原子校验，将 `queued`、`invoking`、`execution_unknown` 及后处理失败状态标记为 `failed`，写入 `error_code=admin_terminated`、`admin_task_terminated` 事件并清除加密请求载荷。已成功、已失败或已过期的任务不可重复终止；上游晚到的结果不会覆盖管理员终态。该操作不会再次调用上游生图。
+
+### 7.6 冒烟、安全与缺陷审查（2026-08-31）
+
+本轮在本地工作树完成异步 Handler/Service 状态转换、超时终态、恢复扫描、管理员终止、错误码分类、路由注册和前端类型检查；未部署或重启生产。
+
+- `610` 作为未知上游错误容错码；未知文案保留脱敏 `fail_reason`。`IMAGE_TOO_MANY_PIXELS`、尺寸上限、`IMAGE_MIME_MISMATCH` 等明确输入错误归 `604`，DNS/TLS/CDN 下载超时归 `602`。
+- 超时终态使用去除取消信号的独立短超时 context；恢复扫描按 `started_at`/`created_at` 墙钟时间处理 stale `invoking`，避免心跳导致无限卡住。
+- 管理员终止接口位于受保护的 `/admin` 路由组，服务层状态+版本 CAS 防止覆盖并发成功结果；`execution_unknown` 不自动重放，防止重复生成和计费。
+- 修复异步 Chat Completions 兼容服务未配置时提前返回路径的 account-attempt context 泄漏；`go vet ./internal/handler ./internal/service` 通过。
+- 验证通过：`go test ./internal/handler -run 'AsyncImage|DurableAsyncImage|TaskCenter|GatewayRoutes' -count=1`、完整 `go test ./internal/handler -count=1`、`go test ./internal/service -run 'AsyncImage|Gemini.*Async|Reference|Failover' -count=1`、`pnpm typecheck`。
+
+仍需在获授权后验证真实上游、Redis/PostgreSQL/OSS 端到端行为、部署后告警和账单对账；生产当前未包含本轮改动。
 
 ## 8. 状态、恢复与成功条件
 

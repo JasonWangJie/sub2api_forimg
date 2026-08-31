@@ -56,6 +56,7 @@ export interface AsyncImagePollResult {
   status: 'queued' | 'processing' | 'succeeded' | 'failed'
   progress: number
   images: Array<{ url: string; expires_at?: number | null }>
+  error_code?: number
   fail_reason?: string
 }
 
@@ -407,6 +408,7 @@ export async function pollAsyncImage(
     status,
     progress: Number(result?.progress ?? (status === 'succeeded' ? 100 : 0)),
     images: (result?.data || []).map((item: any) => ({ url: String(item?.url || '') })).filter((item: any) => item.url),
+    error_code: result?.error_code == null ? undefined : Number(result.error_code),
     fail_reason: result?.fail_reason,
   }
 }
