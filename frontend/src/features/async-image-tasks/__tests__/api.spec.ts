@@ -12,7 +12,7 @@ describe('async image task API', () => {
   })
 
   it('keeps user and admin list namespaces separate', async () => {
-    client.get.mockResolvedValue({ data: { items: [], total: 0, page: 1, page_size: 20, pages: 0, stats: { active: 0, completed: 0, failed: 0, success_rate: 0 } } })
+    client.get.mockResolvedValue({ data: { items: [], total: 0, page: 1, page_size: 20, pages: 0, stats: { active: 0, completed: 0, failed: 0, success_rate: 0, average_duration_ms: null } } })
 
     await asyncImageTasksAPI.user.list({ page: 1, page_size: 20 })
     expect(client.get).toHaveBeenLastCalledWith('/user/async-image-tasks', expect.objectContaining({
@@ -23,6 +23,14 @@ describe('async image task API', () => {
     expect(client.get).toHaveBeenLastCalledWith('/admin/async-image-tasks', expect.objectContaining({
       params: { page: 2, page_size: 50 },
     }))
+  })
+
+  it('keeps an empty completed-duration average as null', async () => {
+    client.get.mockResolvedValue({ data: { items: [], total: 0, page: 1, page_size: 20, pages: 0, stats: { active: 1, completed: 0, failed: 0, success_rate: 0, average_duration_ms: null } } })
+
+    const response = await asyncImageTasksAPI.user.list({ page: 1, page_size: 20 })
+
+    expect(response.stats?.average_duration_ms).toBeNull()
   })
 
   it('normalizes the durable task detail envelope for the shared task view', async () => {
@@ -107,7 +115,7 @@ describe('async image task API', () => {
         page: 1,
         page_size: 20,
         pages: 1,
-        stats: { active: 2, completed: 13, failed: 7, success_rate: 65 },
+        stats: { active: 2, completed: 13, failed: 7, success_rate: 65, average_duration_ms: 1234.5 },
       },
     })
 
@@ -125,7 +133,7 @@ describe('async image task API', () => {
       preview_url: 'https://signed.example/result-1.png',
       view_url: '/api/v1/user/async-image-tasks/asyncimg_list/results/1/view',
     })
-    expect(response.stats).toEqual({ active: 2, completed: 13, failed: 7, success_rate: 65 })
+    expect(response.stats).toEqual({ active: 2, completed: 13, failed: 7, success_rate: 65, average_duration_ms: 1234.5 })
     expect(client.get).toHaveBeenLastCalledWith('/user/async-image-tasks', expect.objectContaining({
       params: { page: 1, page_size: 20, status: 'succeeded', platform: 'openai' },
     }))

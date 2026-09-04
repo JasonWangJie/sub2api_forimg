@@ -77,7 +77,15 @@ export const formatImageSizePoolInput = (
   rows: Array<{ account_id: number; priority?: number; account_name?: string | null }>,
 ): string => {
   if (!rows?.length) return "";
-  return rows.map((row) => String(row.account_id)).join(", ");
+  return rows
+    .map((row) => {
+      const accountID = String(row.account_id);
+      const priority = Number(row.priority);
+      return Number.isFinite(priority) && priority > 0
+        ? `${accountID}:${priority}`
+        : accountID;
+    })
+    .join(", ");
 };
 
 export const toImageSizePoolPayload = (

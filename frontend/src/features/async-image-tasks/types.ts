@@ -140,6 +140,7 @@ export interface AsyncImageTaskStats {
   completed: number
   failed: number
   success_rate: number
+  average_duration_ms: number | null
 }
 
 export interface AsyncImageResultAccess {

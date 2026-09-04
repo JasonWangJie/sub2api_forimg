@@ -33,13 +33,13 @@ codegraph init
 
 ## 当前版本快照
 
-记录日期：`2026-08-31`（更新《异步生图接口文档new》：补齐失败响应、HTTP 状态与 601-609 对照码、上游原文样例、轮询策略和生产错误快照；补充 7 个超时后卡在 `invoking` 的生产诊断；异步错误透传代码与测试已在工作树；未部署或重启生产）。
+记录日期：`2026-09-04`（当前工作树含异步任务中心统计、管理员列表、账号调度和参考图失败换号重试改动；未部署或重启生产）。
 
 | 项目 | 当前记录 |
 |---|---|
 | 发布版本文件 | `backend/cmd/server/VERSION`（以仓库文件为准） |
-| 文档记录时 HEAD | `fd10de10fb3fe22e92e0ba7916ccd0433a8316c5` |
-| HEAD 描述 | `v0.1.173.36-1-gfd10de1-dirty` |
+| 文档记录时 HEAD | `314fcc3c0055a3be0c652782b646e71ad75df808` |
+| HEAD 描述 | `v0.1.173.38-1-g314fcc3-dirty` |
 | 当前及后续默认分支 | `main` |
 | 已合并原作者主线 | 以 `git log` / `upstream/main` 实际为准 |
 | SC 上传安全迁移 | `backend/migrations/187_ZJ_async_image_upload_reservations.sql` |
@@ -51,6 +51,25 @@ codegraph init
 | 异步图库自动归档 | `async_image.auto_archive_to_library`，默认 `false`；结果对象和查询 URL 不受影响 |
 | 异步生图用户统计 | `GET /v1/images/tasks_async/stats`；按服务器时区统计用户当天全部异步任务 |
 | Fork CI | 发版时在 `JasonWangJie/sub2api_forimg/actions` 核对实际结果 |
+
+### 2026-09-03 参考图拉取失败账号重试边界修复
+
+- `image_url fetch failed` 的异步 image-to-image 任务现在把当前 invocation 的失败账号合并进重试判定：同一账号初始请求后最多重试两次，第三次失败才切换一个账号；第二账号失败立即结束，不再误选第三账号。
+- OpenAI 图片调度器优先使用 Worker 传入的预取 sticky 账号，缓存未命中时仍能保持同账号重试；切号阶段继续排除已耗尽账号并禁用历史排除兜底。
+- 实际状态：HEAD `314fcc3c0055a3be0c652782b646e71ad75df808`，`git describe`=`v0.1.173.38-1-g314fcc3-dirty`，VERSION=`0.1.173.38`；未部署或重启生产。
+- 验证：`go test ./internal/handler -count=1`、`go test ./internal/service -run 'TestMergeAsyncImageAccountAttempts|Test.*Image.*Circuit|Test.*ImageGenerationIntent' -count=1`、`go test ./internal/repository -run 'AsyncImage|Migration' -count=1`、`go test ./internal/service -run '^$' -count=1` 均通过；新增 A/A/A/B 重试边界用例通过。完整 `go test ./internal/service -count=1` 仍被既有 `TestEstimateOpenAIInputTokens_CompareWithOpenAIAPI` 的外部网络连接超时阻断；`git diff --check` 通过。
+
+### 2026-09-04 参考图重试无缓存 sticky 修复
+
+- OpenAI 调度器在 Worker 显式传入 sticky 账号时，即使 Redis sticky-session 缓存关闭或未命中，也会先选择该账号；普通请求没有预取账号时仍维持原有缓存依赖。
+- 这保证 `image_url fetch failed` 的默认顺序稳定为 A、A、A、B，避免缓存不可用时第二、第三次请求意外重新负载均衡到其他账号。
+- 验证：无缓存预取 sticky 回归测试、参考图重试 Handler 定向测试通过；完整 Service 包仍仅被 `TestEstimateOpenAIInputTokens_CompareWithOpenAIAPI` 访问 `api.openai.com` 连接超时阻断。未部署或重启生产。
+
+### 2026-09-04 清晰度账号池优先级回显修复
+
+- 修复管理端分组编辑回显只显示账号 ID、丢失 `priority` 的问题。现在保存并重新打开后会保留 `账号ID:优先级`，例如 `1:1, 32:1`；多个账号使用相同优先级是支持的。
+- 后端数据库约束仅限制同一分组/档位/账号不可重复，不限制 priority 唯一；同优先级账号继续按有效负载因子和当前负载均衡。
+- 验证：前端账号池 3/3、异步任务 API 8/8；后端图片账号池、管理员接口、Repository 迁移和同优先级调度定向测试通过。未部署或重启生产。
 
 ### 2026-08-31 异步生图接口文档与错误对照码同步
 
@@ -358,3 +377,50 @@ pnpm run dev
 - 精确回归覆盖“违反了关于裸露、色情或情色内容的防护限制”提示，分类保持 `601`。
 - 安全结论：管理员终止受 AdminAuth/合规中间件及状态+版本 CAS 保护；`execution_unknown` 不自动重放；`610` 不建议盲目重试。真实上游、Redis/PostgreSQL/OSS 端到端及部署后告警仍未验证。
 - 生产复核（2026-08-31 14:50 UTC）：当前 `invoking=3`，超过 1 小时为 `0`；均为分钟级新任务，只读查询，生产仍运行旧二进制。
+
+## 2026-09-03 管理端异步任务中心列表紧凑化
+
+- 当前实际基线：分支 `main`，HEAD `314fcc3c0055a3be0c652782b646e71ad75df808`，`git describe` 为 `v0.1.173.38-1-g314fcc3-dirty`，版本文件 `backend/cmd/server/VERSION` 为 `0.1.173.38`；工作树包含本轮前端及三份交接文档改动。
+- `/admin/async-image-tasks` 表格收窄任务号、状态和图片/存储列，移除状态进度条；实际费用前新增最终账号列，沿用任务返回的 `account_name/account_id`。
+- 验证：`frontend pnpm typecheck`、异步任务 API 测试 7/7、目标 Vue 文件 ESLint、`frontend pnpm build`、`git diff --check` 均通过；构建仅有既有 Browserslist、动态导入和大 chunk 警告，未执行生产部署或重启。
+- 入口：`frontend/src/features/async-image-tasks/AsyncImageTasksView.vue`；异步任务架构和接口约束仍见 `wiki-new/异步生图架构.md`、`docs/DURABLE_ASYNC_IMAGE_API.md`。
+
+## 2026-09-03 异步任务中心平均耗时统计
+
+- `/admin/async-image-tasks` 与 `/async-image-tasks` 顶部成功率旁新增平均耗时，按当前筛选条件下已完成（`succeeded` 且有 `finished_at`）任务的“花费时间”算术平均；无可用样本显示 `-`。
+- 后端统计响应新增 `average_duration_ms`，数据库口径为 `finished_at - submitted_at`，与列表展示的任务花费时间一致；前端统一格式化为毫秒、秒或分钟。
+- 验证：异步任务 Service/Repository/Handler 定向回归、前端 API 8/8、`pnpm typecheck`、目标文件 ESLint、`pnpm build`、`git diff --check` 通过。整包 `go test ./internal/service ./internal/repository ./internal/handler -count=1` 中 Service 仍受既有外部 OpenAI token 对比用例影响失败；未执行生产部署或重启。
+
+## 2026-09-03 生图账号调度去黏性与清晰度池负载均衡
+
+- OpenAI 专用图片端点、Responses（含 WebSocket）和 Chat Completions 的生图请求不再带入会话哈希或 `previous_response_id` 账号黏性，每次按账号池优先级、有效负载因子计算的实时负载和 LRU 重新调度；普通文本请求保持原有黏性行为。
+- Gemini 原生及兼容 Chat Completions 生图请求同样按池调度，并跳过摘要会话的查找、创建和保存。带 `thoughtSignature` 的 Gemini 生图请求保留黏性，以避免签名跨账号校验失败。
+- 清晰度账号池仍遵循严格优先级回退；同一优先级内按有效负载因子和当前负载均衡。管理端提示与占位示例已说明 `账号ID:优先级` 配置方式。
+- 实际基线：分支 `main`，HEAD `314fcc3c0055a3be0c652782b646e71ad75df808`，`git describe --tags --always --dirty` 为 `v0.1.173.38-1-g314fcc3-dirty`，版本文件为 `0.1.173.38`。
+- 验证：后端 Service/Handler/Repository 定向测试、`frontend pnpm typecheck`、中英文账号池 locale ESLint、`frontend pnpm build` 和文档写入后的 `git diff --check` 均通过；构建保留既有 Browserslist、动态导入和大 chunk 警告。未执行生产部署、重启或真实上游账号轮换验收。
+
+## 2026-09-03 生图调度冒烟验证
+
+- 本地冒烟覆盖 Gemini 生图黏性例外、图片意图识别、清晰度账号池/调度器、OpenAI/Gemini Handler 和路由注册；后端 Service、Handler、Repository 定向用例全部通过。
+- 前端异步任务 API 用例 `8/8` 通过，`pnpm typecheck` 通过；未连接真实上游、Redis/PostgreSQL、浏览器实机或生产环境。
+- 下一步建议：先在隔离环境配置两个同优先级账号和一个更高优先级账号，观察生图请求的账号分布、负载因子和 failover；再做带 `thoughtSignature` 的 Gemini 连续请求验证签名不跨账号；上线前增加调度指标和账单/上游 request ID 对账，最后经授权构建、部署、重启并灰度观察。
+
+## 2026-09-03 参考图拉取失败的账号重试策略
+
+- `image_url fetch failed` / `reference_fetch_retry` 现在会记录失败账号并按任务维度保持路由：同一账号最多执行两次重试；第三次同账号失败后排除该账号，仅切换一个账号再试一次，第二个账号失败后结束任务。
+- 参考图重试上下文新增任务级 sticky 标识和切号阶段标识，避免历史排除兜底逻辑再次选回已耗尽账号；现有 OpenAI 混合模式的本地 fallback 行为保持不变。
+# 图片账号连续失败熔断（2026-09-04）
+
+- 新增 Redis 账号级图片熔断器，按 `sync`/`async` scope 隔离；默认关闭，默认连续失败 5 次暂停 300 秒，成功一次立即清零。
+- OpenAI、Gemini、Antigravity 图片调度、清晰度账号池和 sticky 校验均过滤熔断账号；管理端图片存储运行参数支持热更新开关、阈值和暂停时长。
+- 旧式 Gateway 黏性账号命中也会复核图片熔断状态，避免跳过候选列表过滤；未保存管理端配置时支持 `async_image.image_circuit_breaker_enabled`、`async_image.image_circuit_breaker_failure_threshold`、`async_image.image_circuit_breaker_cooldown_seconds` 回退字段。
+- 仅统计账号认证、限流和上游服务故障；参数错误、内容安全、参考图输入错误、存储计费错误及 `execution_unknown` 不计入。
+- 本地验证：定向熔断测试、`go test ./... -run '^$'`、`pnpm typecheck`、`pnpm build`、`git diff --check` 通过；未执行生产部署和真实外部链路验证。
+
+## 2026-09-04 深度冒烟复验
+
+- 账号池回显与调度复验通过：`1:1,32:1` 保存后回显仍保留优先级；多个账号可共享优先级 `1` 或 `2`，同优先级账号按调度器负载策略选择。
+- 后端通过：图片账号池/管理员接口/Repository 迁移定向测试、完整 Handler、路由与中间件测试，以及 `go test ./... -run '^$' -count=1` 全仓编译检查。
+- 前端通过：账号池与异步任务 API 共 `11/11`、`pnpm typecheck`、目标 ESLint、`pnpm build`。构建仅保留既有 Browserslist、动态导入和大 chunk 警告。
+- 完整 `go test ./internal/service -count=1` 仍失败于既有 `TestEstimateOpenAIInputTokens_CompareWithOpenAIAPI`，三个子用例访问 `https://api.openai.com/v1/responses/input_tokens` 连接超时；账号池相关定向测试通过。
+- 未执行浏览器实机、真实上游账号、Redis/PostgreSQL/OSS、生产部署、重启或灰度验收；`git diff --check` 通过。

@@ -17,12 +17,12 @@
 
 这是 `JasonWangJie/sub2api_forimg` Fork，默认在 `main` 开发。交接基线（以本轮命令实际输出为准）：
 
-- HEAD：`fd10de10fb3fe22e92e0ba7916ccd0433a8316c5`
-- `git describe --tags --always --dirty`：`v0.1.173.36-1-gfd10de1-dirty`
-- `backend/cmd/server/VERSION`：`0.1.173.36`
+- HEAD：`314fcc3c0055a3be0c652782b646e71ad75df808`
+- `git describe --tags --always --dirty`：`v0.1.173.38-1-g314fcc3-dirty`
+- `backend/cmd/server/VERSION`：`0.1.173.38`
 - 最近功能：异步生图账号尝试审计、Gemini 快速换号、容量重试排除最近失败账号、`execution_unknown` 对账待处理、参考图混合传输回退与下载闸门
 - 本次交接维护：任务查询增加 `error_code` 601-609，失败时透传 Worker 保存的脱敏上游原文；同步 API 文档与用户指南；本轮继续完善 `异步生图接口文档new.md` 的状态码、轮询、原文样例和生产错误快照
-- 本次冒烟结论：`go test ./internal/handler -run 'AsyncImageFailure|WriteBBQuery' -count=1`、完整 `go test ./internal/handler`、`pnpm typecheck` 和 `git diff --check` 均通过；前端生产构建未在本轮执行
+- 本次冒烟结论：完整 `go test ./internal/handler -count=1`、参考图账号重试定向用例、Service/Repository 编译检查和 `git diff --check` 通过；完整 Service 包仍受既有 `TestEstimateOpenAIInputTokens_CompareWithOpenAIAPI` 外部网络超时影响
 - 生产环境：已只读连接 `108.186.246.14` 查看服务状态和日志，未修改、未部署、未重启
 
 开始工作前必须运行：
@@ -158,3 +158,77 @@ Get-Content backend\cmd\server\VERSION
 - 安全结论：管理员接口由 AdminAuth/合规中间件保护，终止操作使用状态+版本 CAS；`execution_unknown` 禁止自动重放；`610` 未知错误仅用于保留原文和排查，不应盲目重试。
 - 剩余边界：生产服务器仍运行旧二进制；真实上游、Redis/PostgreSQL/OSS 端到端、部署后告警和账单对账尚未验证。
 - 生产只读复核 `2026-08-31 14:50 UTC`：`invoking=3`，超过 1 小时为 `0`；当前任务均为分钟级，未见新的长时间卡住任务。
+
+## 2026-09-03 当前交接：管理员异步任务列表紧凑化
+
+- 本轮仅修改 `frontend/src/features/async-image-tasks/AsyncImageTasksView.vue`：管理员 `/admin/async-image-tasks` 的任务号列约 220px、状态列约 112px、图片/存储列约 100px；状态进度条已移除；实际费用前新增最终账号列，显示 `account_name`，缺失时回退 `#account_id`。
+- 用户列表不显示最终账号列；任务详情页和后端接口未改动。`account_name/account_id` 已由管理员列表响应提供，无需新增 API 字段。
+- 实际基线：`main`，HEAD `314fcc3c0055a3be0c652782b646e71ad75df808`，`git describe`=`v0.1.173.38-1-g314fcc3-dirty`，VERSION=`0.1.173.38`。当前工作树还包含本轮三份文档同步改动。
+- 已验证：`pnpm typecheck`、`pnpm test:run src/features/async-image-tasks/__tests__/api.spec.ts`（7/7）、目标文件 ESLint、`pnpm build`、`git diff --check`；构建仅有既有 Browserslist、动态导入和大 chunk 警告。未验证：浏览器截图/实机视觉、生产部署、重启和生产端到端链路。
+- 后续如调整列宽，优先修改该组件 `columns` computed 与对应 cell 容器的 Tailwind `max-w/min-w`；不要把管理员专属账号字段暴露到用户列表。
+
+## 2026-09-03 当前交接：异步任务中心平均耗时
+
+- `/admin/async-image-tasks` 和 `/async-image-tasks` 顶部已在成功率旁显示平均耗时。后端 `service.AsyncImageTaskStats` 新增 `AverageDurationMS`/`average_duration_ms`，仓储按当前筛选条件查询 `status='succeeded' AND finished_at IS NOT NULL`，平均 `finished_at - submitted_at`；前端 `formatDuration` 统一展示，空样本为 `-`。
+- 相关文件：`backend/internal/service/async_image_task.go`、`backend/internal/repository/async_image_task_repo.go`、`backend/internal/handler/async_image_task_center_handler.go`、`frontend/src/features/async-image-tasks/{AsyncImageTasksView.vue,api.ts,types.ts}`、中英文 `asyncImageTasks` locale；新增仓储/服务/API 断言。
+- 实际基线：`main`，HEAD `314fcc3c0055a3be0c652782b646e71ad75df808`，`git describe`=`v0.1.173.38-1-g314fcc3-dirty`，VERSION=`0.1.173.38`。工作树仍包含前一轮列表紧凑化改动及本轮统计改动。
+- 已验证：异步任务 Service/Repository/Handler 定向测试通过，前端 API 8/8、`pnpm typecheck`、目标文件 ESLint、`pnpm build`、`git diff --check` 通过。整包 `go test ./internal/service ./internal/repository ./internal/handler -count=1` 的 Service 仍被既有外部 OpenAI token 对比用例阻断，Repository/Handler 通过。
+- 运行边界：未执行浏览器截图、真实 PostgreSQL/Redis/OSS、生产部署或重启；生产服务器仍运行旧二进制。后续修改统计时保持“已完成任务的显示花费时间平均”口径，不从当前分页数据计算。
+
+## 2026-09-03 当前交接：生图账号调度去黏性
+
+- 生图调度已完成：`backend/internal/handler/openai_images.go` 的专用图片端点不生成会话键；`openai_gateway_handler.go` 的 HTTP Responses、Responses WebSocket 在生图时清空 session hash，并不把 `previous_response_id` 传给账号选择器；`openai_chat_completions.go` 的显式生图意图同样清空会话键。
+- Gemini 原生入口 `gemini_v1beta_handler.go` 与通用 Gemini Chat Completions 入口仅对无 `thoughtSignature` 的生图关闭黏性；普通文本和带签名生图仍保持 session/digest sticky。无签名生图不查找、创建或保存摘要会话。
+- 策略函数位于 `backend/internal/service/image_generation_intent.go`：`GeminiImageStickySessionRequired` 和 `IsGeminiThoughtSignaturePresent`，回归测试在 `image_generation_intent_test.go`。清晰度账号池排序实现未改，仍是优先级、有效负载因子实时负载、LRU。
+- 管理端账号池提示已更新：未填写优先级时按输入顺序生成 1/2/3；相同优先级按有效负载因子均衡；示例为 `101, 102:1, 103:1`。文件为 `frontend/src/i18n/locales/{zh,en}/admin/overview.ts`。
+- 本轮实际基线：`main`；HEAD `314fcc3c0055a3be0c652782b646e71ad75df808`；`git describe`=`v0.1.173.38-1-g314fcc3-dirty`；VERSION=`0.1.173.38`。后端 Service/Handler/Repository 定向测试、前端 `pnpm typecheck`、locale ESLint、`pnpm build` 均通过；构建保留既有警告。
+- 未执行完整 Service 包、真实上游/Redis/PostgreSQL/OSS、浏览器实机验收、生产部署或重启；不要把本地通过写成生产已生效。文档写入后的 `git diff --check` 已通过，工作树已复核。
+
+## 2026-09-03 当前交接：生图调度冒烟验证
+
+- 冒烟已通过：Service 定向调度/图片意图测试、Handler 定向测试、`internal/server/routes` 路由测试、前端异步任务 API `8/8`、`pnpm typecheck` 均通过。
+- 建议下一步在隔离环境准备两个同优先级账号和一个更高优先级账号，验证优先级严格回退、同优先级按有效负载因子与当前负载均衡；用带/不带 `thoughtSignature` 的 Gemini 请求验证分别保持/解除黏性，并观察 failover。
+- 上线前建议增加账号选择层指标（优先级、有效负载率、选中账号、切换原因）、上游 request ID 与本地账单对账，再经授权执行构建、灰度部署、重启和生产观察。当前未做真实上游、Redis/PostgreSQL/OSS、浏览器实机或生产验证。
+
+## 2026-09-03 当前交接：参考图拉取失败换号重试
+
+- 相关代码：`backend/internal/handler/durable_async_image_worker.go`、`backend/internal/service/async_image_account_attempt.go`、`backend/internal/handler/openai_images.go`、`backend/internal/handler/gateway_handler_chat_completions.go`。
+- 行为：异步 image-to-image 的 `image_url fetch failed` 会持久化失败账号；任务级 sticky 让同账号完成两次重试，第三次同账号失败后切换一个账号重试一次；第二账号失败不再继续。`ReferenceFetchMaxRetries` 默认仍为 2，OpenAI 混合传输的 local fallback 仍按原策略保留。
+- 运行边界：本地 Handler 全量测试和相关 Service 定向测试通过；完整 Service 包受既有外部 OpenAI token 对比用例影响未全通过。未做真实上游、Redis/PostgreSQL/OSS、生产部署、重启或灰度验收。
+- 下一步：隔离环境准备两个可用账号，观察 `account_attempts`、`attempted_account_ids` 和任务 `reference_retry_count`，确认 A/A/A/B 的实际顺序及 B 失败后的终止。
+
+## 2026-09-03 当前交接：参考图重试 invocation 状态合并修复
+
+- Worker 在收到上游 `image_url fetch failed` HTTP 400 后，先记录当前 invocation 的失败账号，再把 capture 与任务持久化历史合并判定；这修复了第三次同账号请求和第二账号请求看不到当前失败的问题。
+- 默认 `ReferenceFetchMaxRetries=2` 的顺序固定为 A 初始请求、A 重试 1、A 重试 2、B 重试 1；B 失败直接进入 `failed`，不会继续选择 C。OpenAI 图片调度在 Worker 传入预取 sticky 账号时优先使用该账号，缓存冷启动也不改变顺序。
+- 已通过：`go test ./internal/handler -count=1`；Service 账号尝试/图片意图定向测试；Repository 异步迁移定向测试；Service/Repository `go test -run '^$'` 编译检查；`git diff --check`。
+- 完整 Service 测试未通过的唯一已确认阻断为既有 `TestEstimateOpenAIInputTokens_CompareWithOpenAIAPI` 外部 OpenAI 网络连接超时；未执行真实上游、Redis/PostgreSQL/OSS、生产部署或重启。
+
+## 2026-09-04 当前交接：参考图重试无缓存 sticky
+
+- `defaultOpenAIAccountScheduler.selectBySessionHash` 现允许 Worker 明确传入的 `StickyAccountID` 在 Redis sticky 缓存关闭或不可用时继续生效；缺少预取账号的普通会话请求仍要求缓存，未改变常规调度。
+- 这补齐异步 `image_url fetch failed` 重试的 A/A/A/B 约束：首次 A、同账号两次重试、切换 B 一次，B 失败终止，且同账号阶段不依赖 Redis。
+- 新增 `TestOpenAIGatewayService_SelectAccountWithScheduler_PrefetchedStickyWithoutCache`；该测试、参考图 Handler 定向测试均通过。完整 `go test ./internal/service -count=1` 于 2026-09-04 仍只在 `TestEstimateOpenAIInputTokens_CompareWithOpenAIAPI` 访问 `https://api.openai.com/v1/responses/input_tokens` 时连接超时失败。
+- 实际基线：分支 `main`；HEAD `314fcc3c0055a3be0c652782b646e71ad75df808`；`git status --short --branch` 为 `## main...origin/main` 加本地既有未提交改动；`git describe --tags --always --dirty`=`v0.1.173.38-1-g314fcc3-dirty`；VERSION=`0.1.173.38`。未连接、部署或重启生产，真实上游、Redis/PostgreSQL/OSS 端到端仍待隔离环境验证。
+
+## 2026-09-04 当前交接：清晰度账号池 priority 回显
+
+- 根因：`frontend/src/views/admin/groupsImageAccountPools.ts` 的 `formatImageSizePoolInput` 只回显 `account_id`，保存后重新加载时丢掉 `priority` 文本；后端数据本身未丢失。
+- 修复：回显格式改为 `account_id:priority`，因此 `1:1,32:1` 保存后仍显示为 `1:1, 32:1`。后端 `group_image_size_accounts` 允许多个账号共享同一个 priority；同优先级由调度器继续做负载均衡。
+- 新增前端回显/解析 round-trip 和后端同优先级账号池调度测试。前端账号池 3/3、异步任务 API 8/8，后端图片账号池/管理员接口/迁移定向测试通过。
+- 实际基线：分支 `main`；HEAD `314fcc3c0055a3be0c652782b646e71ad75df808`；`git status --short --branch` 为 `## main...origin/main` 加本地既有未提交改动；`git describe --tags --always --dirty`=`v0.1.173.38-1-g314fcc3-dirty`；VERSION=`0.1.173.38`。未部署或重启生产。
+
+## 2026-09-04 深度冒烟复验
+
+- 已确认账号池配置 `1:1,32:1` 保存后回显为 `1:1, 32:1`；多个账号使用相同优先级合法，后端唯一约束不限制 priority，调度器在同优先级内继续按负载均衡。
+- 已通过 `go test ./internal/handler -count=1`、图片账号池/管理员接口/Repository 迁移定向测试、路由/中间件测试、`go test ./... -run '^$' -count=1`；前端账号池与异步任务 API `11/11`、`pnpm typecheck`、目标 ESLint、`pnpm build`、`git diff --check`。
+- 完整 `go test ./internal/service -count=1` 的唯一确认阻断为既有 `TestEstimateOpenAIInputTokens_CompareWithOpenAIAPI` 三个子用例访问 `https://api.openai.com/v1/responses/input_tokens` 连接超时；账号池定向测试通过。
+- 本轮没有浏览器实机、真实上游/Redis/PostgreSQL/OSS、生产部署、重启或灰度验收；生产仍不会因本地未提交改动自动生效。
+# 2026-09-04 图片账号连续失败熔断交接
+
+- 当前工作树在 `main`，HEAD `314fcc3c0055a3be0c652782b646e71ad75df808`，`git describe --tags --always --dirty` 为 `v0.1.173.38-1-g314fcc3-dirty`，VERSION `0.1.173.38`；保留此前未提交改动。
+- Redis key 按 `image:circuit:{scope}:{account}:failures/open`；默认关闭、连续失败阈值 5、冷却 300 秒，成功清零，sync/async 隔离。
+- 管理端字段位于 `frontend/src/views/admin/BackupView.vue` 图片存储运行参数区域；已完成 Go 全仓编译检查、前端类型检查和构建。
+- 未保存管理端配置时，`async_image.image_circuit_breaker_enabled`、`async_image.image_circuit_breaker_failure_threshold`、`async_image.image_circuit_breaker_cooldown_seconds` 可作为 `config.yaml`/环境变量回退；已在 `asyncRuntimeFromConfig` 增加映射并补同步/异步调度过滤测试。
+- Gateway 旧式 sticky lookup 也会检查 `ImageAccountCircuitBreaker`，因此图片请求不会因已有会话绑定而绕过冷却；相关回归测试位于 `backend/internal/service/image_account_circuit_breaker_scheduling_test.go`。
+- 上线前在隔离环境验证两账号切换、冷却恢复、成功清零、Redis TTL 和无可用账号响应；未执行生产部署或真实外部链路。

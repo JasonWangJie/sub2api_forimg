@@ -24,11 +24,18 @@ describe("groupsImageAccountPools", () => {
 
   it("round-trips empty and configured tiers", () => {
     const view = normalizeImageSizePoolView({
-      "4K": [{ account_id: 9, priority: 1, account_name: "a" }],
+      "4K": [
+        { account_id: 9, priority: 1, account_name: "a" },
+        { account_id: 8, priority: 1, account_name: "b" },
+      ],
     });
     expect(view["1K"]).toEqual([]);
     expect(view["4K"][0].account_id).toBe(9);
-    expect(formatImageSizePoolInput(view["4K"])).toBe("9");
+    expect(formatImageSizePoolInput(view["4K"])).toBe("9:1, 8:1");
+    expect(parseImageSizePoolInput(formatImageSizePoolInput(view["4K"]))).toEqual([
+      { account_id: 9, priority: 1 },
+      { account_id: 8, priority: 1 },
+    ]);
     expect(toImageSizePoolPayload({ "1K": "", "2K": "", "4K": "9,8" })).toEqual({
       "1K": [],
       "2K": [],

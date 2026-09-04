@@ -479,6 +479,14 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 			} else {
 				result, err = h.geminiCompatService.Forward(requestCtx, c, account, body)
 			}
+			if (service.GeminiImageGenerationIntentFromContext(requestCtx) || service.IsGeminiAsyncImageGeneration(requestCtx)) &&
+				!(service.IsGeminiAsyncImageGeneration(requestCtx) && requestCtx.Err() != nil && c.Writer.Size() == 0) {
+				if account.Platform == service.PlatformGemini {
+					h.geminiCompatService.ReportImageAccountResult(requestCtx, account.ID, err == nil && result != nil, err)
+				} else {
+					h.gatewayService.ReportImageAccountResult(requestCtx, account.ID, err == nil && result != nil, err)
+				}
+			}
 			if accountReleaseFunc != nil {
 				accountReleaseFunc()
 			}

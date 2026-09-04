@@ -157,19 +157,32 @@ func (h *GatewayHandler) ChatCompletions(c *gin.Context) {
 	}
 	sessionHash := h.gatewayService.GenerateSessionHash(parsedReq)
 	groupPlatform := effectiveAPIKeyPlatform(c, apiKey)
-	selectionSessionHash := sessionHash
 	asyncImageGeneration := service.IsGeminiAsyncImageGeneration(c.Request.Context())
-	if asyncImageGeneration {
+	geminiImageIntent := false
+	if groupPlatform == service.PlatformGemini || groupPlatform == service.PlatformAntigravity {
+		geminiImageIntent = service.IsGeminiNativeImageGenerationIntent("generateContent", reqModel, body) ||
+			service.IsImageGenerationIntent("/v1/chat/completions", reqModel, body)
+	}
+	if geminiImageIntent && !asyncImageGeneration {
+		c.Request = c.Request.WithContext(service.WithGeminiImageGenerationIntent(c.Request.Context()))
+	}
+	selectionSessionHash := sessionHash
+	if asyncImageGeneration || (geminiImageIntent && !service.GeminiImageStickySessionRequired(geminiImageIntent, body)) {
 		// A durable image task must reconsider the complete size-tier pool on
-		// every attempt instead of waiting on a sticky account.
+		// every attempt instead of waiting on a sticky account. Synchronous
+		// Gemini image generations use the same stateless routing rule.
 		selectionSessionHash = ""
 	} else if groupPlatform == service.PlatformGemini && selectionSessionHash != "" {
 		selectionSessionHash = "gemini:" + selectionSessionHash
 	}
+	if asyncImageGeneration {
+		if routedHash := service.AsyncImageRoutingSessionHash(c.Request.Context()); routedHash != "" {
+			selectionSessionHash = routedHash
+		}
+	}
 	// Attach image size-tier pool hint for Gemini image requests only.
 	if groupPlatform == service.PlatformGemini || groupPlatform == service.PlatformAntigravity {
-		if service.IsGeminiNativeImageGenerationIntent("generateContent", reqModel, body) ||
-			service.IsImageGenerationIntent("/v1/chat/completions", reqModel, body) {
+		if geminiImageIntent {
 			if tier := service.ExtractImageSizePoolTierFromRequestBody(body); tier != "" {
 				c.Request = c.Request.WithContext(service.WithImageSizeAccountPoolTier(c.Request.Context(), tier))
 			}
@@ -203,7 +216,8 @@ func (h *GatewayHandler) ChatCompletions(c *gin.Context) {
 		}
 		selection, err := h.gatewayService.SelectAccountWithLoadAwareness(c.Request.Context(), apiKey.GroupID, selectionSessionHash, reqModel, excludedAccountIDs, "", int64(0))
 		if err != nil {
-			if len(fs.FailedAccountIDs) == 0 && len(service.AsyncImageExcludedAccountIDs(c.Request.Context())) > 0 && !historicalExclusionsRetried {
+			if len(fs.FailedAccountIDs) == 0 && len(service.AsyncImageExcludedAccountIDs(c.Request.Context())) > 0 && !historicalExclusionsRetried &&
+				!service.AsyncImageReferenceAccountSwitchActive(c.Request.Context()) {
 				historicalExclusionsRetried = true
 				continue
 			}
@@ -357,6 +371,15 @@ func (h *GatewayHandler) ChatCompletions(c *gin.Context) {
 		}
 		if asyncImageGeneration && attemptTimedOut && c.Request.Context().Err() == nil && result == nil && err != nil {
 			err = &service.UpstreamFailoverError{StatusCode: http.StatusGatewayTimeout, ResponseBody: []byte("upstream account attempt timed out"), ResponseHeaders: c.Writer.Header().Clone()}
+		}
+		if geminiImageIntent || asyncImageGeneration {
+			if !(asyncImageGeneration && attemptTimedOut && result == nil) {
+				if account.Platform == service.PlatformGemini {
+					h.geminiCompatService.ReportImageAccountResult(forwardCtx, account.ID, err == nil && result != nil, err)
+				} else {
+				 h.gatewayService.ReportImageAccountResult(forwardCtx, account.ID, err == nil && result != nil, err)
+				}
+			}
 		}
 
 		if accountReleaseFunc != nil {

@@ -197,6 +197,21 @@ func (r *asyncImageTaskRepository) CountAsyncImageTaskStatuses(ctx context.Conte
 	return counts, nil
 }
 
+func (r *asyncImageTaskRepository) AverageCompletedAsyncImageTaskDuration(ctx context.Context, filter service.AsyncImageTaskFilter) (*float64, error) {
+	where, args := buildAsyncImageTaskFilter(filter)
+	where += " AND status = 'succeeded' AND finished_at IS NOT NULL"
+	var average sql.NullFloat64
+	if err := r.sql.QueryRowContext(ctx, `
+SELECT AVG(EXTRACT(EPOCH FROM (finished_at - submitted_at)) * 1000)
+FROM async_image_tasks`+where, args...).Scan(&average); err != nil {
+		return nil, err
+	}
+	if !average.Valid {
+		return nil, nil
+	}
+	return &average.Float64, nil
+}
+
 func buildAsyncImageTaskFilter(filter service.AsyncImageTaskFilter) (string, []any) {
 	clauses := make([]string, 0, 12)
 	args := make([]any, 0, 12)

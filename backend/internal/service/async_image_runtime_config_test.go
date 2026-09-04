@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"testing"
 
+	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/stretchr/testify/require"
 )
 
@@ -31,6 +32,17 @@ func TestAsyncImageRuntimeConfigOldJSONGetsRetryDefaults(t *testing.T) {
 	require.Equal(t, 20, cfg.RetryJitterPercent)
 	require.Equal(t, 900, cfg.RetryAfterMaxSeconds)
 	require.False(t, cfg.AutoArchiveToLibrary)
+}
+
+func TestAsyncRuntimeFromConfigMapsImageCircuitBreakerSettings(t *testing.T) {
+	cfg := asyncRuntimeFromConfig(config.AsyncImageConfig{
+		ImageCircuitBreakerEnabled:          true,
+		ImageCircuitBreakerFailureThreshold: 7,
+		ImageCircuitBreakerCooldownSeconds:  900,
+	})
+	require.True(t, cfg.ImageCircuitBreakerEnabled)
+	require.Equal(t, 7, cfg.ImageCircuitBreakerFailureThreshold)
+	require.Equal(t, 900, cfg.ImageCircuitBreakerCooldownSeconds)
 }
 
 func TestAsyncImageRuntimeConfigPreservesExplicitAutoArchivePolicy(t *testing.T) {

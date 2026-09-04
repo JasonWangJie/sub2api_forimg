@@ -149,16 +149,23 @@ type AsyncImageTaskFilter struct {
 // AsyncImageTaskStats contains counts for the full filtered result set, not
 // only the current page of tasks.
 type AsyncImageTaskStats struct {
-	Active      int64   `json:"active"`
-	Completed   int64   `json:"completed"`
-	Failed      int64   `json:"failed"`
-	SuccessRate float64 `json:"success_rate"`
+	Active            int64    `json:"active"`
+	Completed         int64    `json:"completed"`
+	Failed            int64    `json:"failed"`
+	SuccessRate       float64  `json:"success_rate"`
+	AverageDurationMS *float64 `json:"average_duration_ms"`
 }
 
 // AsyncImageTaskStatsRepository is optional so lightweight task repositories
 // used by tests and integrations do not need to implement aggregate queries.
 type AsyncImageTaskStatsRepository interface {
 	CountAsyncImageTaskStatuses(ctx context.Context, filter AsyncImageTaskFilter) (map[string]int64, error)
+}
+
+// AsyncImageTaskDurationStatsRepository optionally supplies the completed-task
+// duration aggregate used by the task-center summary.
+type AsyncImageTaskDurationStatsRepository interface {
+	AverageCompletedAsyncImageTaskDuration(ctx context.Context, filter AsyncImageTaskFilter) (*float64, error)
 }
 
 // AsyncImageTaskCenterStatsService is implemented by the durable task service
@@ -462,6 +469,12 @@ func (s *AsyncImageTaskService) taskStats(ctx context.Context, filter AsyncImage
 	finished := stats.Completed + stats.Failed
 	if finished > 0 {
 		stats.SuccessRate = float64(stats.Completed) / float64(finished) * 100
+	}
+	if durationRepo, ok := s.repo.(AsyncImageTaskDurationStatsRepository); ok {
+		stats.AverageDurationMS, err = durationRepo.AverageCompletedAsyncImageTaskDuration(ctx, filter)
+		if err != nil {
+			return AsyncImageTaskStats{}, err
+		}
 	}
 	return stats, nil
 }

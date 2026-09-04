@@ -524,7 +524,15 @@ func (h *DurableAsyncImageHandler) invokeAsyncImageTask(parent context.Context, 
 		}
 	}
 	parent = service.WithAsyncImageAccountAttemptCapture(parent, attemptCapture)
-	parent = service.WithAsyncImageExcludedAccountIDs(parent, asyncImageRecentFailedAccountIDs(task))
+	referenceRetryState := asyncImageReferenceAccountRetryState(task)
+	referenceRetryState.switchPending = asyncImageReferenceAccountSwitchRetryAllowed(task, cfg)
+	parent = service.WithAsyncImageExcludedAccountIDs(parent, asyncImageReferenceRetryExcludedAccountIDs(task, cfg))
+	if task != nil && task.RequestType == service.AsyncImageRequestTypeImageToImage {
+		parent = service.WithAsyncImageRoutingSessionHash(parent, "async-image:"+task.TaskID)
+	}
+	if referenceRetryState.switchPending {
+		parent = service.WithAsyncImageReferenceAccountSwitch(parent, true)
+	}
 	if task != nil && task.Platform == service.PlatformGemini {
 		parent = service.WithAsyncImageGeminiMaxAccountSwitches(parent, cfg.GeminiAsyncMaxAccountSwitches)
 	}
@@ -537,6 +545,9 @@ func (h *DurableAsyncImageHandler) invokeAsyncImageTask(parent context.Context, 
 	if err != nil {
 		h.failAsyncImageTask(parent, task, "eligibility_failed", asyncImageSafeError(err), false)
 		return asyncImageWorkerDisposition{}
+	}
+	if referenceRetryState.sameAccountID > 0 && !referenceRetryState.switchPending && apiKey != nil && apiKey.GroupID != nil {
+		parent = service.WithPrefetchedStickySession(parent, referenceRetryState.sameAccountID, *apiKey.GroupID, true)
 	}
 	payload, err := h.decryptAsyncImagePayload(task.RequestPayload)
 	if err != nil {
@@ -626,7 +637,11 @@ func (h *DurableAsyncImageHandler) invokeAsyncImageTask(parent context.Context, 
 			h.markAsyncImageExecutionUnknown(parent, task, message)
 			return asyncImageWorkerDisposition{}
 		}
-		if shouldRetryAsyncImageUpstreamReferenceFetch(task, cfg, recorder.Code, message) {
+		// The account-attempt capture is invocation-scoped. Record this response
+		// before classifying it so the retry policy sees the failure that just
+		// happened, not only the previous queued invocation's persisted snapshot.
+		recordAsyncImageReferenceFetchFailure(ginContext.Request.Context(), message)
+		if shouldRetryAsyncImageUpstreamReferenceFetchWithContext(ginContext.Request.Context(), task, cfg, recorder.Code, message) {
 			return h.retryAsyncImageUpstreamReferenceFetch(parent, task, cfg, message, retryAfter)
 		}
 		if isAsyncImageCapacityFailure(recorder.Code, message) {
@@ -793,8 +808,28 @@ func isAsyncImageMultipartRequiredFailure(message string) bool {
 }
 
 func shouldRetryAsyncImageUpstreamReferenceFetch(task *service.AsyncImageTask, cfg service.AsyncImageRuntimeConfig, _ int, message string) bool {
-	if task == nil || task.RequestType != service.AsyncImageRequestTypeImageToImage ||
-		!canRetryAsyncImage(task, task.ReferenceRetryCount, cfg.ReferenceFetchMaxRetries, cfg.TotalMaxRetries) {
+	return shouldRetryAsyncImageUpstreamReferenceFetchWithContext(nil, task, cfg, 0, message)
+}
+
+func shouldRetryAsyncImageUpstreamReferenceFetchWithContext(ctx context.Context, task *service.AsyncImageTask, cfg service.AsyncImageRuntimeConfig, _ int, message string) bool {
+	if task == nil || task.RequestType != service.AsyncImageRequestTypeImageToImage {
+		return false
+	}
+	state := asyncImageReferenceAccountRetryStateWithContext(task, ctx)
+	// Reference-fetch retries are limited to one account switch. Once a second
+	// account has failed, retrying would silently select a third account.
+	if len(state.failedAccountIDs) >= 2 {
+		return false
+	}
+	canRetry := canRetryAsyncImage(task, task.ReferenceRetryCount, cfg.ReferenceFetchMaxRetries, cfg.TotalMaxRetries)
+	// The final same-account attempt is the second configured retry. Its
+	// failure must still be requeued once so the next invocation can switch
+	// accounts, even though the category retry counter has reached its limit.
+	finalSameAccountAttempt := cfg.ReferenceFetchMaxRetries > 0 &&
+		task.RetryCount < cfg.TotalMaxRetries &&
+		task.ReferenceRetryCount >= cfg.ReferenceFetchMaxRetries &&
+		state.sameAccountFailures >= cfg.ReferenceFetchMaxRetries
+	if !canRetry && !finalSameAccountAttempt && !asyncImageReferenceAccountSwitchRetryAllowed(task, cfg) {
 		return false
 	}
 	mode := asyncImageReferenceTransport(task, cfg)
@@ -916,21 +951,28 @@ func asyncImageReferenceRetryAfter(err error) time.Duration {
 }
 
 func (h *DurableAsyncImageHandler) retryAsyncImageReferenceFetch(ctx context.Context, task *service.AsyncImageTask, cfg service.AsyncImageRuntimeConfig, cause error) asyncImageWorkerDisposition {
-	return h.scheduleAsyncImageReferenceRetry(ctx, task, cfg, asyncImageSafeError(cause), asyncImageReferenceRetryAfter(cause), false)
+	return h.scheduleAsyncImageReferenceRetry(ctx, task, cfg, asyncImageSafeError(cause), asyncImageReferenceRetryAfter(cause), false, false)
 }
 
 func (h *DurableAsyncImageHandler) retryAsyncImageUpstreamReferenceFetch(ctx context.Context, task *service.AsyncImageTask, cfg service.AsyncImageRuntimeConfig, message string, retryAfter time.Duration) asyncImageWorkerDisposition {
+	state := asyncImageReferenceAccountRetryStateWithContext(task, ctx)
+	accountSwitchRetry := len(state.failedAccountIDs) == 1 && state.sameAccountID > 0 &&
+		state.sameAccountFailures >= cfg.ReferenceFetchMaxRetries+1
 	fallbackLocal := asyncImageReferenceTransport(task, cfg) == service.AsyncImageReferenceTransportPassthroughFallbackLocal
-	return h.scheduleAsyncImageReferenceRetry(ctx, task, cfg, message, retryAfter, fallbackLocal)
+	return h.scheduleAsyncImageReferenceRetry(ctx, task, cfg, message, retryAfter, fallbackLocal, accountSwitchRetry)
 }
 
-func (h *DurableAsyncImageHandler) scheduleAsyncImageReferenceRetry(ctx context.Context, task *service.AsyncImageTask, cfg service.AsyncImageRuntimeConfig, detail string, retryAfter time.Duration, fallbackLocal bool) asyncImageWorkerDisposition {
+func (h *DurableAsyncImageHandler) scheduleAsyncImageReferenceRetry(ctx context.Context, task *service.AsyncImageTask, cfg service.AsyncImageRuntimeConfig, detail string, retryAfter time.Duration, fallbackLocal, accountSwitchRetry bool) asyncImageWorkerDisposition {
 	if task == nil {
 		return asyncImageWorkerDisposition{}
 	}
 	attempt := task.ReferenceRetryCount + 1
+	maxRetries := cfg.ReferenceFetchMaxRetries
+	if accountSwitchRetry {
+		maxRetries++
+	}
 	code := asyncImageReferenceFetchRetryCode
-	message := fmt.Sprintf("reference image fetch failed; scheduled retry %d/%d: %s", attempt, cfg.ReferenceFetchMaxRetries, asyncImageSafeError(errors.New(detail)))
+	message := fmt.Sprintf("reference image fetch failed; scheduled retry %d/%d: %s", attempt, maxRetries, asyncImageSafeError(errors.New(detail)))
 	progress := 0
 	transition := service.AsyncImageTaskTransition{
 		TaskID: task.TaskID, ExpectedVersion: task.Version,
@@ -943,7 +985,7 @@ func (h *DurableAsyncImageHandler) scheduleAsyncImageReferenceRetry(ctx context.
 		mode := service.AsyncImageReferenceTransportLocal
 		transition.ReferenceTransport = &mode
 	}
-	transition.EventPayload, _ = json.Marshal(map[string]any{"retry": attempt, "max": cfg.ReferenceFetchMaxRetries, "fallback_local": fallbackLocal})
+	transition.EventPayload, _ = json.Marshal(map[string]any{"retry": attempt, "max": maxRetries, "fallback_local": fallbackLocal, "account_switch": accountSwitchRetry})
 	if _, err := h.tasks.Transition(ctx, transition); err != nil {
 		logger.L().Warn("async_image.reference_retry_transition_failed", zap.String("task_id", task.TaskID), zap.Error(err))
 		return asyncImageWorkerDisposition{}
@@ -2074,6 +2116,101 @@ func asyncImageRecentFailedAccountIDs(task *service.AsyncImageTask) map[int64]st
 		ids[attempts[i].AccountID] = struct{}{}
 	}
 	return ids
+}
+
+type asyncImageReferenceAccountRetryInfo struct {
+	failedAccountIDs    map[int64]struct{}
+	failureCounts       map[int64]int
+	sameAccountID       int64
+	sameAccountFailures int
+	switchPending       bool
+}
+
+func asyncImageReferenceAccountRetryState(task *service.AsyncImageTask) asyncImageReferenceAccountRetryInfo {
+	return asyncImageReferenceAccountRetryStateWithContext(task, nil)
+}
+
+func asyncImageReferenceAccountRetryStateWithContext(task *service.AsyncImageTask, ctx context.Context) asyncImageReferenceAccountRetryInfo {
+	state := asyncImageReferenceAccountRetryInfo{
+		failedAccountIDs: make(map[int64]struct{}),
+		failureCounts:    make(map[int64]int),
+	}
+	if task != nil && len(task.AccountAttempts) > 0 {
+		var attempts []service.AsyncImageAccountAttempt
+		if err := json.Unmarshal(task.AccountAttempts, &attempts); err == nil {
+			accumulateAsyncImageReferenceAccountFailures(&state, attempts)
+		}
+	}
+	if capture := service.AsyncImageAccountAttemptCaptureFromContext(ctx); capture != nil {
+		accumulateAsyncImageReferenceAccountFailures(&state, capture.Attempts())
+	}
+	return state
+}
+
+func accumulateAsyncImageReferenceAccountFailures(state *asyncImageReferenceAccountRetryInfo, attempts []service.AsyncImageAccountAttempt) {
+	if state == nil {
+		return
+	}
+	for _, attempt := range attempts {
+		if attempt.Status != service.AsyncImageAccountAttemptFailed || attempt.AccountID <= 0 ||
+			!service.IsAsyncImageReferenceFetchFailureMessage(attempt.Error) {
+			continue
+		}
+		state.failedAccountIDs[attempt.AccountID] = struct{}{}
+		state.failureCounts[attempt.AccountID]++
+		state.sameAccountID = attempt.AccountID
+	}
+	if state.sameAccountID > 0 {
+		state.sameAccountFailures = state.failureCounts[state.sameAccountID]
+	}
+}
+
+func asyncImageReferenceAccountSwitchRetryAllowed(task *service.AsyncImageTask, cfg service.AsyncImageRuntimeConfig) bool {
+	if task == nil || cfg.ReferenceFetchMaxRetries <= 0 || task.RetryCount >= cfg.TotalMaxRetries ||
+		task.ReferenceRetryCount < cfg.ReferenceFetchMaxRetries {
+		return false
+	}
+	state := asyncImageReferenceAccountRetryState(task)
+	return len(state.failedAccountIDs) == 1 &&
+		state.sameAccountFailures >= cfg.ReferenceFetchMaxRetries+1
+}
+
+func asyncImageReferenceRetryExcludedAccountIDs(task *service.AsyncImageTask, cfg service.AsyncImageRuntimeConfig) map[int64]struct{} {
+	excluded := asyncImageRecentFailedAccountIDs(task)
+	state := asyncImageReferenceAccountRetryState(task)
+	if len(state.failedAccountIDs) == 0 || state.sameAccountID <= 0 {
+		return excluded
+	}
+	// Keep the same account eligible through the configured same-account
+	// retries. Once those attempts are exhausted, exclude it for exactly one
+	// account-switch retry; a second failed account ends this retry path.
+	if len(state.failedAccountIDs) == 1 && state.sameAccountFailures < cfg.ReferenceFetchMaxRetries+1 {
+		delete(excluded, state.sameAccountID)
+	}
+	if state.sameAccountFailures >= cfg.ReferenceFetchMaxRetries+1 && len(state.failedAccountIDs) == 1 {
+		excluded[state.sameAccountID] = struct{}{}
+	}
+	return excluded
+}
+
+func recordAsyncImageReferenceFetchFailure(ctx context.Context, message string) {
+	capture := service.AsyncImageAccountAttemptCaptureFromContext(ctx)
+	if capture == nil {
+		return
+	}
+	attempts := capture.Attempts()
+	if len(attempts) == 0 {
+		return
+	}
+	last := attempts[len(attempts)-1]
+	if last.AccountID <= 0 || (last.Status == service.AsyncImageAccountAttemptFailed &&
+		service.IsAsyncImageReferenceFetchFailureMessage(last.Error)) {
+		return
+	}
+	service.RecordAsyncImageAccountAttempt(ctx, service.AsyncImageAccountAttempt{
+		AccountID: last.AccountID, AccountName: last.AccountName,
+		Status: service.AsyncImageAccountAttemptFailed, Error: message,
+	})
 }
 
 func asyncImageSafeError(err error) string {

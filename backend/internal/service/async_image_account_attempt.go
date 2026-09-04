@@ -30,6 +30,45 @@ type asyncImageAccountAttemptContextKey struct{}
 type asyncImageExcludedAccountsContextKey struct{}
 type asyncImageGeminiMaxSwitchesContextKey struct{}
 type asyncImageAccountAttemptTimeoutContextKey struct{}
+type asyncImageRoutingSessionHashContextKey struct{}
+type asyncImageReferenceAccountSwitchContextKey struct{}
+
+// WithAsyncImageRoutingSessionHash pins one durable reference-image task to
+// its selected account while the task is retrying the same upstream request.
+// The value is intentionally task-scoped and never exposed to API clients.
+func WithAsyncImageRoutingSessionHash(ctx context.Context, hash string) context.Context {
+	if ctx == nil || hash == "" {
+		return ctx
+	}
+	return context.WithValue(ctx, asyncImageRoutingSessionHashContextKey{}, hash)
+}
+
+func AsyncImageRoutingSessionHash(ctx context.Context) string {
+	if ctx == nil {
+		return ""
+	}
+	hash, _ := ctx.Value(asyncImageRoutingSessionHashContextKey{}).(string)
+	return hash
+}
+
+// WithAsyncImageReferenceAccountSwitch marks the invocation whose selected
+// account is exhausted for reference-fetch retries. Gateway handlers use it
+// to suppress their normal historical-exclusion fallback, which would
+// otherwise re-select the exhausted account when no alternate is available.
+func WithAsyncImageReferenceAccountSwitch(ctx context.Context, active bool) context.Context {
+	if ctx == nil {
+		return nil
+	}
+	return context.WithValue(ctx, asyncImageReferenceAccountSwitchContextKey{}, active)
+}
+
+func AsyncImageReferenceAccountSwitchActive(ctx context.Context) bool {
+	if ctx == nil {
+		return false
+	}
+	active, _ := ctx.Value(asyncImageReferenceAccountSwitchContextKey{}).(bool)
+	return active
+}
 
 func WithAsyncImageExcludedAccountIDs(ctx context.Context, ids map[int64]struct{}) context.Context {
 	if len(ids) == 0 {

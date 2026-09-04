@@ -160,3 +160,32 @@ func TestGatewayImageSizePoolHonorsPriorityAndFailoverExclusions(t *testing.T) {
 	require.Equal(t, int64(6), selection.Account.ID)
 	selection.ReleaseFunc()
 }
+
+func TestGatewayImageSizePoolAllowsSamePriorityAccounts(t *testing.T) {
+	groupID := int64(8)
+	repo := imageSizePoolRepositoryStub{
+		configured: true,
+		accounts: []Account{
+			{ID: 11, Platform: PlatformGemini, Status: StatusActive, Schedulable: true, Priority: 1, Concurrency: 1},
+			{ID: 12, Platform: PlatformGemini, Status: StatusActive, Schedulable: true, Priority: 1, Concurrency: 1},
+		},
+	}
+	svc := &GatewayService{accountRepo: repo}
+	group := &Group{ID: groupID, Platform: PlatformGemini, Status: StatusActive, Hydrated: true}
+	ctx := context.WithValue(context.Background(), ctxkey.Group, group)
+	ctx = WithImageSizeAccountPoolTier(ctx, ImageBillingSize1K)
+
+	selection, err := svc.SelectAccountWithLoadAwareness(ctx, &groupID, "", "", nil, "", 0)
+	require.NoError(t, err)
+	require.NotNil(t, selection)
+	require.Contains(t, []int64{11, 12}, selection.Account.ID)
+	firstID := selection.Account.ID
+	selection.ReleaseFunc()
+
+	selection, err = svc.SelectAccountWithLoadAwareness(ctx, &groupID, "", "", map[int64]struct{}{firstID: {}}, "", 0)
+	require.NoError(t, err)
+	require.NotNil(t, selection)
+	require.Contains(t, []int64{11, 12}, selection.Account.ID)
+	require.NotEqual(t, firstID, selection.Account.ID)
+	selection.ReleaseFunc()
+}

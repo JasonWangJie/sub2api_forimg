@@ -206,6 +206,21 @@
                 <span class="mt-1 block">{{ t('admin.backup.imageStorage.autoArchiveToLibraryHint') }}</span>
               </label>
             </div>
+            <div class="md:col-span-2 lg:col-span-3 flex items-start gap-2 rounded-md border border-gray-200 p-3 dark:border-dark-700">
+              <input id="async-image-circuit-breaker" v-model="imageStorageForm.async_image.image_circuit_breaker_enabled" type="checkbox" class="mt-0.5" />
+              <label for="async-image-circuit-breaker" class="text-xs text-gray-600 dark:text-gray-400">
+                <span class="font-medium text-gray-700 dark:text-gray-200">{{ t('admin.backup.imageStorage.imageCircuitBreakerEnabled') }}</span>
+                <span class="mt-1 block">{{ t('admin.backup.imageStorage.imageCircuitBreakerHint') }}</span>
+              </label>
+            </div>
+            <div>
+              <label class="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">{{ t('admin.backup.imageStorage.imageCircuitBreakerFailureThreshold') }}</label>
+              <input v-model.number="imageStorageForm.async_image.image_circuit_breaker_failure_threshold" type="number" min="1" max="100" class="input w-full" />
+            </div>
+            <div>
+              <label class="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">{{ t('admin.backup.imageStorage.imageCircuitBreakerCooldownSeconds') }}</label>
+              <input v-model.number="imageStorageForm.async_image.image_circuit_breaker_cooldown_seconds" type="number" min="10" max="86400" class="input w-full" />
+            </div>
             <div>
               <label class="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">{{ t('admin.backup.imageStorage.workerConcurrency') }}</label>
               <input v-model.number="imageStorageForm.async_image.worker_concurrency" type="number" min="1" max="64" class="input w-full" />

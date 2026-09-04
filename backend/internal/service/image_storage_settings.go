@@ -218,51 +218,54 @@ type ImageLibraryRuntimeConfig struct {
 // AsyncImageRuntimeConfig is stored with image-storage settings so operational
 // changes take effect without restarting the API service.
 type AsyncImageRuntimeConfig struct {
-	PublicBaseURL                     string   `json:"public_base_url"`
-	AutoArchiveToLibrary              bool     `json:"auto_archive_to_library"`
-	WorkerConcurrency                 int      `json:"worker_concurrency"`
-	WorkerLeaseSeconds                int      `json:"worker_lease_seconds"`
-	RecoveryIntervalSeconds           int      `json:"recovery_interval_seconds"`
-	ExecutionTimeoutSeconds           int      `json:"execution_timeout_seconds"`
-	AccountAttemptTimeoutSeconds      int      `json:"account_attempt_timeout_seconds"`
-	StorageRetryAttempts              int      `json:"storage_retry_attempts"`
-	BillingRetryAttempts              int      `json:"billing_retry_attempts"`
-	RetryBackoffSeconds               int      `json:"retry_backoff_seconds"`
-	OpenAIReferenceTransportMode      string   `json:"openai_reference_transport_mode"`
-	GeminiReferenceTransportMode      string   `json:"gemini_reference_transport_mode"`
-	GeminiAsyncMaxAccountSwitches     int      `json:"gemini_async_max_account_switches"`
-	ReferenceFetchMaxRetries          int      `json:"reference_fetch_max_retries"`
-	ReferenceFetchRetryBaseSeconds    int      `json:"reference_fetch_retry_base_seconds"`
-	ReferenceFetchRetryMaxSeconds     int      `json:"reference_fetch_retry_max_seconds"`
-	UpstreamTransientMaxRetries       int      `json:"upstream_transient_max_retries"`
-	UpstreamTransientRetryBaseSeconds int      `json:"upstream_transient_retry_base_seconds"`
-	UpstreamTransientRetryMaxSeconds  int      `json:"upstream_transient_retry_max_seconds"`
-	CapacityMaxRetries                int      `json:"capacity_max_retries"`
-	CapacityRetryBaseSeconds          int      `json:"capacity_retry_base_seconds"`
-	CapacityRetryMaxSeconds           int      `json:"capacity_retry_max_seconds"`
-	TotalMaxRetries                   int      `json:"total_max_retries"`
-	RetryJitterPercent                int      `json:"retry_jitter_percent"`
-	RetryAfterMaxSeconds              int      `json:"retry_after_max_seconds"`
-	DownloadMaxBytes                  int64    `json:"download_max_bytes"`
-	DownloadMaxPixels                 int64    `json:"download_max_pixels"`
-	MaxReferenceImages                int      `json:"max_reference_images"`
-	MaxReferenceTotalBytes            int64    `json:"max_reference_total_bytes"`
-	MaxReferenceTotalPixels           int64    `json:"max_reference_total_pixels"`
-	DownloadTimeoutSeconds            int      `json:"download_timeout_seconds"`
-	ReferenceFetchConcurrency         int      `json:"reference_fetch_concurrency"`
-	ReferenceCacheTTLSeconds          int      `json:"reference_cache_ttl_seconds"`
-	ReferenceCacheMaxBytes            int64    `json:"reference_cache_max_bytes"`
-	DownloadMaxRedirects              int      `json:"download_max_redirects"`
-	UploadTimeoutSeconds              int      `json:"upload_timeout_seconds"`
-	UploadPerMinute                   int      `json:"upload_per_minute"`
-	MaxInputBytesPerKey               int64    `json:"max_input_bytes_per_key"`
-	SignedURLExpirySeconds            int      `json:"signed_url_expiry_seconds"`
-	InputRetentionHours               int      `json:"input_retention_hours"`
-	TaskRetentionDays                 int      `json:"task_retention_days"`
-	ResultRetentionDays               int      `json:"result_retention_days"`
-	GeminiHalfKModels                 []string `json:"gemini_half_k_models"`
-	PromptPreviewEnabled              bool     `json:"prompt_preview_enabled"`
-	PromptPreviewMaxChars             int      `json:"prompt_preview_max_chars"`
+	PublicBaseURL                       string   `json:"public_base_url"`
+	AutoArchiveToLibrary                bool     `json:"auto_archive_to_library"`
+	WorkerConcurrency                   int      `json:"worker_concurrency"`
+	WorkerLeaseSeconds                  int      `json:"worker_lease_seconds"`
+	RecoveryIntervalSeconds             int      `json:"recovery_interval_seconds"`
+	ExecutionTimeoutSeconds             int      `json:"execution_timeout_seconds"`
+	AccountAttemptTimeoutSeconds        int      `json:"account_attempt_timeout_seconds"`
+	StorageRetryAttempts                int      `json:"storage_retry_attempts"`
+	BillingRetryAttempts                int      `json:"billing_retry_attempts"`
+	RetryBackoffSeconds                 int      `json:"retry_backoff_seconds"`
+	OpenAIReferenceTransportMode        string   `json:"openai_reference_transport_mode"`
+	GeminiReferenceTransportMode        string   `json:"gemini_reference_transport_mode"`
+	GeminiAsyncMaxAccountSwitches       int      `json:"gemini_async_max_account_switches"`
+	ImageCircuitBreakerEnabled          bool     `json:"image_circuit_breaker_enabled"`
+	ImageCircuitBreakerFailureThreshold int      `json:"image_circuit_breaker_failure_threshold"`
+	ImageCircuitBreakerCooldownSeconds  int      `json:"image_circuit_breaker_cooldown_seconds"`
+	ReferenceFetchMaxRetries            int      `json:"reference_fetch_max_retries"`
+	ReferenceFetchRetryBaseSeconds      int      `json:"reference_fetch_retry_base_seconds"`
+	ReferenceFetchRetryMaxSeconds       int      `json:"reference_fetch_retry_max_seconds"`
+	UpstreamTransientMaxRetries         int      `json:"upstream_transient_max_retries"`
+	UpstreamTransientRetryBaseSeconds   int      `json:"upstream_transient_retry_base_seconds"`
+	UpstreamTransientRetryMaxSeconds    int      `json:"upstream_transient_retry_max_seconds"`
+	CapacityMaxRetries                  int      `json:"capacity_max_retries"`
+	CapacityRetryBaseSeconds            int      `json:"capacity_retry_base_seconds"`
+	CapacityRetryMaxSeconds             int      `json:"capacity_retry_max_seconds"`
+	TotalMaxRetries                     int      `json:"total_max_retries"`
+	RetryJitterPercent                  int      `json:"retry_jitter_percent"`
+	RetryAfterMaxSeconds                int      `json:"retry_after_max_seconds"`
+	DownloadMaxBytes                    int64    `json:"download_max_bytes"`
+	DownloadMaxPixels                   int64    `json:"download_max_pixels"`
+	MaxReferenceImages                  int      `json:"max_reference_images"`
+	MaxReferenceTotalBytes              int64    `json:"max_reference_total_bytes"`
+	MaxReferenceTotalPixels             int64    `json:"max_reference_total_pixels"`
+	DownloadTimeoutSeconds              int      `json:"download_timeout_seconds"`
+	ReferenceFetchConcurrency           int      `json:"reference_fetch_concurrency"`
+	ReferenceCacheTTLSeconds            int      `json:"reference_cache_ttl_seconds"`
+	ReferenceCacheMaxBytes              int64    `json:"reference_cache_max_bytes"`
+	DownloadMaxRedirects                int      `json:"download_max_redirects"`
+	UploadTimeoutSeconds                int      `json:"upload_timeout_seconds"`
+	UploadPerMinute                     int      `json:"upload_per_minute"`
+	MaxInputBytesPerKey                 int64    `json:"max_input_bytes_per_key"`
+	SignedURLExpirySeconds              int      `json:"signed_url_expiry_seconds"`
+	InputRetentionHours                 int      `json:"input_retention_hours"`
+	TaskRetentionDays                   int      `json:"task_retention_days"`
+	ResultRetentionDays                 int      `json:"result_retention_days"`
+	GeminiHalfKModels                   []string `json:"gemini_half_k_models"`
+	PromptPreviewEnabled                bool     `json:"prompt_preview_enabled"`
+	PromptPreviewMaxChars               int      `json:"prompt_preview_max_chars"`
 }
 
 func (in *AsyncImageRuntimeConfig) UnmarshalJSON(data []byte) error {
@@ -1032,6 +1035,9 @@ func asyncRuntimeFromConfig(in config.AsyncImageConfig) AsyncImageRuntimeConfig 
 		out.GeminiReferenceTransportMode = in.GeminiReferenceTransportMode
 	}
 	out.GeminiAsyncMaxAccountSwitches = in.GeminiAsyncMaxAccountSwitches
+	out.ImageCircuitBreakerEnabled = in.ImageCircuitBreakerEnabled
+	out.ImageCircuitBreakerFailureThreshold = in.ImageCircuitBreakerFailureThreshold
+	out.ImageCircuitBreakerCooldownSeconds = in.ImageCircuitBreakerCooldownSeconds
 	out.ReferenceFetchMaxRetries = in.ReferenceFetchMaxRetries
 	if in.ReferenceFetchRetryBaseSeconds > 0 {
 		out.ReferenceFetchRetryBaseSeconds = in.ReferenceFetchRetryBaseSeconds
@@ -1083,49 +1089,52 @@ func asyncRuntimeFromConfig(in config.AsyncImageConfig) AsyncImageRuntimeConfig 
 
 func defaultAsyncImageRuntimeConfig() AsyncImageRuntimeConfig {
 	return AsyncImageRuntimeConfig{
-		AutoArchiveToLibrary:              false,
-		WorkerConcurrency:                 4,
-		WorkerLeaseSeconds:                120,
-		RecoveryIntervalSeconds:           30,
-		ExecutionTimeoutSeconds:           1200,
-		AccountAttemptTimeoutSeconds:      300,
-		StorageRetryAttempts:              5,
-		BillingRetryAttempts:              10,
-		RetryBackoffSeconds:               30,
-		OpenAIReferenceTransportMode:      AsyncImageReferenceTransportPassthroughFallbackLocal,
-		GeminiReferenceTransportMode:      AsyncImageReferenceTransportPassthrough,
-		GeminiAsyncMaxAccountSwitches:     3,
-		ReferenceFetchMaxRetries:          2,
-		ReferenceFetchRetryBaseSeconds:    15,
-		ReferenceFetchRetryMaxSeconds:     60,
-		UpstreamTransientMaxRetries:       3,
-		UpstreamTransientRetryBaseSeconds: 15,
-		UpstreamTransientRetryMaxSeconds:  60,
-		CapacityMaxRetries:                5,
-		CapacityRetryBaseSeconds:          30,
-		CapacityRetryMaxSeconds:           300,
-		TotalMaxRetries:                   16,
-		RetryJitterPercent:                20,
-		RetryAfterMaxSeconds:              900,
-		DownloadMaxBytes:                  defaultImageMaxDownloadBytes,
-		DownloadMaxPixels:                 80_000_000,
-		MaxReferenceImages:                8,
-		MaxReferenceTotalBytes:            64 << 20,
-		MaxReferenceTotalPixels:           80_000_000,
-		DownloadTimeoutSeconds:            30,
-		ReferenceFetchConcurrency:         8,
-		ReferenceCacheTTLSeconds:          60,
-		ReferenceCacheMaxBytes:            128 << 20,
-		DownloadMaxRedirects:              3,
-		UploadTimeoutSeconds:              300,
-		UploadPerMinute:                   20,
-		MaxInputBytesPerKey:               1 << 30,
-		SignedURLExpirySeconds:            3600,
-		InputRetentionHours:               24,
-		TaskRetentionDays:                 90,
-		ResultRetentionDays:               90,
-		PromptPreviewEnabled:              true,
-		PromptPreviewMaxChars:             160,
+		AutoArchiveToLibrary:                false,
+		WorkerConcurrency:                   4,
+		WorkerLeaseSeconds:                  120,
+		RecoveryIntervalSeconds:             30,
+		ExecutionTimeoutSeconds:             1200,
+		AccountAttemptTimeoutSeconds:        300,
+		StorageRetryAttempts:                5,
+		BillingRetryAttempts:                10,
+		RetryBackoffSeconds:                 30,
+		OpenAIReferenceTransportMode:        AsyncImageReferenceTransportPassthroughFallbackLocal,
+		GeminiReferenceTransportMode:        AsyncImageReferenceTransportPassthrough,
+		GeminiAsyncMaxAccountSwitches:       3,
+		ImageCircuitBreakerEnabled:          false,
+		ImageCircuitBreakerFailureThreshold: 5,
+		ImageCircuitBreakerCooldownSeconds:  300,
+		ReferenceFetchMaxRetries:            2,
+		ReferenceFetchRetryBaseSeconds:      15,
+		ReferenceFetchRetryMaxSeconds:       60,
+		UpstreamTransientMaxRetries:         3,
+		UpstreamTransientRetryBaseSeconds:   15,
+		UpstreamTransientRetryMaxSeconds:    60,
+		CapacityMaxRetries:                  5,
+		CapacityRetryBaseSeconds:            30,
+		CapacityRetryMaxSeconds:             300,
+		TotalMaxRetries:                     16,
+		RetryJitterPercent:                  20,
+		RetryAfterMaxSeconds:                900,
+		DownloadMaxBytes:                    defaultImageMaxDownloadBytes,
+		DownloadMaxPixels:                   80_000_000,
+		MaxReferenceImages:                  8,
+		MaxReferenceTotalBytes:              64 << 20,
+		MaxReferenceTotalPixels:             80_000_000,
+		DownloadTimeoutSeconds:              30,
+		ReferenceFetchConcurrency:           8,
+		ReferenceCacheTTLSeconds:            60,
+		ReferenceCacheMaxBytes:              128 << 20,
+		DownloadMaxRedirects:                3,
+		UploadTimeoutSeconds:                300,
+		UploadPerMinute:                     20,
+		MaxInputBytesPerKey:                 1 << 30,
+		SignedURLExpirySeconds:              3600,
+		InputRetentionHours:                 24,
+		TaskRetentionDays:                   90,
+		ResultRetentionDays:                 90,
+		PromptPreviewEnabled:                true,
+		PromptPreviewMaxChars:               160,
 	}
 }
 
@@ -1184,6 +1193,18 @@ func normalizeAsyncImageRuntimeConfig(in *AsyncImageRuntimeConfig) {
 		in.GeminiAsyncMaxAccountSwitches = 0
 	} else if in.GeminiAsyncMaxAccountSwitches > 16 {
 		in.GeminiAsyncMaxAccountSwitches = 16
+	}
+	if in.ImageCircuitBreakerFailureThreshold <= 0 {
+		in.ImageCircuitBreakerFailureThreshold = defaults.ImageCircuitBreakerFailureThreshold
+	} else if in.ImageCircuitBreakerFailureThreshold > 100 {
+		in.ImageCircuitBreakerFailureThreshold = 100
+	}
+	if in.ImageCircuitBreakerCooldownSeconds <= 0 {
+		in.ImageCircuitBreakerCooldownSeconds = defaults.ImageCircuitBreakerCooldownSeconds
+	} else if in.ImageCircuitBreakerCooldownSeconds < 10 {
+		in.ImageCircuitBreakerCooldownSeconds = 10
+	} else if in.ImageCircuitBreakerCooldownSeconds > 86400 {
+		in.ImageCircuitBreakerCooldownSeconds = 86400
 	}
 	if in.ReferenceFetchMaxRetries < 0 {
 		in.ReferenceFetchMaxRetries = 0

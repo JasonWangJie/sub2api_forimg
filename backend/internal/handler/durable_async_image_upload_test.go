@@ -146,7 +146,7 @@ func newSCUploadAdmissionTestRouter(t *testing.T, repo *asyncImageUploadHandlerR
 		ID: 9, UserID: 7, GroupID: &groupID,
 		Group: &service.Group{
 			ID: groupID, Platform: service.PlatformGemini,
-			Status: service.StatusActive,
+			Status:               service.StatusActive,
 			AllowImageGeneration: true, AllowAsyncImageGeneration: true,
 		},
 	}

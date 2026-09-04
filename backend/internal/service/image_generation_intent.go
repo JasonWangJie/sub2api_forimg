@@ -1,6 +1,7 @@
 package service
 
 import (
+	"bytes"
 	"strings"
 
 	"github.com/tidwall/gjson"
@@ -77,6 +78,20 @@ func IsImageGenerationIntent(endpoint string, requestedModel string, body []byte
 		return !imageIntent && (!modelSeen || !toolsSeen || !inputSeen || !toolChoiceSeen)
 	})
 	return imageIntent
+}
+
+// IsGeminiThoughtSignaturePresent reports whether a Gemini request carries a
+// thought signature. Gemini uses signatures to bind follow-up requests to the
+// account that produced them, so those requests must retain sticky routing.
+func IsGeminiThoughtSignaturePresent(body []byte) bool {
+	return len(body) > 0 && bytes.Contains(body, []byte(`"thoughtSignature"`))
+}
+
+// GeminiImageStickySessionRequired keeps normal Gemini requests sticky while
+// allowing independent image generations to be balanced across the pool.
+// Image requests carrying a thought signature remain sticky for validation.
+func GeminiImageStickySessionRequired(imageIntent bool, body []byte) bool {
+	return !imageIntent || IsGeminiThoughtSignaturePresent(body)
 }
 
 // IsExplicitImageGenerationIntent 仅检测原生 image_generation 工具、图片模型和显式 tool_choice，

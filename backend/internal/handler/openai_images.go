@@ -143,9 +143,11 @@ func (h *OpenAIGatewayHandler) Images(c *gin.Context) {
 		return
 	}
 
-	sessionHash := h.gatewayService.GenerateExplicitSessionHash(c, body)
 	requestCtx := service.WithOpenAIImagesEndpoint(service.WithOpenAIImageGenerationIntent(c.Request.Context()))
 	asyncImageGeneration := asyncImageUsageCaptureFromContext(c.Request.Context()) != nil
+	// Durable reference-image retries use a task-scoped sticky hash so the
+	// selected account is reused until the retry policy explicitly switches it.
+	sessionHash := service.AsyncImageRoutingSessionHash(requestCtx)
 
 	maxAccountSwitches := h.maxAccountSwitches
 	switchCount := 0
@@ -180,7 +182,8 @@ func (h *OpenAIGatewayHandler) Images(c *gin.Context) {
 			parsed.SizeTier,
 		)
 		if err != nil {
-			if len(failedAccountIDs) == 0 && len(service.AsyncImageExcludedAccountIDs(requestCtx)) > 0 && !historicalExclusionsRetried {
+			if len(failedAccountIDs) == 0 && len(service.AsyncImageExcludedAccountIDs(requestCtx)) > 0 && !historicalExclusionsRetried &&
+				!service.AsyncImageReferenceAccountSwitchActive(requestCtx) {
 				historicalExclusionsRetried = true
 				continue
 			}
@@ -234,7 +237,6 @@ func (h *OpenAIGatewayHandler) Images(c *gin.Context) {
 		)
 
 		account := selection.Account
-		sessionHash = ensureOpenAIPoolModeSessionHash(sessionHash, account)
 		reqLog.Debug("openai.images.account_selected", zap.Int64("account_id", account.ID), zap.String("account_name", account.Name))
 		setOpsSelectedAccount(c, account.ID, account.Platform)
 		if asyncImageGeneration {
@@ -282,6 +284,9 @@ func (h *OpenAIGatewayHandler) Images(c *gin.Context) {
 		accountAttemptCancel()
 		if asyncImageGeneration && attemptTimedOut && requestCtx.Err() == nil && result == nil && err != nil {
 			err = &service.UpstreamFailoverError{StatusCode: http.StatusGatewayTimeout, ResponseBody: []byte("upstream account attempt timed out"), ResponseHeaders: c.Writer.Header().Clone()}
+		}
+		if !(asyncImageGeneration && attemptTimedOut && result == nil) {
+		h.gatewayService.ReportImageAccountResult(accountForwardCtx, account.ID, err == nil && result != nil, err)
 		}
 		forwardDurationMs := time.Since(forwardStart).Milliseconds()
 		upstreamLatencyMs, _ := getContextInt64(c, service.OpsUpstreamLatencyMsKey)

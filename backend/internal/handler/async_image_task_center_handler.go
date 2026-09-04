@@ -252,6 +252,23 @@ func (h *AsyncImageTaskCenterHandler) globalStats(ctx context.Context, filter se
 	if finished > 0 {
 		stats.SuccessRate = float64(stats.Completed) / float64(finished) * 100
 	}
+	var totalDurationMS float64
+	var durationCount int64
+	for _, task := range pageTasks {
+		if task == nil || task.Status != service.AsyncImageTaskStatusSucceeded || task.FinishedAt == nil {
+			continue
+		}
+		duration := task.FinishedAt.Sub(task.SubmittedAt).Seconds() * 1000
+		if duration < 0 || math.IsNaN(duration) || math.IsInf(duration, 0) {
+			continue
+		}
+		totalDurationMS += duration
+		durationCount++
+	}
+	if durationCount > 0 {
+		averageDurationMS := totalDurationMS / float64(durationCount)
+		stats.AverageDurationMS = &averageDurationMS
+	}
 	return stats, nil
 }
 

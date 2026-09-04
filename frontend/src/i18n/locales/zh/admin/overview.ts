@@ -157,6 +157,10 @@ export default {
         asyncPublicBaseUrlHint: '任务查询 URL 用此域名。管理端已保存时以界面为准（上方站点/API 地址可补空）；config.yaml 的 async_image 仅在从未保存过管理端配置时生效。',
         autoArchiveToLibrary: '异步成功结果自动进入个人图库',
         autoArchiveToLibraryHint: '关闭后仍保存异步结果并返回图片地址，但不创建个人图库记录，也不会消耗图库逻辑字节配额。',
+        imageCircuitBreakerEnabled: '启用图片账号连续失败熔断',
+        imageCircuitBreakerHint: '同步或异步生图中，同一账号连续失败达到阈值后暂停调度；成功一次会清零连续失败次数。',
+        imageCircuitBreakerFailureThreshold: '连续失败阈值',
+        imageCircuitBreakerCooldownSeconds: '暂停调度时长（秒）',
         workerConcurrency: 'Worker 并发数',
         executionTimeoutSeconds: '任务执行超时（秒，默认 1200）',
         accountAttemptTimeoutSeconds: '单账号尝试超时（秒）',
@@ -1099,11 +1103,11 @@ export default {
         notConfigured: '未配置',
         accountPoolsTitle: '按清晰度账号池（可选）',
         accountPoolsHint:
-          '按 1K/2K/4K 可选绑定上游账号（多账号用逗号分隔，顺序即优先级）。某档留空则用分组默认账号池；该档账号全不可用时回退默认池；账号可独立绑定，不必先在默认池。',
+          '按 1K/2K/4K 可选绑定上游账号。多个账号用逗号分隔；未填写优先级时，输入顺序自动生成 1、2、3。相同优先级的账号会根据有效负载因子计算实时负载并进行均衡；不同优先级表示严格的优先级回退。清空某档位则使用分组默认账号池。',
         pool1k: '1K 账号',
         pool2k: '2K 账号',
         pool4k: '4K 账号',
-        poolPlaceholder: '例如：101, 102, 103'
+        poolPlaceholder: '例如：101, 102:1, 103:1'
       },
       videoPricing: {
         title: '视频生成计费',

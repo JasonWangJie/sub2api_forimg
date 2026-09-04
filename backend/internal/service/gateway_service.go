@@ -768,6 +768,19 @@ type GatewayService struct {
 	tlsFPProfileService   *TLSFingerprintProfileService
 	balanceNotifyService  *BalanceNotifyService
 	userPlatformQuotaRepo UserPlatformQuotaRepository
+	imageCircuitBreaker   ImageAccountCircuitBreaker
+}
+
+func (s *GatewayService) SetImageAccountCircuitBreaker(b ImageAccountCircuitBreaker) {
+	if s != nil {
+		s.imageCircuitBreaker = b
+	}
+}
+
+func (s *GatewayService) ReportImageAccountResult(ctx context.Context, accountID int64, success bool, err error) {
+	if s != nil {
+		ReportImageAccountResult(ctx, s.imageCircuitBreaker, accountID, success, err)
+	}
 }
 
 // NewGatewayService creates a new GatewayService

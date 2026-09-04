@@ -1285,7 +1285,7 @@ func (s *OpenAIGatewayService) listSchedulableAccounts(ctx context.Context, grou
 			}
 			filtered = append(filtered, forced[i])
 		}
-		filtered = s.filterOpenAIAccountsBySchedulingThreshold(ctx, filtered)
+		filtered = s.filterImageCircuitOpenAccounts(ctx, s.filterOpenAIAccountsBySchedulingThreshold(ctx, filtered))
 		if platform == PlatformGrok {
 			filtered = s.filterGrokFreeQuotaAccountsForOpenAI(ctx, filtered)
 		}
@@ -1297,7 +1297,7 @@ func (s *OpenAIGatewayService) listSchedulableAccounts(ctx context.Context, grou
 		if err != nil {
 			return accounts, err
 		}
-		accounts = s.filterOpenAIAccountsBySchedulingThreshold(ctx, accounts)
+		accounts = s.filterImageCircuitOpenAccounts(ctx, s.filterOpenAIAccountsBySchedulingThreshold(ctx, accounts))
 		if platform == PlatformGrok {
 			accounts = s.filterGrokFreeQuotaAccountsForOpenAI(ctx, accounts)
 		}
@@ -1315,7 +1315,7 @@ func (s *OpenAIGatewayService) listSchedulableAccounts(ctx context.Context, grou
 	if err != nil {
 		return nil, fmt.Errorf("query accounts failed: %w", err)
 	}
-	accounts = s.filterOpenAIAccountsBySchedulingThreshold(ctx, accounts)
+	accounts = s.filterImageCircuitOpenAccounts(ctx, s.filterOpenAIAccountsBySchedulingThreshold(ctx, accounts))
 	if platform == PlatformGrok {
 		accounts = s.filterGrokFreeQuotaAccountsForOpenAI(ctx, accounts)
 	}
@@ -1410,6 +1410,9 @@ func (s *OpenAIGatewayService) recheckSelectedOpenAIAccountFromDBBeforeProfit(ct
 		if s.isOpenAIAccountBlockedBySchedulingThreshold(ctx, account) {
 			return nil
 		}
+		if s.isImageCircuitOpen(ctx, account.ID) {
+			return nil
+		}
 		if !parentHealthyForShadow(account, s.parentAccountLookup(ctx)) {
 			return nil
 		}
@@ -1436,6 +1439,9 @@ func (s *OpenAIGatewayService) recheckSelectedOpenAIAccountFromDBBeforeProfit(ct
 		return nil
 	}
 	if s.isOpenAIAccountBlockedBySchedulingThreshold(ctx, latest) {
+		return nil
+	}
+	if s.isImageCircuitOpen(ctx, latest.ID) {
 		return nil
 	}
 	if s.isOpenAIProxyStreamQuarantined(ctx, latest) {
@@ -1476,6 +1482,11 @@ func (s *OpenAIGatewayService) getSchedulableAccount(ctx context.Context, accoun
 	if s.isOpenAIAccountBlockedBySchedulingThreshold(ctx, account) {
 		return nil, nil
 	}
+	if scope, ok := ImageCircuitScopeFromContext(ctx); ok && s.imageCircuitBreaker != nil {
+		if open, err := s.imageCircuitBreaker.IsOpen(ctx, account.ID, scope); err == nil && open {
+			return nil, nil
+		}
+	}
 	// Legacy sticky (advanced scheduler off) must still free-gate Grok OAuth.
 	if account.IsGrok() {
 		if gated := s.filterGrokFreeQuotaAccountsForOpenAI(ctx, []Account{*account}); len(gated) == 0 {
@@ -1507,6 +1518,30 @@ func (s *OpenAIGatewayService) filterOpenAIAccountsBySchedulingThreshold(ctx con
 		filtered = append(filtered, accounts[i])
 	}
 	return filtered
+}
+
+func (s *OpenAIGatewayService) filterImageCircuitOpenAccounts(ctx context.Context, accounts []Account) []Account {
+	scope, ok := ImageCircuitScopeFromContext(ctx)
+	if !ok || s == nil || s.imageCircuitBreaker == nil || len(accounts) == 0 {
+		return accounts
+	}
+	filtered := make([]Account, 0, len(accounts))
+	for i := range accounts {
+		open, err := s.imageCircuitBreaker.IsOpen(ctx, accounts[i].ID, scope)
+		if err != nil || !open {
+			filtered = append(filtered, accounts[i])
+		}
+	}
+	return filtered
+}
+
+func (s *OpenAIGatewayService) isImageCircuitOpen(ctx context.Context, accountID int64) bool {
+	scope, ok := ImageCircuitScopeFromContext(ctx)
+	if !ok || s == nil || s.imageCircuitBreaker == nil {
+		return false
+	}
+	open, err := s.imageCircuitBreaker.IsOpen(ctx, accountID, scope)
+	return err == nil && open
 }
 
 func (s *OpenAIGatewayService) isOpenAIAccountBlockedBySchedulingThreshold(ctx context.Context, account *Account) bool {

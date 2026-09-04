@@ -434,6 +434,7 @@ type OpenAIGatewayService struct {
 	balanceNotifyService  *BalanceNotifyService
 	settingService        *SettingService
 	userPlatformQuotaRepo UserPlatformQuotaRepository
+	imageCircuitBreaker   ImageAccountCircuitBreaker
 	liveAttestation       liveattestation.Provider
 	liveAttestationCipher SecretEncryptor
 
@@ -467,6 +468,18 @@ type OpenAIGatewayService struct {
 	codexModelsManifestCache            codexModelsManifestCache
 	openaiCompatSessionResponses        sync.Map
 	openaiCompatAnthropicDigestSessions sync.Map
+}
+
+func (s *OpenAIGatewayService) SetImageAccountCircuitBreaker(b ImageAccountCircuitBreaker) {
+	if s != nil {
+		s.imageCircuitBreaker = b
+	}
+}
+
+func (s *OpenAIGatewayService) ReportImageAccountResult(ctx context.Context, accountID int64, success bool, err error) {
+	if s != nil {
+		ReportImageAccountResult(ctx, s.imageCircuitBreaker, accountID, success, err)
+	}
 }
 
 // NewOpenAIGatewayService creates a new OpenAIGatewayService

@@ -458,7 +458,14 @@ func (s *defaultOpenAIAccountScheduler) selectBySessionHash(
 	req OpenAIAccountScheduleRequest,
 ) (*AccountSelectionResult, bool, error) {
 	sessionHash := strings.TrimSpace(req.SessionHash)
-	if sessionHash == "" || s == nil || s.service == nil || s.service.cache == nil {
+	if sessionHash == "" || s == nil || s.service == nil {
+		return nil, false, nil
+	}
+	// A durable async-image retry can supply the selected account directly.
+	// That retry must remain sticky even when the shared sticky-session cache
+	// is disabled or temporarily unavailable. Ordinary session lookup still
+	// requires the cache below.
+	if req.StickyAccountID <= 0 && s.service.cache == nil {
 		return nil, false, nil
 	}
 
@@ -2257,7 +2264,12 @@ func (s *OpenAIGatewayService) selectAccountWithSchedulerOnce(
 	}
 
 	var stickyAccountID int64
-	if sessionHash != "" && s.cache != nil {
+	if prefetched := prefetchedStickyAccountIDFromContext(ctx, groupID); prefetched > 0 {
+		// Durable image retries carry the last selected account in request
+		// metadata. Prefer it over a cache lookup so same-account retries remain
+		// deterministic even when the sticky-session cache is cold or disabled.
+		stickyAccountID = prefetched
+	} else if sessionHash != "" && s.cache != nil {
 		if accountID, err := s.getStickySessionAccountID(ctx, groupID, sessionHash); err == nil && accountID > 0 {
 			stickyAccountID = accountID
 		}

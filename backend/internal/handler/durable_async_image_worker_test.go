@@ -52,6 +52,94 @@ func TestAsyncImageRecentFailedAccountIDsCountsUniqueAccounts(t *testing.T) {
 	}, ids)
 }
 
+func TestAsyncImageReferenceRetryKeepsAccountThenAllowsOneSwitch(t *testing.T) {
+	cfg := testAsyncImageRetryConfig()
+	referenceMessage := "reference image fetch failed; upstream image_url fetch failed: curl: (28) Connection timed out"
+	makeTask := func(retryCount int, attempts string) *service.AsyncImageTask {
+		return &service.AsyncImageTask{
+			RequestType:         service.AsyncImageRequestTypeImageToImage,
+			RetryCount:          retryCount,
+			ReferenceRetryCount: retryCount,
+			AccountAttempts:     json.RawMessage(attempts),
+		}
+	}
+
+	oneFailure := makeTask(1, `[{"account_id":11,"status":"failed","error":"`+referenceMessage+`"}]`)
+	state := asyncImageReferenceAccountRetryState(oneFailure)
+	require.Equal(t, int64(11), state.sameAccountID)
+	require.Equal(t, 1, state.sameAccountFailures)
+	require.False(t, asyncImageReferenceAccountSwitchRetryAllowed(oneFailure, cfg))
+	require.NotContains(t, asyncImageReferenceRetryExcludedAccountIDs(oneFailure, cfg), int64(11))
+
+	twoFailures := makeTask(2, `[{"account_id":11,"status":"failed","error":"`+referenceMessage+`"},{"account_id":11,"status":"failed","error":"`+referenceMessage+`"}]`)
+	require.False(t, asyncImageReferenceAccountSwitchRetryAllowed(twoFailures, cfg))
+	require.NotContains(t, asyncImageReferenceRetryExcludedAccountIDs(twoFailures, cfg), int64(11))
+	require.True(t, shouldRetryAsyncImageUpstreamReferenceFetch(twoFailures, cfg, http.StatusBadRequest, referenceMessage))
+
+	threeFailures := makeTask(2, `[{"account_id":11,"status":"failed","error":"`+referenceMessage+`"},{"account_id":11,"status":"failed","error":"`+referenceMessage+`"},{"account_id":11,"status":"failed","error":"`+referenceMessage+`"}]`)
+	require.True(t, asyncImageReferenceAccountSwitchRetryAllowed(threeFailures, cfg))
+	require.Contains(t, asyncImageReferenceRetryExcludedAccountIDs(threeFailures, cfg), int64(11))
+	require.True(t, shouldRetryAsyncImageUpstreamReferenceFetch(threeFailures, cfg, http.StatusBadRequest, referenceMessage))
+
+	secondAccount := makeTask(3, `[{"account_id":11,"status":"failed","error":"`+referenceMessage+`"},{"account_id":11,"status":"failed","error":"`+referenceMessage+`"},{"account_id":11,"status":"failed","error":"`+referenceMessage+`"},{"account_id":12,"status":"failed","error":"`+referenceMessage+`"}]`)
+	require.False(t, asyncImageReferenceAccountSwitchRetryAllowed(secondAccount, cfg))
+	require.False(t, shouldRetryAsyncImageUpstreamReferenceFetch(secondAccount, cfg, http.StatusBadRequest, referenceMessage))
+}
+
+func TestAsyncImageReferenceRetryMergesCurrentInvocationAndStopsAfterSecondAccount(t *testing.T) {
+	cfg := testAsyncImageRetryConfig()
+	message := "上游生图失败（HTTP 400）：image_url fetch failed: curl: (28) Connection timed out"
+	task := &service.AsyncImageTask{
+		RequestType: service.AsyncImageRequestTypeImageToImage,
+	}
+
+	// The durable transition after each retry persists the capture. Simulate
+	// those transitions here to verify the exact A/A/A/B request sequence.
+	makeFailureContext := func(accountID int64) (*service.AsyncImageAccountAttemptCapture, context.Context) {
+		capture := &service.AsyncImageAccountAttemptCapture{}
+		ctx := service.WithAsyncImageAccountAttemptCapture(context.Background(), capture)
+		service.RecordAsyncImageAccountAttempt(ctx, service.AsyncImageAccountAttempt{
+			AccountID: accountID, Status: service.AsyncImageAccountAttemptSelected,
+		})
+		recordAsyncImageReferenceFetchFailure(ctx, message)
+		return capture, ctx
+	}
+	for i := 0; i < 3; i++ {
+		capture, ctx := makeFailureContext(11)
+		require.True(t, shouldRetryAsyncImageUpstreamReferenceFetchWithContext(ctx, task, cfg, http.StatusBadRequest, message))
+		merged, ids := service.MergeAsyncImageAccountAttempts(task.AccountAttempts, capture.Attempts())
+		task.AccountAttempts, task.AttemptedAccountIDs = merged, ids
+		task.RetryCount++
+		task.ReferenceRetryCount++
+	}
+	require.True(t, asyncImageReferenceAccountSwitchRetryAllowed(task, cfg))
+	require.Contains(t, asyncImageReferenceRetryExcludedAccountIDs(task, cfg), int64(11))
+
+	capture, ctx := makeFailureContext(12)
+	require.False(t, shouldRetryAsyncImageUpstreamReferenceFetchWithContext(ctx, task, cfg, http.StatusBadRequest, message),
+		"a second failed account must terminate the task instead of selecting a third account")
+	merged, ids := service.MergeAsyncImageAccountAttempts(task.AccountAttempts, capture.Attempts())
+	task.AccountAttempts, task.AttemptedAccountIDs = merged, ids
+	state := asyncImageReferenceAccountRetryStateWithContext(task, ctx)
+	require.Equal(t, map[int64]struct{}{11: {}, 12: {}}, state.failedAccountIDs)
+}
+
+func TestRecordAsyncImageReferenceFetchFailureUsesSelectedAccount(t *testing.T) {
+	capture := &service.AsyncImageAccountAttemptCapture{}
+	ctx := service.WithAsyncImageAccountAttemptCapture(context.Background(), capture)
+	service.RecordAsyncImageAccountAttempt(ctx, service.AsyncImageAccountAttempt{
+		AccountID: 42, AccountName: "account-42", Status: service.AsyncImageAccountAttemptSelected,
+	})
+	recordAsyncImageReferenceFetchFailure(ctx, "reference image fetch failed: image_url fetch failed: curl: (28)")
+	attempts := capture.Attempts()
+	require.Len(t, attempts, 2)
+	require.Equal(t, service.AsyncImageAccountAttemptFailed, attempts[1].Status)
+	require.Equal(t, int64(42), attempts[1].AccountID)
+
+	recordAsyncImageReferenceFetchFailure(ctx, "reference image fetch failed: image_url fetch failed: curl: (28)")
+	require.Len(t, capture.Attempts(), 2, "a handler-recorded reference failure must not be duplicated")
+}
+
 func TestAsyncImageExplicitReferenceFetchFailure(t *testing.T) {
 	msg := "上游生图失败（HTTP 400）：image_url fetch failed: Failed to perform, curl: (28) Connection timed out after 60002 milliseconds. See https://cdn.example/a.png first for more details."
 	require.True(t, isAsyncImageExplicitReferenceFetchFailure(msg))

@@ -264,6 +264,14 @@ func TestIsImageGenerationIntentMap_NamespaceImageGen(t *testing.T) {
 	}
 }
 
+func TestGeminiImageStickySessionRequired(t *testing.T) {
+	require.True(t, GeminiImageStickySessionRequired(false, []byte(`{"contents":[]}`)))
+	require.False(t, GeminiImageStickySessionRequired(true, []byte(`{"contents":[]}`)))
+	require.True(t, GeminiImageStickySessionRequired(true, []byte(`{"thoughtSignature":"sig"}`)))
+	require.False(t, IsGeminiThoughtSignaturePresent([]byte(`{"contents":[]}`)))
+	require.True(t, IsGeminiThoughtSignaturePresent([]byte(`{"parts":[{"thoughtSignature":"sig"}]}`)))
+}
+
 func TestResolveOpenAIResponsesImageBillingConfigUsesCurrentBodyModel(t *testing.T) {
 	imageModel, imageSize, err := resolveOpenAIResponsesImageBillingConfigFromBody(
 		[]byte(`{"model":"mapped-image-model","tools":[{"type":"image_generation","size":"1024x1024"}]}`),

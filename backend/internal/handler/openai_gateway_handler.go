@@ -367,6 +367,7 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 	}
 	var imageReleaseFunc func()
 	if imageIntent {
+		c.Request = c.Request.WithContext(service.WithOpenAIImageGenerationIntent(c.Request.Context()))
 		var imageAcquired bool
 		imageReleaseFunc, imageAcquired = h.acquireImageGenerationSlot(c, streamStarted)
 		if !imageAcquired {
@@ -421,10 +422,20 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 
 	// Generate session hash (header first; fallback to prompt_cache_key)
 	sessionHash := h.gatewayService.GenerateSessionHash(c, sessionHashBody)
+	if imageIntent {
+		// Image generations should be scheduled afresh from the configured pool.
+		sessionHash = ""
+	}
 	if h.rejectIfCyberSessionBlocked(c, apiKey, sessionHashBody, reqModel, cyberBlockFormatResponses) {
 		return
 	}
 	requireCompact := isOpenAIRemoteCompactPath(c)
+	selectionPreviousResponseID := previousResponseID
+	if imageIntent {
+		// Do not let a previous response hard-pin an image generation to the
+		// account that produced it; image requests use pool scheduling instead.
+		selectionPreviousResponseID = ""
+	}
 
 	maxAccountSwitches := h.maxAccountSwitches
 	switchCount := 0
@@ -462,7 +473,7 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 		selection, scheduleDecision, err := h.gatewayService.SelectAccountWithSchedulerForCapability(
 			c.Request.Context(),
 			apiKey.GroupID,
-			previousResponseID,
+			selectionPreviousResponseID,
 			sessionHash,
 			reqModel,
 			failedAccountIDs,
@@ -523,7 +534,9 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 			zap.Float64("load_skew", scheduleDecision.LoadSkew),
 		)
 		account := selection.Account
-		sessionHash = ensureOpenAIPoolModeSessionHash(sessionHash, account)
+		if !imageIntent {
+			sessionHash = ensureOpenAIPoolModeSessionHash(sessionHash, account)
+		}
 		reqLog.Debug("openai.account_selected", zap.Int64("account_id", account.ID), zap.String("account_name", account.Name))
 		setOpsSelectedAccount(c, account.ID, account.Platform)
 
@@ -559,6 +572,9 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 			}()
 			return h.gatewayService.Forward(c.Request.Context(), c, account, attemptBody)
 		}()
+		if imageIntent {
+			h.gatewayService.ReportImageAccountResult(c.Request.Context(), account.ID, err == nil && result != nil, err)
+		}
 		cyberBlockKeyHTTP := ""
 		if service.GetOpsCyberPolicy(c) != nil {
 			cyberBlockKeyHTTP = service.CyberSessionBlockKey(apiKey.ID, c, sessionHashBody)
@@ -1814,6 +1830,15 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 		firstMessage,
 		openAIWSIngressFallbackSessionSeed(subject.UserID, apiKey.ID, apiKey.GroupID),
 	)
+	if imageIntent {
+		c.Request = c.Request.WithContext(service.WithOpenAIImageGenerationIntent(c.Request.Context()))
+		// Image generations do not need connection-level account affinity.
+		sessionHash = ""
+	}
+	selectionPreviousResponseID := previousResponseID
+	if imageIntent {
+		selectionPreviousResponseID = ""
+	}
 	maxAccountSwitches := h.maxAccountSwitches
 	switchCount := 0
 	profitVetoCount := 0
@@ -1883,7 +1908,7 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 		selection, scheduleDecision, err := h.gatewayService.SelectAccountWithSchedulerForCapability(
 			ctx,
 			apiKey.GroupID,
-			previousResponseID,
+			selectionPreviousResponseID,
 			sessionHash,
 			reqModel,
 			failedAccountIDs,

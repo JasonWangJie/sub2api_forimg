@@ -140,6 +140,9 @@ export interface AsyncImageRuntimeConfig {
   openai_reference_transport_mode: 'passthrough' | 'local' | 'passthrough_fallback_local'
   gemini_reference_transport_mode: 'passthrough' | 'local' | 'passthrough_fallback_local'
   gemini_async_max_account_switches: number
+  image_circuit_breaker_enabled: boolean
+  image_circuit_breaker_failure_threshold: number
+  image_circuit_breaker_cooldown_seconds: number
   reference_fetch_max_retries: number
   reference_fetch_retry_base_seconds: number
   reference_fetch_retry_max_seconds: number

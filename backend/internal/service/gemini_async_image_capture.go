@@ -12,6 +12,23 @@ import (
 	"sync"
 )
 
+type geminiImageGenerationIntentContextKey struct{}
+
+func WithGeminiImageGenerationIntent(ctx context.Context) context.Context {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	return context.WithValue(ctx, geminiImageGenerationIntentContextKey{}, true)
+}
+
+func GeminiImageGenerationIntentFromContext(ctx context.Context) bool {
+	if ctx == nil {
+		return false
+	}
+	enabled, _ := ctx.Value(geminiImageGenerationIntentContextKey{}).(bool)
+	return enabled
+}
+
 type geminiAsyncImageCaptureContextKey struct{}
 type geminiAsyncImageGenerationContextKey struct{}
 type geminiHalfKCapabilityContextKey struct{}

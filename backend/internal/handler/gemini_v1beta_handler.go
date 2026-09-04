@@ -257,6 +257,11 @@ func (h *GatewayHandler) GeminiV1BetaModels(c *gin.Context) {
 	if !ensureImageGenerationGate(modelName) {
 		return
 	}
+	if imageIntent {
+		ctx := service.WithGeminiImageGenerationIntent(c.Request.Context())
+		c.Request = c.Request.WithContext(ctx)
+	}
+	geminiImageSticky := service.GeminiImageStickySessionRequired(imageIntent, body)
 
 	// Get subscription (may be nil)
 	subscription, _ := middleware.GetSubscriptionFromContext(c)
@@ -307,6 +312,11 @@ func (h *GatewayHandler) GeminiV1BetaModels(c *gin.Context) {
 		}
 		sessionHash = h.gatewayService.GenerateSessionHash(parsedReq)
 	}
+	if !geminiImageSticky {
+		// Stateless Gemini image generations should be scheduled from the pool on
+		// every request; signed follow-ups retain the session above.
+		sessionHash = ""
+	}
 	sessionKey := sessionHash
 	if sessionHash != "" {
 		sessionKey = "gemini:" + sessionHash
@@ -332,7 +342,7 @@ func (h *GatewayHandler) GeminiV1BetaModels(c *gin.Context) {
 	var geminiPrefixHash string
 	var geminiSessionUUID string
 	var matchedDigestChain string
-	useDigestFallback := sessionBoundAccountID == 0
+	useDigestFallback := geminiImageSticky && sessionBoundAccountID == 0
 
 	if useDigestFallback {
 		// 解析 Gemini 请求体
@@ -573,6 +583,13 @@ func (h *GatewayHandler) GeminiV1BetaModels(c *gin.Context) {
 			)
 		} else {
 			result, err = h.geminiCompatService.ForwardNative(requestCtx, c, account, modelName, action, stream, body)
+		}
+		if imageIntent && !(service.IsGeminiAsyncImageGeneration(requestCtx) && requestCtx.Err() != nil && c.Writer.Size() == 0) {
+			if account.Platform == service.PlatformGemini {
+				h.geminiCompatService.ReportImageAccountResult(requestCtx, account.ID, err == nil && result != nil, err)
+			} else {
+				h.gatewayService.ReportImageAccountResult(requestCtx, account.ID, err == nil && result != nil, err)
+			}
 		}
 		if accountReleaseFunc != nil {
 			accountReleaseFunc()

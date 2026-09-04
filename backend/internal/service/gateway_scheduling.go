@@ -986,7 +986,7 @@ func (s *GatewayService) listSchedulableAccounts(ctx context.Context, groupID *i
 			}
 			filtered = append(filtered, acc)
 		}
-		filtered = s.filterAccountsBySchedulingThreshold(ctx, filtered)
+		filtered = s.filterImageCircuitOpenAccounts(ctx, s.filterAccountsBySchedulingThreshold(ctx, filtered))
 		if platform == PlatformGrok || strings.EqualFold(platform, PlatformGrok) {
 			filtered = s.filterGrokFreeQuotaAccountsForGateway(ctx, filtered)
 		}
@@ -1016,7 +1016,7 @@ func (s *GatewayService) listSchedulableAccounts(ctx context.Context, groupID *i
 				}
 			}
 		}
-		return accounts, useMixed, err
+		return s.filterImageCircuitOpenAccounts(ctx, accounts), useMixed, err
 	}
 	useMixed := (platform == PlatformAnthropic || platform == PlatformGemini) && !hasForcePlatform
 	if useMixed {
@@ -1060,7 +1060,7 @@ func (s *GatewayService) listSchedulableAccounts(ctx context.Context, groupID *i
 					"tls_fingerprint", acc.IsTLSFingerprintEnabled())
 			}
 		}
-		return s.filterAccountsBySchedulingThreshold(ctx, filtered), useMixed, nil
+		return s.filterImageCircuitOpenAccounts(ctx, s.filterAccountsBySchedulingThreshold(ctx, filtered)), useMixed, nil
 	}
 
 	var accounts []Account
@@ -1095,11 +1095,26 @@ func (s *GatewayService) listSchedulableAccounts(ctx context.Context, groupID *i
 				"tls_fingerprint", acc.IsTLSFingerprintEnabled())
 		}
 	}
-	accounts = s.filterAccountsBySchedulingThreshold(ctx, accounts)
+	accounts = s.filterImageCircuitOpenAccounts(ctx, s.filterAccountsBySchedulingThreshold(ctx, accounts))
 	if platform == PlatformGrok || strings.EqualFold(platform, PlatformGrok) {
 		accounts = s.filterGrokFreeQuotaAccountsForGateway(ctx, accounts)
 	}
 	return accounts, useMixed, nil
+}
+
+func (s *GatewayService) filterImageCircuitOpenAccounts(ctx context.Context, accounts []Account) []Account {
+	scope, ok := ImageCircuitScopeFromContext(ctx)
+	if !ok || s == nil || s.imageCircuitBreaker == nil || len(accounts) == 0 {
+		return accounts
+	}
+	filtered := make([]Account, 0, len(accounts))
+	for i := range accounts {
+		open, err := s.imageCircuitBreaker.IsOpen(ctx, accounts[i].ID, scope)
+		if err != nil || !open {
+			filtered = append(filtered, accounts[i])
+		}
+	}
+	return filtered
 }
 
 // IsSingleAntigravityAccountGroup 检查指定分组是否只有一个 antigravity 平台的可调度账号。
@@ -1546,6 +1561,11 @@ func (s *GatewayService) getSchedulableAccount(ctx context.Context, accountID in
 	}
 	if s.isAccountBlockedBySchedulingThreshold(ctx, account) {
 		return nil, nil
+	}
+	if scope, ok := ImageCircuitScopeFromContext(ctx); ok && s.imageCircuitBreaker != nil {
+		if open, err := s.imageCircuitBreaker.IsOpen(ctx, account.ID, scope); err == nil && open {
+			return nil, nil
+		}
 	}
 	// Sticky / non-list selection must honor free soft-gate (same as listSchedulableAccounts).
 	if account.IsGrok() {

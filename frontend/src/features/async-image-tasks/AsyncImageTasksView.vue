@@ -20,6 +20,10 @@
               <span class="h-1.5 w-1.5 rounded-full bg-emerald-500"></span>
               {{ t('asyncImageTasks.summary.successRate', { rate: successRateLabel }) }}
             </span>
+            <span class="inline-flex items-center gap-1.5 rounded-md border border-sky-200 bg-sky-50 px-2.5 py-1.5 text-sky-700 dark:border-sky-900/70 dark:bg-sky-950/30 dark:text-sky-300">
+              <span class="h-1.5 w-1.5 rounded-full bg-sky-500"></span>
+              {{ t('asyncImageTasks.summary.averageDuration', { duration: averageDurationLabel }) }}
+            </span>
           </div>
           <div class="flex items-center gap-2">
             <AutoRefreshButton
@@ -109,7 +113,7 @@
           @sort="sort"
         >
           <template #cell-id="{ row }">
-            <div class="flex max-w-[300px] items-start gap-1.5">
+            <div class="flex items-start gap-1.5" :class="admin ? 'max-w-[220px]' : 'max-w-[300px]'">
               <div class="min-w-0 flex-1" :title="String(taskKey(row))">
                 <span class="block truncate font-mono text-xs font-semibold text-gray-900 dark:text-gray-100">
                   {{ taskKey(row) }}
@@ -171,20 +175,15 @@
           </template>
 
           <template #cell-status="{ row }">
-            <div class="min-w-[145px]">
+            <div :class="admin ? 'min-w-[112px]' : 'min-w-[145px]'">
               <span :class="statusBadgeClass(row.status)">
                 <span class="h-1.5 w-1.5 rounded-full" :class="statusDotClass(row.status)"></span>
                 {{ statusLabel(row.status) }}
               </span>
-              <div v-if="showProgress(row)" class="mt-2 h-1.5 w-full overflow-hidden rounded-full bg-gray-100 dark:bg-dark-700">
-                <div
-                  class="h-full rounded-full bg-primary-500 transition-[width] duration-300"
-                  :style="{ width: `${normalizedProgress(row)}%` }"
-                ></div>
-              </div>
               <p
                 v-if="row.error_message"
-                class="mt-1.5 max-w-[220px] truncate text-xs text-rose-500 dark:text-rose-400"
+                class="mt-1.5 truncate text-xs text-rose-500 dark:text-rose-400"
+                :class="admin ? 'max-w-[180px]' : 'max-w-[220px]'"
                 :title="row.error_message"
               >
                 {{ row.error_message }}
@@ -193,11 +192,23 @@
           </template>
 
           <template #cell-results="{ row }">
-            <div class="min-w-[120px] whitespace-nowrap">
+            <div class="whitespace-nowrap" :class="admin ? 'min-w-[96px]' : 'min-w-[120px]'">
               <div class="text-sm font-medium text-gray-800 dark:text-gray-200">
                 {{ resultCount(row) }} / {{ row.image_count ?? resultCount(row) }}
               </div>
               <div class="mt-0.5 text-xs text-gray-400">{{ providerLabel(row.storage_provider) }}</div>
+            </div>
+          </template>
+
+          <template v-if="admin" #cell-account="{ row }">
+            <div class="max-w-[140px]">
+              <div
+                class="truncate text-sm text-gray-800 dark:text-gray-200"
+                :title="row.account_name || idFallback(row.account_id)"
+              >
+                {{ row.account_name || idFallback(row.account_id) }}
+              </div>
+              <div v-if="row.account_id" class="mt-0.5 font-mono text-[11px] text-gray-400">#{{ row.account_id }}</div>
             </div>
           </template>
 
@@ -579,7 +590,7 @@ const filters = reactive({
   storage_provider: '',
   ...defaultAsyncImageTaskDateFilters(),
 })
-const stats = ref<AsyncImageTaskStats>({ active: 0, completed: 0, failed: 0, success_rate: 0 })
+const stats = ref<AsyncImageTaskStats>({ active: 0, completed: 0, failed: 0, success_rate: 0, average_duration_ms: null })
 const sortState = reactive({ sort_by: 'created_at', sort_order: 'desc' as 'asc' | 'desc' })
 let listController: AbortController | null = null
 let detailController: AbortController | null = null
@@ -590,15 +601,17 @@ const activeTaskCount = computed(() => stats.value.active)
 const completedTaskCount = computed(() => stats.value.completed)
 const attentionTaskCount = computed(() => stats.value.failed)
 const successRateLabel = computed(() => `${stats.value.success_rate.toFixed(1)}%`)
+const averageDurationLabel = computed(() => formatDuration(stats.value.average_duration_ms))
 
 const columns = computed<Column[]>(() => [
-  { key: 'id', label: t('asyncImageTasks.columns.taskId') },
+  { key: 'id', label: t('asyncImageTasks.columns.taskId'), class: admin.value ? 'w-[220px] max-w-[220px]' : undefined },
   { key: 'created_at', label: t('asyncImageTasks.columns.submittedAt'), sortable: true },
   { key: 'platform', label: t('asyncImageTasks.columns.platform') },
   { key: 'model', label: t('asyncImageTasks.columns.model') },
-  { key: 'status', label: t('common.status'), sortable: true },
-  { key: 'results', label: t('asyncImageTasks.columns.results') },
+  { key: 'status', label: t('common.status'), sortable: true, class: admin.value ? 'w-[112px] max-w-[112px]' : undefined },
+  { key: 'results', label: t('asyncImageTasks.columns.results'), class: admin.value ? 'w-[100px] max-w-[100px]' : undefined },
   ...(admin.value ? [{ key: 'owner', label: t('asyncImageTasks.columns.owner') }] : []),
+  ...(admin.value ? [{ key: 'account', label: t('asyncImageTasks.detail.account'), class: 'w-[140px] max-w-[140px]' }] : []),
   { key: 'cost', label: t('asyncImageTasks.columns.cost'), class: 'text-right' },
   { key: 'actions', label: t('common.actions'), class: 'text-right' },
 ])
@@ -735,20 +748,6 @@ function statusDotClass(status: string): string {
   return 'bg-rose-500'
 }
 
-function normalizedProgress(task: AsyncImageTask): number {
-  if (task.status === 'succeeded') return 100
-  if (typeof task.progress === 'number' && Number.isFinite(task.progress)) {
-    const value = task.progress <= 1 ? task.progress * 100 : task.progress
-    return Math.min(100, Math.max(0, Math.round(value)))
-  }
-  const fallback: Record<string, number> = { queued: 5, invoking: 30, upstream_succeeded: 60, uploading: 75, billing_pending: 90 }
-  return fallback[task.status] ?? 0
-}
-
-function showProgress(task: AsyncImageTask): boolean {
-  return inProgressStatuses.has(task.status)
-}
-
 function taskDuration(task: AsyncImageTask): number | null {
   if (typeof task.duration_ms === 'number' && task.duration_ms >= 0) return task.duration_ms
   const start = new Date(task.started_at || submittedAt(task)).getTime()
@@ -871,7 +870,7 @@ async function loadTasks(silent = false): Promise<void> {
     pagination.page = response.page
     pagination.page_size = response.page_size
     pagination.pages = response.pages
-    stats.value = response.stats || { active: 0, completed: 0, failed: 0, success_rate: 0 }
+    stats.value = response.stats || { active: 0, completed: 0, failed: 0, success_rate: 0, average_duration_ms: null }
     autoRefresh.resetCountdown()
   } catch (error) {
     const maybeAbort = error as { name?: string; code?: string }

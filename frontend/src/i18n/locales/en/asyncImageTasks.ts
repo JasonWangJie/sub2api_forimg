@@ -9,6 +9,7 @@ export default {
       completed: '{count} completed',
       attention: '{count} failed',
       successRate: '{rate} success rate',
+      averageDuration: '{duration} average duration',
     },
     filters: {
       search: 'Task, model, key, or user',

@@ -157,6 +157,10 @@ export default {
         asyncPublicBaseUrlHint: 'Used for task query URLs. After admin settings are saved, the UI wins (site/API URL can fill an empty value here); config.yaml async_image applies only when admin settings were never saved.',
         autoArchiveToLibrary: 'Automatically add successful async results to personal library',
         autoArchiveToLibraryHint: 'When disabled, results are still stored and returned by URL, but no personal-library record is created and library logical-byte quota is not consumed.',
+        imageCircuitBreakerEnabled: 'Enable consecutive-failure circuit breaker',
+        imageCircuitBreakerHint: 'Pause an account after consecutive sync or async image failures. One success resets the counter.',
+        imageCircuitBreakerFailureThreshold: 'Consecutive failure threshold',
+        imageCircuitBreakerCooldownSeconds: 'Scheduling pause (seconds)',
         workerConcurrency: 'Worker concurrency',
         executionTimeoutSeconds: 'Execution timeout (seconds, default 1200)',
         accountAttemptTimeoutSeconds: 'Per-account attempt timeout (seconds)',
@@ -1102,11 +1106,11 @@ export default {
         notConfigured: 'Not configured',
         accountPoolsTitle: 'Optional resolution account pools',
         accountPoolsHint:
-          'Optionally bind upstream accounts per 1K/2K/4K (comma-separated; order is priority). An empty tier uses the group default pool; if a configured tier has no available accounts it falls back to the default pool. Accounts may be bound independently without being in the default pool.',
+          'Optionally bind upstream accounts per 1K/2K/4K. When priorities are omitted, input order generates 1, 2, 3. Accounts with the same priority are balanced by effective load factor and current load; different priorities mean strict fallback order. An empty tier uses the group default pool.',
         pool1k: '1K accounts',
         pool2k: '2K accounts',
         pool4k: '4K accounts',
-        poolPlaceholder: 'e.g. 101, 102, 103'
+        poolPlaceholder: 'e.g. 101, 102:1, 103:1'
       },
       videoPricing: {
         title: 'Video Generation Pricing',

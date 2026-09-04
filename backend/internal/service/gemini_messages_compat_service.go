@@ -55,6 +55,19 @@ type GeminiMessagesCompatService struct {
 	antigravityGatewayService *AntigravityGatewayService
 	cfg                       *config.Config
 	responseHeaderFilter      *responseheaders.CompiledHeaderFilter
+	imageCircuitBreaker       ImageAccountCircuitBreaker
+}
+
+func (s *GeminiMessagesCompatService) SetImageAccountCircuitBreaker(b ImageAccountCircuitBreaker) {
+	if s != nil {
+		s.imageCircuitBreaker = b
+	}
+}
+
+func (s *GeminiMessagesCompatService) ReportImageAccountResult(ctx context.Context, accountID int64, success bool, err error) {
+	if s != nil {
+		ReportImageAccountResult(ctx, s.imageCircuitBreaker, accountID, success, err)
+	}
 }
 
 func (s *GeminiMessagesCompatService) readUpstreamErrorBody(resp *http.Response) []byte {
@@ -211,8 +224,13 @@ func (s *GeminiMessagesCompatService) tryStickySessionHit(
 	}
 
 	account, err := s.getSchedulableAccount(ctx, accountID)
-	if err != nil {
+	if err != nil || account == nil {
 		return nil
+	}
+	if scope, ok := ImageCircuitScopeFromContext(ctx); ok && s.imageCircuitBreaker != nil {
+		if open, err := s.imageCircuitBreaker.IsOpen(ctx, account.ID, scope); err == nil && open {
+			return nil
+		}
 	}
 
 	// 检查账号是否需要清理粘性会话
@@ -333,6 +351,11 @@ func (s *GeminiMessagesCompatService) selectBestGeminiAccount(
 
 	for i := range accounts {
 		acc := &accounts[i]
+		if scope, ok := ImageCircuitScopeFromContext(ctx); ok && s.imageCircuitBreaker != nil {
+			if open, err := s.imageCircuitBreaker.IsOpen(ctx, acc.ID, scope); err == nil && open {
+				continue
+			}
+		}
 
 		// 跳过被排除的账号
 		if _, excluded := excludedIDs[acc.ID]; excluded {

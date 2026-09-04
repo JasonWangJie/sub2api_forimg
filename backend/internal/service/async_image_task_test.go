@@ -11,15 +11,17 @@ import (
 
 type asyncImageTaskRepositoryStub struct {
 	AsyncImageTaskRepository
-	createParams     CreateAsyncImageTaskParams
-	createTask       *AsyncImageTask
-	createReused     bool
-	createErr        error
-	transitionParams AsyncImageTaskTransition
-	transitionTask   *AsyncImageTask
-	transitionErr    error
-	statusCounts     map[string]int64
-	statusCountsErr  error
+	createParams       CreateAsyncImageTaskParams
+	createTask         *AsyncImageTask
+	createReused       bool
+	createErr          error
+	transitionParams   AsyncImageTaskTransition
+	transitionTask     *AsyncImageTask
+	transitionErr      error
+	statusCounts       map[string]int64
+	statusCountsErr    error
+	averageDuration    *float64
+	averageDurationErr error
 }
 
 func (s *asyncImageTaskRepositoryStub) CreateAsyncImageTask(_ context.Context, params CreateAsyncImageTaskParams) (*AsyncImageTask, bool, error) {
@@ -36,6 +38,10 @@ func (s *asyncImageTaskRepositoryStub) CountAsyncImageTaskStatuses(context.Conte
 	return s.statusCounts, s.statusCountsErr
 }
 
+func (s *asyncImageTaskRepositoryStub) AverageCompletedAsyncImageTaskDuration(context.Context, AsyncImageTaskFilter) (*float64, error) {
+	return s.averageDuration, s.averageDurationErr
+}
+
 func TestAsyncImageTaskServiceStatsUseFilteredStatusCounts(t *testing.T) {
 	repo := &asyncImageTaskRepositoryStub{statusCounts: map[string]int64{
 		AsyncImageTaskStatusQueued: 2, AsyncImageTaskStatusSucceeded: 13,
@@ -49,6 +55,19 @@ func TestAsyncImageTaskServiceStatsUseFilteredStatusCounts(t *testing.T) {
 	require.Equal(t, int64(13), stats.Completed)
 	require.Equal(t, int64(7), stats.Failed)
 	require.InDelta(t, 65, stats.SuccessRate, 0.0001)
+}
+
+func TestAsyncImageTaskServiceStatsIncludesAverageCompletedDuration(t *testing.T) {
+	averageDuration := 2450.5
+	repo := &asyncImageTaskRepositoryStub{
+		statusCounts:    map[string]int64{AsyncImageTaskStatusSucceeded: 2},
+		averageDuration: &averageDuration,
+	}
+
+	stats, err := NewAsyncImageTaskService(repo).StatsForAdmin(context.Background(), AsyncImageTaskFilter{})
+	require.NoError(t, err)
+	require.NotNil(t, stats.AverageDurationMS)
+	require.InDelta(t, averageDuration, *stats.AverageDurationMS, 0.0001)
 }
 
 func TestAsyncImageTaskServiceCreateNormalizesAndDelegates(t *testing.T) {

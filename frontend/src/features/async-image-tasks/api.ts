@@ -98,11 +98,16 @@ function normalizeListResponse(
   const items = Array.isArray(data?.items) ? data.items.map((task) => normalizeTask(task)) : []
   const pageSize = Number(data?.page_size) || Number(params.page_size) || 20
   const total = Number(data?.total) || 0
+  const rawAverageDurationMS = data?.stats?.average_duration_ms
+  const averageDurationMS = rawAverageDurationMS == null ? null : Number(rawAverageDurationMS)
   const stats: AsyncImageTaskStats = {
     active: Number(data?.stats?.active) || 0,
     completed: Number(data?.stats?.completed) || 0,
     failed: Number(data?.stats?.failed) || 0,
     success_rate: Number(data?.stats?.success_rate) || 0,
+    average_duration_ms: averageDurationMS !== null && Number.isFinite(averageDurationMS) && averageDurationMS >= 0
+      ? averageDurationMS
+      : null,
   }
   return {
     items,
