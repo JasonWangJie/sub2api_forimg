@@ -83,6 +83,27 @@ describe('DataTable', () => {
     expect(nameHeader.findAll('svg')[1].classes()).toContain('text-primary-600')
   })
 
+  it('supports compact horizontal cell padding for dense tables', async () => {
+    const wrapper = mount(DataTable, {
+      props: {
+        columns: [
+          { key: 'task', label: 'Task' },
+          { key: 'status', label: 'Status' },
+          { key: 'account', label: 'Account' },
+          { key: 'cost', label: 'Cost' },
+          { key: 'actions', label: 'Actions' },
+        ],
+        data: [{ task: 'task-1', status: 'succeeded', account: 'account-a', cost: '$1', actions: '' }],
+        compact: true,
+      },
+    })
+
+    await wrapper.vm.$nextTick()
+
+    expect(wrapper.find('thead th').classes()).toContain('px-1')
+    expect(wrapper.find('tbody td').classes()).toContain('px-1')
+  })
+
   it('renders every row with no virtual padding spacer for small datasets (virtualization off)', async () => {
     const data = Array.from({ length: 8 }, (_, i) => ({ id: i + 1, name: `Row ${i + 1}` }))
     const wrapper = mount(DataTable, {

@@ -38,6 +38,16 @@ func TestAsyncImageTaskMigrationContainsDurabilityAndOwnershipConstraints(t *tes
 	}
 }
 
+func TestBuildAsyncImageTaskFilterSearchIncludesFinalAccountName(t *testing.T) {
+	where, args := buildAsyncImageTaskFilter(service.AsyncImageTaskFilter{Search: "prod-account"})
+
+	require.Contains(t, where, "task_id ILIKE $1")
+	require.Contains(t, where, "model ILIKE $1")
+	require.Contains(t, where, "COALESCE(prompt_preview, '') ILIKE $1")
+	require.Contains(t, where, "EXISTS (SELECT 1 FROM accounts AS a WHERE a.id = async_image_tasks.account_id AND (a.name ILIKE $1 OR CAST(a.id AS TEXT) ILIKE $1))")
+	require.Equal(t, []any{"%prod-account%"}, args)
+}
+
 func TestAsyncImageResultIntentMigrationAddsOutboxClaimOwnership(t *testing.T) {
 	content, err := migrations.FS.ReadFile("189_ZJ_async_image_result_upload_intents.sql")
 	require.NoError(t, err)

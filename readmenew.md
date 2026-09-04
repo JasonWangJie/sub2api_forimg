@@ -1,5 +1,17 @@
 # Sub2API Fork 二次开发总览
 
+## 2026-09-05 个人图库同步广场上传修复
+
+- 修复审核通过后点击“同步至图片广场”出现 `Network error. Please check your connection` 的问题：浏览器 `FormData` 上传不再手动覆盖 `Content-Type`，由 Axios 自动生成包含 boundary 的请求头；普通图库文件导入同步采用相同规则。
+- 新增 `imageLibrary` API 回归测试，覆盖同步上传字段、请求路径、multipart boundary 委托及导入幂等键。
+- 验证：前端 API/图库面板定向 Vitest `5/5`、`pnpm typecheck`、目标 ESLint、`pnpm build`，后端 Handler 全量测试及 Service 定向 Go 测试均通过；`git diff --check` 通过。构建保留既有 Browserslist、动态导入和大 chunk 警告。未执行真实浏览器、OSS/数据库/上游端到端验证，未部署或重启生产。
+
+## 2026-09-04 管理员异步任务搜索与列布局
+
+- `/admin/async-image-tasks` 搜索关键词现在支持任务号、模型、提示词、最终账号名称及最终账号 ID 的大小写不敏感模糊匹配；前端搜索提示同步说明最终账号范围。
+- 管理员列表的“用户 / 密钥 / 分组”列改为仅显示用户邮箱，用户列收窄为 `160px`；“最终账号”列扩展为 `200px`，继续显示账号名称和 ID。
+- 验证：前端全量 Vitest `239` 文件/`1623` 用例通过（异步 API `8/8`）、`pnpm typecheck`、目标 ESLint、`pnpm build`、后端 `go test ./internal/repository -count=1` 和 `go test ./internal/handler -count=1` 均通过；构建仅有既有 Browserslist/动态导入/大 chunk 警告。未部署或重启生产，未做真实数据库/上游端到端验证。
+
 ## 2026-08-31 生产卡住任务清理
 
 - 经用户明确授权，在 `108.186.246.14` PostgreSQL（近 7 天范围）筛选并结束 7 个 `invoking` 且执行/更新时间均超过 1 小时的任务。
@@ -38,8 +50,8 @@ codegraph init
 | 项目 | 当前记录 |
 |---|---|
 | 发布版本文件 | `backend/cmd/server/VERSION`（以仓库文件为准） |
-| 文档记录时 HEAD | `314fcc3c0055a3be0c652782b646e71ad75df808` |
-| HEAD 描述 | `v0.1.173.38-1-g314fcc3-dirty` |
+| 文档记录时 HEAD | `0ea8f5195ff64e6acecb3d131d68eac8553f203b` |
+| HEAD 描述 | `v0.1.173.40-dirty` |
 | 当前及后续默认分支 | `main` |
 | 已合并原作者主线 | 以 `git log` / `upstream/main` 实际为准 |
 | SC 上传安全迁移 | `backend/migrations/187_ZJ_async_image_upload_reservations.sql` |
@@ -424,3 +436,25 @@ pnpm run dev
 - 前端通过：账号池与异步任务 API 共 `11/11`、`pnpm typecheck`、目标 ESLint、`pnpm build`。构建仅保留既有 Browserslist、动态导入和大 chunk 警告。
 - 完整 `go test ./internal/service -count=1` 仍失败于既有 `TestEstimateOpenAIInputTokens_CompareWithOpenAIAPI`，三个子用例访问 `https://api.openai.com/v1/responses/input_tokens` 连接超时；账号池相关定向测试通过。
 - 未执行浏览器实机、真实上游账号、Redis/PostgreSQL/OSS、生产部署、重启或灰度验收；`git diff --check` 通过。
+
+## 2026-09-04 生产异步生图只读诊断
+
+- 已按用户授权只读检查 `root@108.186.246.14`：`sub2api` 服务 active，生产版本 `0.1.173.38`，commit `276f2240b80796a58cfb969a4c8b7f420a1310b9`；本轮未修改数据库、配置、文件，未部署或重启。
+- 实时快照中 `invoking` 数量约 2-6，`account_id IS NULL=0`、租约超时=0、超过 10 分钟=0，更新时间持续刷新；“正在调用上游但没有选定账号”属于页面展示误判，任务实际已有账号。
+- 日志中的 `reference_fetch_retry` 是上游拉取参考图 URL 超时（`curl (28)`，约 60 秒），不是本地账号为空。生产 commit 尚未包含本地 `v0.1.173.40` 的同账号两次重试后换号一次逻辑，因此生产仍可能连续使用同一账号。
+- 生产 commit 同样早于本地管理员列表账号列和顶部平均耗时前端改动，页面缺少这些字段不能反推数据库未选账号。
+- 本地 `A/A/A/B`、失败账号持久化、无 Redis sticky 缓存预取账号测试通过；前端账号池 `1:1,32:1` 回显/解析 round-trip 通过。生产修复仍待单独授权发布。
+
+## 2026-09-04 异步生图任务列表密度调整
+
+- `/admin/async-image-tasks` 管理端表格启用页面级紧凑横向内边距，减少各列之间的空白；未改变其他页面的 `DataTable` 默认间距。
+- 最终账号列由 140px 调整为 160px，保留账号名称与 ID 的截断展示；列表中的“手动结束为失败”改为仅显示 ban 图标，并保留 tooltip 与无障碍名称。
+- `DataTable` 新增 `compact` 属性及回归用例，异步任务列表管理员模式启用该属性；移动端卡片布局和详情弹窗不受影响。
+- 验证：前端全量 Vitest `239/239` 文件、`1623/1623` 用例通过；`pnpm typecheck`、目标 ESLint、`pnpm build` 和 `git diff --check` 通过。构建保留既有 Browserslist、动态导入和大 chunk 警告。
+- 当前仅完成本地代码与测试，未进行浏览器实机、真实上游/Redis/PostgreSQL/OSS、生产部署、重启或灰度验收。
+
+## 2026-09-04 分组清晰度账号池纵向布局
+
+- 分组生图编辑区域的 1K、2K、4K 账号池改为单列纵向排列，每个清晰度独占一行，避免在宽屏下挤在同一排。
+- 仅调整 `GroupsView.vue` 的展示类名，账号池输入格式、优先级解析、保存接口和其他图片定价字段保持不变。
+- 已通过分组图片账号池/图片定价/异步生图相关前端测试 `14/14`、`pnpm typecheck`、`GroupsView.vue` ESLint 和 `git diff --check`；未执行生产部署或重启。

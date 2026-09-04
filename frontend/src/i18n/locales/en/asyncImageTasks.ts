@@ -12,8 +12,8 @@ export default {
       averageDuration: '{duration} average duration',
     },
     filters: {
-      search: 'Task, model, key, or user',
-      searchPlaceholder: 'Search task ID or related context',
+      search: 'Task, model, prompt, or final account',
+      searchPlaceholder: 'Search task ID, model, prompt, or final account',
       startDate: 'Submitted after',
       endDate: 'Submitted before',
       allStatuses: 'All statuses',
@@ -29,7 +29,7 @@ export default {
       model: 'Model / Spec',
       results: 'Images / Storage',
       storage: 'Storage',
-      owner: 'User / Key / Group',
+      owner: 'User',
       cost: 'Actual cost',
     },
     requestType: {

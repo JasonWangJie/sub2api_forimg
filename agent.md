@@ -1,5 +1,20 @@
 # AI 交接文档
 
+## 2026-09-05 个人图库同步广场上传修复
+
+- `frontend/src/api/imageLibrary.ts` 的同步广场上传和普通图库文件导入不再手动设置 `Content-Type: multipart/form-data`；浏览器/Axios 会生成带 boundary 的请求头，避免 Go `ParseMultipartForm` 解析失败并被前端归一化为 Network error。
+- 回归测试位于 `frontend/src/api/__tests__/imageLibrary.spec.ts`，已验证 `file` 字段、同步 URL、未传手动 headers 以及导入幂等键。
+- 当前基线以命令为准：`git rev-parse HEAD=0ea8f5195ff64e6acecb3d131d68eac8553f203b`，`git describe=v0.1.173.40-dirty`，`VERSION=0.1.173.38`；保留工作树既有未提交改动。
+- 已通过前端定向 Vitest `5/5`、`pnpm typecheck`、目标 ESLint、`pnpm build`、后端 Handler 全量测试（37.030s）及 Service 定向测试，并通过 `git diff --check`。未做真实浏览器或外部存储端到端验证，未部署/重启生产。
+
+## 2026-09-04 管理员异步任务搜索与列布局
+
+- 当前工作树在 `main`，HEAD `0ea8f5195ff64e6acecb3d131d68eac8553f203b`，`git describe`=`v0.1.173.40-dirty`，`backend/cmd/server/VERSION`=`0.1.173.38`；保留既有未提交改动。
+- `/admin/async-image-tasks` 的 `q` 搜索后端现在匹配任务号、模型、提示词、`accounts.name` 及账号 ID，使用同一个 `%...%` 参数实现大小写不敏感模糊搜索；前端搜索提示已同步。
+- 管理员列表 owner 列只渲染 `user_email`，列宽 `160px`；最终账号列宽 `200px`，保留名称与 `#ID`。
+- 本轮验证已通过：前端全量 Vitest `239` 文件/`1623` 用例（异步 API `8/8`）、`pnpm typecheck`、目标 ESLint、`pnpm build`、Repository 全量测试、Handler 全包测试、`git diff --check`。构建警告为既有提示。
+- 运行边界：未连接真实 PostgreSQL/上游/Redis/OSS，未部署或重启生产，Fork CI 未运行；后续如需验收应在隔离环境验证账号名称/ID 搜索和长邮箱截断。
+
 ## 2026-08-31 生产清理结果
 
 - 用户已明确授权连接 `108.186.246.14` 并清理近几天卡住任务。已在 PostgreSQL `sub2api` 单事务结束 7 个超过 1 小时的 `invoking` 任务。
@@ -232,3 +247,27 @@ Get-Content backend\cmd\server\VERSION
 - 未保存管理端配置时，`async_image.image_circuit_breaker_enabled`、`async_image.image_circuit_breaker_failure_threshold`、`async_image.image_circuit_breaker_cooldown_seconds` 可作为 `config.yaml`/环境变量回退；已在 `asyncRuntimeFromConfig` 增加映射并补同步/异步调度过滤测试。
 - Gateway 旧式 sticky lookup 也会检查 `ImageAccountCircuitBreaker`，因此图片请求不会因已有会话绑定而绕过冷却；相关回归测试位于 `backend/internal/service/image_account_circuit_breaker_scheduling_test.go`。
 - 上线前在隔离环境验证两账号切换、冷却恢复、成功清零、Redis TTL 和无可用账号响应；未执行生产部署或真实外部链路。
+
+## 2026-09-04 当前交接：生产卡住任务只读诊断
+
+- 已按用户授权只读检查 `108.186.246.14`：`sub2api` active，生产版本 `0.1.173.38`，commit `276f2240b80796a58cfb969a4c8b7f420a1310b9`。实时 `invoking` 约 2-6，`account_id IS NULL=0`、租约超时=0、超过 10 分钟=0，更新时间持续刷新；当前没有证据表明 Worker 卡死或没有选定账号。
+- 日志中的 `reference_fetch_retry` 原因是上游抓取参考图 URL 的 `curl (28)` 约 60 秒连接超时。生产版本未包含本地 `v0.1.173.40` 的 A/A/A/B 策略，因此同账号重试两次后换号一次尚未在生产生效。
+- 生产版本也早于本地管理员账号列和顶部平均耗时前端改动，页面缺少字段不能据此判断任务没有账号。
+- 本地验证已通过：Handler/Repository 定向测试，Service 重试相关测试，前端账号池与异步任务 API `11/11`。完整 Service 包仍被既有外部 OpenAI token 对比用例网络超时阻断。
+- 账号池输入 `1:1,32:1` 在本地保存后回显为 `1:1, 32:1`；相同 priority 合法并按同优先级负载均衡。生产未修改配置，需另行授权构建/发布/重启后观察。
+- 当前基线：HEAD `0ea8f5195ff64e6acecb3d131d68eac8553f203b`，`git describe`=`v0.1.173.40-dirty`，VERSION=`0.1.173.38`；工作树含本轮三份文档修改，分支落后 `origin/main` 1 个提交。
+
+## 2026-09-04 当前交接：异步生图任务列表密度调整
+
+- 管理端 `/admin/async-image-tasks` 通过 `DataTable` 的页面级 `compact` 属性使用 `px-1` 横向单元格内边距；该属性默认关闭，不影响其他表格。
+- 最终账号列宽统一为 `w-[160px] max-w-[160px]`，列表容器同步为 `max-w-[160px]`；“手动结束为失败”列表操作仅渲染 ban 图标，`title`/`aria-label` 仍使用 `asyncImageTasks.terminate.action`，详情弹窗确认按钮保持文字。
+- 新增 `frontend/src/components/common/__tests__/DataTable.spec.ts` 紧凑内边距回归用例。前端全量 `pnpm test:run` 为 239 个文件、1623 个用例全通过；`pnpm typecheck`、目标 ESLint、`pnpm build`、`git diff --check` 通过。
+- 构建警告仍为既有 Browserslist、动态导入和大 chunk；未执行浏览器实机或真实 Redis/PostgreSQL/OSS/上游链路，未部署或重启生产。
+- 当前基线：HEAD `0ea8f5195ff64e6acecb3d131d68eac8553f203b`，`git describe --tags --always --dirty`=`v0.1.173.40-dirty`，VERSION=`0.1.173.38`；分支 `main`，相对 `origin/main` 落后 1 个提交，工作树保留既有未提交改动。
+
+## 2026-09-04 当前交接：分组清晰度账号池纵向布局
+
+- `frontend/src/views/admin/GroupsView.vue` 中“按清晰度账号池”编辑区域已移除 `md:grid-cols-3`，固定为 `grid grid-cols-1 gap-3`；1K、2K、4K 现在各占一行。
+- 本次只改布局，不改 `editImageSizePoolDraft`、`parseImageSizePoolInput`、`toImageSizePoolPayload` 或后端账号池接口；保存后的账号 ID/priority 行为保持不变。
+- 验证已通过：分组图片账号池/图片定价/异步生图测试 `14/14`、`pnpm typecheck`、`pnpm eslint src/views/admin/GroupsView.vue`、`git diff --check`。
+- 当前基线：HEAD `0ea8f5195ff64e6acecb3d131d68eac8553f203b`，`git describe --tags --always --dirty`=`v0.1.173.40-dirty`，VERSION=`0.1.173.38`；分支 `main`，相对 `origin/main` 落后 1 个提交；未部署或重启生产。

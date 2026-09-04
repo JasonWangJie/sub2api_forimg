@@ -105,6 +105,7 @@
           :columns="columns"
           :data="tasks"
           :loading="loading"
+          :compact="admin"
           :row-key="taskKey"
           server-side-sort
           default-sort-key="created_at"
@@ -201,7 +202,7 @@
           </template>
 
           <template v-if="admin" #cell-account="{ row }">
-            <div class="max-w-[140px]">
+            <div class="max-w-[200px]">
               <div
                 class="truncate text-sm text-gray-800 dark:text-gray-200"
                 :title="row.account_name || idFallback(row.account_id)"
@@ -213,11 +214,8 @@
           </template>
 
           <template v-if="admin" #cell-owner="{ row }">
-            <div class="max-w-[220px]">
+            <div class="max-w-[160px]">
               <div class="truncate text-sm text-gray-800 dark:text-gray-200" :title="row.user_email || ''">{{ row.user_email || '-' }}</div>
-              <div class="mt-0.5 truncate text-xs text-gray-400" :title="row.api_key_name || ''">
-                {{ row.api_key_name || '-' }}<span v-if="row.group_name"> · {{ row.group_name }}</span>
-              </div>
             </div>
           </template>
 
@@ -245,11 +243,12 @@
               <button
                 v-if="admin && canTerminate(row)"
                 type="button"
-                class="inline-flex items-center gap-1 text-sm font-medium text-rose-600 hover:text-rose-700 dark:text-rose-400"
+                class="inline-flex h-8 w-8 items-center justify-center rounded-md text-rose-600 hover:bg-rose-50 hover:text-rose-700 dark:text-rose-400 dark:hover:bg-rose-950/30"
+                :title="t('asyncImageTasks.terminate.action')"
+                :aria-label="t('asyncImageTasks.terminate.action')"
                 @click="askTerminate(row)"
               >
                 <Icon name="ban" size="sm" />
-                {{ t('asyncImageTasks.terminate.action') }}
               </button>
             </div>
           </template>
@@ -610,8 +609,8 @@ const columns = computed<Column[]>(() => [
   { key: 'model', label: t('asyncImageTasks.columns.model') },
   { key: 'status', label: t('common.status'), sortable: true, class: admin.value ? 'w-[112px] max-w-[112px]' : undefined },
   { key: 'results', label: t('asyncImageTasks.columns.results'), class: admin.value ? 'w-[100px] max-w-[100px]' : undefined },
-  ...(admin.value ? [{ key: 'owner', label: t('asyncImageTasks.columns.owner') }] : []),
-  ...(admin.value ? [{ key: 'account', label: t('asyncImageTasks.detail.account'), class: 'w-[140px] max-w-[140px]' }] : []),
+  ...(admin.value ? [{ key: 'owner', label: t('asyncImageTasks.columns.owner'), class: 'w-[160px] max-w-[160px]' }] : []),
+  ...(admin.value ? [{ key: 'account', label: t('asyncImageTasks.detail.account'), class: 'w-[200px] max-w-[200px]' }] : []),
   { key: 'cost', label: t('asyncImageTasks.columns.cost'), class: 'text-right' },
   { key: 'actions', label: t('common.actions'), class: 'text-right' },
 ])

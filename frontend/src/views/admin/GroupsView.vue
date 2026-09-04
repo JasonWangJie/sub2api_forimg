@@ -2724,7 +2724,7 @@
             <p class="mt-2 text-xs text-gray-500 dark:text-gray-400">
               {{ t("admin.groups.imagePricing.accountPoolsHint") }}
             </p>
-            <div class="mt-3 grid grid-cols-1 gap-3 md:grid-cols-3">
+            <div class="mt-3 grid grid-cols-1 gap-3">
               <div v-for="tier in imageSizePoolTier" :key="tier">
                 <label class="input-label">{{
                   t(

@@ -90,7 +90,7 @@ export async function importImageFile(
     if (value != null && value !== '') form.append(key, typeof value === 'string' ? value : JSON.stringify(value))
   })
   const { data } = await apiClient.post<ImageLibraryItem>('/user/image-library/import', form, {
-    headers: { 'Content-Type': 'multipart/form-data', 'Idempotency-Key': idempotencyKey },
+    headers: { 'Idempotency-Key': idempotencyKey },
   })
   return normalizeLibraryItem((data as any)?.item || data)
 }
@@ -202,7 +202,6 @@ export async function syncPlazaSubmissionRequest(
   const { data } = await apiClient.post<{ item: ImagePlazaSubmissionRequest; library_item: ImageLibraryItem }>(
     `/user/image-library/submission-requests/${encodeURIComponent(requestId)}/sync`,
     form,
-    { headers: { 'Content-Type': 'multipart/form-data' } },
   )
   return {
     item: data.item,

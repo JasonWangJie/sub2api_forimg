@@ -471,6 +471,8 @@ interface Props {
   selectedKeys?: Array<string | number>
   /** Accessible label for a row selection checkbox. */
   selectionLabel?: string | ((row: any) => string)
+  /** Use tighter horizontal cell padding for dense operational tables. */
+  compact?: boolean
 }
 
 const props = withDefaults(defineProps<Props>(), {
@@ -481,6 +483,7 @@ const props = withDefaults(defineProps<Props>(), {
   defaultSortOrder: 'asc',
   serverSideSort: false,
   selectable: false,
+  compact: false,
   selectedKeys: () => []
 })
 
@@ -882,6 +885,8 @@ const getStickyColumnClass = (column: Column, index: number) => {
 
 // 根据列数自适应调整内边距
 const getAdaptivePaddingClass = () => {
+  if (props.compact) return 'px-1'
+
   const columnCount = props.columns.length
 
   // 列数越多，内边距越小

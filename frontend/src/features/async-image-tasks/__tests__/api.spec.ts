@@ -19,9 +19,9 @@ describe('async image task API', () => {
       params: { page: 1, page_size: 20 },
     }))
 
-    await asyncImageTasksAPI.admin.list({ page: 2, page_size: 50 })
+    await asyncImageTasksAPI.admin.list({ page: 2, page_size: 50, q: 'final-account' })
     expect(client.get).toHaveBeenLastCalledWith('/admin/async-image-tasks', expect.objectContaining({
-      params: { page: 2, page_size: 50 },
+      params: { page: 2, page_size: 50, q: 'final-account' },
     }))
   })
 

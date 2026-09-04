@@ -255,7 +255,7 @@ func buildAsyncImageTaskFilter(filter service.AsyncImageTaskFilter) (string, []a
 	if filter.Search != "" {
 		args = append(args, "%"+filter.Search+"%")
 		placeholder := "$" + strconv.Itoa(len(args))
-		clauses = append(clauses, "(task_id ILIKE "+placeholder+" OR model ILIKE "+placeholder+" OR COALESCE(prompt_preview, '') ILIKE "+placeholder+")")
+		clauses = append(clauses, "(task_id ILIKE "+placeholder+" OR model ILIKE "+placeholder+" OR COALESCE(prompt_preview, '') ILIKE "+placeholder+" OR EXISTS (SELECT 1 FROM accounts AS a WHERE a.id = async_image_tasks.account_id AND (a.name ILIKE "+placeholder+" OR CAST(a.id AS TEXT) ILIKE "+placeholder+")))")
 	}
 	if filter.StorageProvider != "" {
 		args = append(args, filter.StorageProvider)

@@ -12,8 +12,8 @@ export default {
       averageDuration: '平均耗时 {duration}',
     },
     filters: {
-      search: '任务、模型、密钥或用户',
-      searchPlaceholder: '搜索任务号或关联信息',
+      search: '任务、模型、提示词或最终账号',
+      searchPlaceholder: '搜索任务号、模型、提示词或最终账号',
       startDate: '提交开始日期',
       endDate: '提交结束日期',
       allStatuses: '全部状态',
@@ -29,7 +29,7 @@ export default {
       model: '模型 / 规格',
       results: '图片 / 存储',
       storage: '存储厂商',
-      owner: '用户 / 密钥 / 分组',
+      owner: '用户',
       cost: '实际费用',
     },
     requestType: {
