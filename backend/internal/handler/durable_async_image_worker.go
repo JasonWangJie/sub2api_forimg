@@ -1837,7 +1837,7 @@ func (h *DurableAsyncImageHandler) uploadAsyncImageStaging(ctx context.Context, 
 	intents := make([]service.AsyncImageResultUploadIntent, 0, len(objects))
 	keys := make(map[int]string, len(objects))
 	for _, object := range objects {
-		key := strings.TrimPrefix(fmt.Sprintf("%s/results/%s/%s/%03d%s", prefix, service.ImageObjectDatePartition(partitionTime), task.TaskID, object.ImageIndex, asyncImageExtension(object.ContentType)), "/")
+		key := service.AsyncImageResultObjectKey(prefix, partitionTime, task.TaskID, object.ImageIndex, object.ContentType)
 		intent, intentErr := intentResolver.ObjectIntent(key, object.ContentType, object.ByteSize, object.Checksum)
 		if intentErr != nil {
 			return intentErr

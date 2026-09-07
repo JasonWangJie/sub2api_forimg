@@ -12,6 +12,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/google/uuid"
 )
 
 const defaultImageMaxDownloadBytes int64 = 32 << 20 // 32 MiB
@@ -281,6 +283,29 @@ func ImageObjectDatePartition(now time.Time) string {
 		now = time.Now()
 	}
 	return now.UTC().Format("2006/01/02")
+}
+
+// AsyncImageResultObjectKey returns the stable object key used for a durable
+// asynchronous image result. Results are kept directly under the UTC day
+// partition; there is intentionally no task-ID directory. The UUID is derived
+// from taskID and imageIndex so retries reuse the same key while images from a
+// multi-image task still receive different names.
+//
+// Example: images/results/2026/09/07/20260907153045<guid>.png
+func AsyncImageResultObjectKey(prefix string, submittedAt time.Time, taskID string, imageIndex int, contentType string) string {
+	if submittedAt.IsZero() {
+		submittedAt = time.Now()
+	}
+	if imageIndex < 0 {
+		imageIndex = 0
+	}
+	nameUUID := uuid.NewSHA1(uuid.NameSpaceURL, []byte(taskID+":"+strconv.Itoa(imageIndex)))
+	filename := submittedAt.UTC().Format("20060102150405") + nameUUID.String() + extensionForContentType(contentType)
+	cleanPrefix := strings.Trim(prefix, "/")
+	if cleanPrefix == "" {
+		return "results/" + ImageObjectDatePartition(submittedAt) + "/" + filename
+	}
+	return cleanPrefix + "/results/" + ImageObjectDatePartition(submittedAt) + "/" + filename
 }
 
 func detectImageContentType(data []byte) string {

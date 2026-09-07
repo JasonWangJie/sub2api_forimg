@@ -1,5 +1,13 @@
 # Sub2API Fork 二次开发总览
 
+## 2026-09-07 异步生图结果文件布局调整
+
+- 当前基线：分支 `main`，HEAD `cc55ab9a181490ada4124d0eb84688a425d1ce43`，`git describe=v0.1.173.41-1-gcc55ab9-dirty`，VERSION=`0.1.173.41`；保留工作树既有 `sub2所需.md` 改动。
+- 异步生图结果不再按任务 ID 创建独立子目录；对象直接写入 `results/YYYY/MM/DD/` 日目录。
+- 文件名统一为 `yyyyMMddHHmmss+GUID.ext`，GUID 由任务 ID 与图片序号稳定生成；同一任务多张图使用不同 GUID，上传重试仍复用同一对象 key。
+- 验证：`go test ./internal/service -run TestAsyncImageResultObjectKeyUsesDayDirectoryAndStableDistinctNames -count=1`、`go test ./internal/handler -run 'AsyncImage|Upload' -count=1` 均通过；已执行 `git diff --check`，唯一提示来自既有 `sub2所需.md` 尾随空格。未部署或重启生产，未做真实 OSS 端到端验证。
+- 冒烟复核（2026-09-07）：`go test ./internal/service -run 'ImageStorage|ImageObject|ImageResultUploader' -count=1`、`go test ./internal/handler -run 'AsyncImage|Upload' -count=1`、`go test ./internal/service ./internal/handler -run '^$' -count=1` 均通过。
+
 ## 2026-09-05 个人图库同步广场上传修复
 
 - 修复审核通过后点击“同步至图片广场”出现 `Network error. Please check your connection` 的问题：浏览器 `FormData` 上传不再手动覆盖 `Content-Type`，由 Axios 自动生成包含 boundary 的请求头；普通图库文件导入同步采用相同规则。
@@ -45,13 +53,13 @@ codegraph init
 
 ## 当前版本快照
 
-记录日期：`2026-09-04`（当前工作树含异步任务中心统计、管理员列表、账号调度和参考图失败换号重试改动；未部署或重启生产）。
+记录日期：`2026-09-07`（当前工作树含异步生图结果对象 key 布局调整及既有用户改动；未部署或重启生产）。
 
 | 项目 | 当前记录 |
 |---|---|
-| 发布版本文件 | `backend/cmd/server/VERSION`（以仓库文件为准） |
-| 文档记录时 HEAD | `0ea8f5195ff64e6acecb3d131d68eac8553f203b` |
-| HEAD 描述 | `v0.1.173.40-dirty` |
+| 发布版本文件 | `backend/cmd/server/VERSION`=`0.1.173.41` |
+| 文档记录时 HEAD | `cc55ab9a181490ada4124d0eb84688a425d1ce43` |
+| HEAD 描述 | `v0.1.173.41-1-gcc55ab9-dirty` |
 | 当前及后续默认分支 | `main` |
 | 已合并原作者主线 | 以 `git log` / `upstream/main` 实际为准 |
 | SC 上传安全迁移 | `backend/migrations/187_ZJ_async_image_upload_reservations.sql` |
@@ -157,7 +165,7 @@ codegraph init
 
 - 新图片默认私有；公开必须由用户显式投稿并由管理员批准。
 - **实时本机投稿在审核前不占用 OSS**；只有 `approved_pending_sync` 后用户同步才写入对象存储并进入广场。
-- OSS 只保存实际对象；对象 key 按 UTC **年/月/日**分区（如 `library/{userId}/2026/07/22/...`、`{prefix}/results/2026/07/22/{taskId}/...`）。数据库保存稳定的 provider、bucket、object key 和校验元数据，不保存过期预签名 URL。
+- OSS 只保存实际对象；对象 key 按 UTC **年/月/日**分区（如 `library/{userId}/2026/07/22/...`、`{prefix}/results/2026/07/22/20260722153045<guid>.png`）。数据库保存稳定的 provider、bucket、object key 和校验元数据，不保存过期预签名 URL。
 - 异步任务结果与图库引用同一 `image_storage_objects` 身份，不能因为一处解除引用就删除仍被其他记录使用的对象。
 - 旧 `image_plaza_items` 的历史公开数据先强制转私有，再由可恢复 Worker 严格校验并迁入私有图库和 `pending_review` 投稿。
 - 危险、损坏、路径越界或不支持的旧图片只计入隔离数量，不继续公开。
@@ -166,7 +174,7 @@ codegraph init
 - 上传默认 20 次/Key/分钟（最大 1000）、默认 1 GiB/Key 输入额度（最大 100 GiB）、单图/请求有效图片负载硬上限 64 MiB、单次 OSS Put 默认 300 秒且最大 600 秒、输入最长保留 720 小时。相同幂等上传只重签并返回 `X-Idempotency-Replayed: true`；冲突、处理中或结果墓碑返回 `409`。
 - 每个输入对象最多保留 128 个重签 URL alias。注册由输入对象行锁串行化，过期 alias 仍作为所有权墓碑保留；第 129 个新 alias 返回结构化 `429`，不会无限扩张表。
 - SC 客户端文件名会净化且不进入对象 key；OSS 前持久化 deterministic object intent。失败或 stale intent 第一次 Delete 后保留恢复事实，至少十分钟后二次 Delete 成功才移除；未清理 failed intent 始终计入 Key 容量。
-- 异步结果的每个 OSS PUT 也必须先写入 `async_image_result_upload_intents`。对象 key 由任务提交日期、任务号和结果序号确定；部分上传或进程崩溃后只覆盖同一 key，不重新生成。结果清单落库时同事务删除 intent；过期孤儿由 retention Worker 在确认没有任务、图库或广场活动引用后删除。
+- 异步结果的每个 OSS PUT 也必须先写入 `async_image_result_upload_intents`。对象 key 由任务提交日期、任务号和结果序号确定为 `yyyyMMddHHmmss+GUID.ext`，直接位于日目录下，不创建任务子目录；部分上传或进程崩溃后只覆盖同一 key，不重新生成。结果清单落库时同事务删除 intent；过期孤儿由 retention Worker 在确认没有任务、图库或广场活动引用后删除。
 - `2026-08-14`：管理端清理已覆盖异步任务结果与「清理全部」；存储后端切换不再被活跃对象拦截，但切换前仍建议先清理。
 
 ## 异步并发与性能边界

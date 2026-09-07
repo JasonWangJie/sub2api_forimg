@@ -1,5 +1,13 @@
 # AI 交接文档
 
+## 2026-09-07 异步生图结果文件布局调整
+
+- Worker 结果上传已取消“一个任务一个文件夹”：`backend/internal/handler/durable_async_image_worker.go` 使用 `service.AsyncImageResultObjectKey`，对象直接落在 `results/YYYY/MM/DD/` 日目录。
+- 文件名格式为 `yyyyMMddHHmmss+GUID.ext`。GUID 使用任务 ID + 图片序号的稳定 UUID；同一任务的图片序号不同则文件名不同，重试/恢复仍复用原 key，符合 upload intent 的幂等要求。
+- 定向验证已通过：`go test ./internal/service -run TestAsyncImageResultObjectKeyUsesDayDirectoryAndStableDistinctNames -count=1`、`go test ./internal/handler -run 'AsyncImage|Upload' -count=1`。尚未验证真实 OSS/数据库端到端，未部署或重启生产。
+- 冒烟复核追加通过：`go test ./internal/service -run 'ImageStorage|ImageObject|ImageResultUploader' -count=1`、`go test ./internal/handler -run 'AsyncImage|Upload' -count=1`、`go test ./internal/service ./internal/handler -run '^$' -count=1`。
+- 本轮实际基线：分支 `main`；HEAD `cc55ab9a181490ada4124d0eb84688a425d1ce43`；`git describe=v0.1.173.41-1-gcc55ab9-dirty`；VERSION=`0.1.173.41`；工作树另有用户既有 `sub2所需.md` 改动。`git diff --check` 已执行，唯一提示为该既有文件第 12 行尾随空格。
+
 ## 2026-09-05 个人图库同步广场上传修复
 
 - `frontend/src/api/imageLibrary.ts` 的同步广场上传和普通图库文件导入不再手动设置 `Content-Type: multipart/form-data`；浏览器/Axios 会生成带 boundary 的请求头，避免 Go `ParseMultipartForm` 解析失败并被前端归一化为 Network error。
