@@ -787,6 +787,14 @@ func asyncImagePublicStatus(task *service.AsyncImageTask, cfg service.AsyncImage
 	switch task.Status {
 	case service.AsyncImageTaskStatusQueued:
 		return "queued"
+	case service.AsyncImageTaskStatusInvoking:
+		// The worker claims queued -> invoking before account routing so the
+		// database CAS remains the single invocation lock. Until an account is
+		// persisted, no upstream request can have been admitted; expose that
+		// short scheduling window as queued to clients.
+		if task.AccountID == nil || *task.AccountID <= 0 {
+			return "queued"
+		}
 	case service.AsyncImageTaskStatusSucceeded:
 		if asyncImageResultsReleasable(task) {
 			return "succeeded"

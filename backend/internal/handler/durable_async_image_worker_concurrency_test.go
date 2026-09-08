@@ -164,6 +164,7 @@ func TestDurableAsyncImageWorkerDefersLocalCapacityWithoutFailingTask(t *testing
 	require.Equal(t, 12*time.Second, disposition.delay)
 	require.Equal(t, service.AsyncImageTaskStatusQueued, repo.transition.ToStatus)
 	require.True(t, repo.transition.IncrementCapacityRetry)
+	require.True(t, repo.transition.ClearAccountID)
 }
 
 func TestDurableAsyncImageWorkerFailsAfterFifthLocalCapacityAttempt(t *testing.T) {

@@ -48,6 +48,16 @@ func TestBuildAsyncImageTaskFilterSearchIncludesFinalAccountName(t *testing.T) {
 	require.Equal(t, []any{"%prod-account%"}, args)
 }
 
+func TestBuildAsyncImageTaskFilterNormalizesQueuedAndInvokingDisplayStates(t *testing.T) {
+	queuedWhere, queuedArgs := buildAsyncImageTaskFilter(service.AsyncImageTaskFilter{Status: service.AsyncImageTaskStatusQueued})
+	require.Contains(t, queuedWhere, "status = 'queued' OR (status = 'invoking' AND (account_id IS NULL OR account_id <= 0))")
+	require.Empty(t, queuedArgs)
+
+	invokingWhere, invokingArgs := buildAsyncImageTaskFilter(service.AsyncImageTaskFilter{Status: service.AsyncImageTaskStatusInvoking})
+	require.Contains(t, invokingWhere, "status = 'invoking' AND account_id > 0")
+	require.Empty(t, invokingArgs)
+}
+
 func TestAsyncImageResultIntentMigrationAddsOutboxClaimOwnership(t *testing.T) {
 	content, err := migrations.FS.ReadFile("189_ZJ_async_image_result_upload_intents.sql")
 	require.NoError(t, err)
@@ -222,7 +232,7 @@ func TestAsyncImageTaskRepositoryTransitionUsesVersionCASAndEvent(t *testing.T) 
 	mock.ExpectQuery("SELECT status, version FROM async_image_tasks").
 		WithArgs("asyncimg_1").
 		WillReturnRows(sqlmock.NewRows([]string{"status", "version"}).AddRow(service.AsyncImageTaskStatusQueued, int64(1)))
-	mock.ExpectQuery("(?s)UPDATE async_image_tasks SET.*WHERE task_id = \\$1.*version = \\$43.*updated_at <= \\$45.*RETURNING").
+	mock.ExpectQuery("(?s)UPDATE async_image_tasks SET.*account_id = CASE WHEN \\$52::boolean THEN NULL.*WHERE task_id = \\$1.*version = \\$43.*updated_at <= \\$45.*RETURNING").
 		WillReturnRows(asyncImageTaskRows(now, "asyncimg_1", "hash-1", service.AsyncImageTaskStatusInvoking))
 	mock.ExpectExec("(?s)INSERT INTO async_image_events").
 		WillReturnResult(sqlmock.NewResult(1, 1))

@@ -24,7 +24,7 @@ func TestAsyncImagePublicStatus(t *testing.T) {
 		want          string
 	}{
 		{"queued", service.AsyncImageTaskStatusQueued, service.AsyncImageBillingStatusPending, 0, "queued"},
-		{"invoking", service.AsyncImageTaskStatusInvoking, service.AsyncImageBillingStatusPending, 0, "processing"},
+		{"invoking_without_account", service.AsyncImageTaskStatusInvoking, service.AsyncImageBillingStatusPending, 0, "queued"},
 		{"upstream_succeeded", service.AsyncImageTaskStatusUpstreamSucceeded, service.AsyncImageBillingStatusPrepared, 0, "processing"},
 		{"storage_retrying", service.AsyncImageTaskStatusStorageFailed, service.AsyncImageBillingStatusPrepared, 2, "processing"},
 		{"storage_exhausted", service.AsyncImageTaskStatusStorageFailed, service.AsyncImageBillingStatusPrepared, 3, "failed"},
@@ -44,6 +44,14 @@ func TestAsyncImagePublicStatus(t *testing.T) {
 			}, cfg))
 		})
 	}
+}
+
+func TestAsyncImagePublicStatusInvokingWithAccountIsProcessing(t *testing.T) {
+	accountID := int64(42)
+	require.Equal(t, "processing", asyncImagePublicStatus(&service.AsyncImageTask{
+		Status: service.AsyncImageTaskStatusInvoking, AccountID: &accountID,
+		BillingStatus: service.AsyncImageBillingStatusPending,
+	}, service.AsyncImageRuntimeConfig{}))
 }
 
 func TestAsyncImagePublicQueriesDoNotReleaseResultsBeforeBillingSucceeds(t *testing.T) {

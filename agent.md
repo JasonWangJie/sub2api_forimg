@@ -1,5 +1,21 @@
 # AI 交接文档
 
+## 2026-09-08 异步生图冒烟复核与重试状态修复
+
+- 本轮确认的逻辑漏洞：首次 `invoking` 无账号已显示为 `queued`，但账号 7 失败后回到 `queued` 未清除旧 `account_id`，下一次重新抢占且尚未选号时会误显示 `processing`；任务中心状态筛选也曾按原始状态过滤，和展示状态不一致。
+- 已修复：`AsyncImageTaskTransition` 增加 `ClearAccountID`；参考图、容量、上游临时错误、账号尝试超时重试回队列，以及 `queued -> invoking` 重新抢占均清除当前账号；`enrichAsyncImageAttemptTransition` 不再用最近尝试账号覆盖清除意图。账号历史仍保留在 `account_attempts`/`attempted_account_ids`。
+- Repository 的 `queued` 筛选匹配原始 `queued` 或未分配账号的 `invoking`；`invoking` 筛选仅匹配 `account_id > 0`。公共查询和任务中心展示规则保持不变。
+- 已验证：Handler/Repository/Service 异步定向 Go 测试、前端异步 API Vitest `8/8`、`pnpm typecheck`、`git diff --check` 均通过。未做真实 PostgreSQL/Redis/上游/OSS 端到端验证，未部署或重启生产。
+- 当前实际基线：`main`，HEAD `eecbd846cf2d0c5b0a1a25e07a226994e3711cab`，`git describe=v0.1.173.43-1-geecbd84-dirty`，VERSION=`0.1.173.43`。
+
+## 2026-09-08 异步生图未分配账号时状态展示修复
+
+- 根因：Worker 为防止重复执行，会在账号路由前先将任务从 `queued` CAS 到 `invoking`；共享图片并发门或账号容量不足时尚未选中账号，短窗口仍被页面显示为“调用上游”。
+- 修复：`backend/internal/handler/durable_async_image_handler.go` 的公共 BB/SC 查询，以及 `backend/internal/handler/async_image_task_center_handler.go` 的用户/管理员列表和详情，在 `status=invoking` 且 `account_id` 为空或非正数时返回展示状态 `queued`；账号已落库则保持 `invoking`。内部持久化状态和 CAS/恢复逻辑未改变。
+- 文档同步：`wiki-new/异步生图架构.md`、`docs/DURABLE_ASYNC_IMAGE_API.md`、`异步生图接口文档new.md` 已说明 `invoking` 可能仍处于账号路由/容量准入窗口，未分配账号时 BB/SC 对外显示 `queued`。
+- 回归：`go test ./internal/handler -run 'TestAsyncImage|TestDurableAsyncImage' -count=1`、`go test ./internal/service -run 'AsyncImage' -count=1`、前端异步任务 API 8/8、`pnpm typecheck` 均通过；`git diff --check` 通过。另补充任务详情时间线在未分配账号窗口显示 `queued` 的回归测试。
+- 当前实际基线：分支 `main`；HEAD `eecbd846cf2d0c5b0a1a25e07a226994e3711cab`；`git describe=v0.1.173.43-1-geecbd84-dirty`；VERSION=`0.1.173.43`。未部署或重启生产，未做真实数据库/上游端到端验证。
+
 ## 2026-09-07 异步生图结果文件布局调整
 
 - Worker 结果上传已取消“一个任务一个文件夹”：`backend/internal/handler/durable_async_image_worker.go` 使用 `service.AsyncImageResultObjectKey`，对象直接落在 `results/YYYY/MM/DD/` 日目录。
@@ -40,13 +56,12 @@
 
 这是 `JasonWangJie/sub2api_forimg` Fork，默认在 `main` 开发。交接基线（以本轮命令实际输出为准）：
 
-- HEAD：`314fcc3c0055a3be0c652782b646e71ad75df808`
-- `git describe --tags --always --dirty`：`v0.1.173.38-1-g314fcc3-dirty`
-- `backend/cmd/server/VERSION`：`0.1.173.38`
-- 最近功能：异步生图账号尝试审计、Gemini 快速换号、容量重试排除最近失败账号、`execution_unknown` 对账待处理、参考图混合传输回退与下载闸门
-- 本次交接维护：任务查询增加 `error_code` 601-609，失败时透传 Worker 保存的脱敏上游原文；同步 API 文档与用户指南；本轮继续完善 `异步生图接口文档new.md` 的状态码、轮询、原文样例和生产错误快照
-- 本次冒烟结论：完整 `go test ./internal/handler -count=1`、参考图账号重试定向用例、Service/Repository 编译检查和 `git diff --check` 通过；完整 Service 包仍受既有 `TestEstimateOpenAIInputTokens_CompareWithOpenAIAPI` 外部网络超时影响
-- 生产环境：已只读连接 `108.186.246.14` 查看服务状态和日志，未修改、未部署、未重启
+- HEAD：`eecbd846cf2d0c5b0a1a25e07a226994e3711cab`
+- `git describe --tags --always --dirty`：`v0.1.173.43-1-geecbd84-dirty`
+- `backend/cmd/server/VERSION`：`0.1.173.43`
+- 最近功能：异步生图未分配账号窗口对外显示为排队、重试清除旧当前账号、任务中心状态筛选与展示归一化
+- 本次冒烟结论：Handler/Repository 全包 Go 测试、Service 异步定向测试与编译检查、前端异步 API Vitest `8/8`、`pnpm typecheck` 和 `git diff --check` 通过；Markdown 全仓检查仅发现既有 3 条断链（`wiki/Home.md`、`wiki/Gateway-API.md` 和 `README.md` 指向缺失文档）
+- 生产环境：未连接、未修改、未部署、未重启；未做真实 PostgreSQL/Redis/上游/OSS 端到端验证
 
 开始工作前必须运行：
 

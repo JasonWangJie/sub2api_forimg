@@ -1,5 +1,21 @@
 # Sub2API Fork 二次开发总览
 
+## 2026-09-08 异步生图冒烟复核与重试状态修复
+
+- 冒烟复核发现并修复两处状态一致性缺陷：账号容量/上游临时错误/参考图重试回到 `queued` 时清除当前执行 `account_id`，但保留 `account_attempts` 与 `attempted_account_ids` 审计；任务中心筛选 `queued`/`invoking` 时与未分配账号的展示状态保持一致。
+- 新增 `ClearAccountID` 持久化迁移字段语义（仅 transition 控制，不改表结构），覆盖重新抢占、容量重试、上游重试、账号尝试超时和参考图重试；补充 Worker、Repository、Handler 回归测试。
+- 验证：Handler/Repository 全包 Go 测试、Service 异步定向测试与编译检查、`pnpm test:run src/features/async-image-tasks/__tests__/api.spec.ts`（8/8）、`pnpm typecheck`、`git diff --check` 均通过。
+- 未完成项：未连接真实 PostgreSQL/Redis/上游/OSS 做端到端验证，未部署或重启生产；状态筛选 SQL 尚未在生产数据上验收。
+- 当前实际基线：分支 `main`；HEAD `eecbd846cf2d0c5b0a1a25e07a226994e3711cab`；`git describe=v0.1.173.43-1-geecbd84-dirty`；VERSION=`0.1.173.43`。
+
+## 2026-09-08 异步生图未分配账号时状态展示修复
+
+- 异步 Worker 仍使用内部 `queued -> invoking` CAS 作为唯一执行锁，但在账号路由尚未落库时（`invoking` 且 `account_id` 为空）对外统一显示为 `queued`，避免没有分配最终账号、没有调用上游时误显示“调用上游”。
+- BB/SC 任务查询、用户/管理员任务中心列表及详情均应用该展示规则；账号已落库后仍显示 `invoking`，不影响真实执行和重复调用保护。
+- 已同步 `wiki-new/异步生图架构.md`、`docs/DURABLE_ASYNC_IMAGE_API.md`、`异步生图接口文档new.md` 的状态说明，明确账号路由前的内部 `invoking` 展示为 `queued`。
+- 验证：`go test ./internal/handler -run 'TestAsyncImage|TestDurableAsyncImage' -count=1`、`go test ./internal/service -run 'AsyncImage' -count=1`、`pnpm test:run src/features/async-image-tasks/__tests__/api.spec.ts`（8/8）、`pnpm typecheck` 均通过；`git diff --check` 通过。未部署或重启生产，未做真实数据库/上游端到端验证。
+- 当前实际基线：分支 `main`；HEAD `eecbd846cf2d0c5b0a1a25e07a226994e3711cab`；`git describe=v0.1.173.43-1-geecbd84-dirty`；VERSION=`0.1.173.43`。
+
 ## 2026-09-07 异步生图结果文件布局调整
 
 - 当前基线：分支 `main`，HEAD `cc55ab9a181490ada4124d0eb84688a425d1ce43`，`git describe=v0.1.173.41-1-gcc55ab9-dirty`，VERSION=`0.1.173.41`；保留工作树既有 `sub2所需.md` 改动。
@@ -53,13 +69,13 @@ codegraph init
 
 ## 当前版本快照
 
-记录日期：`2026-09-07`（当前工作树含异步生图结果对象 key 布局调整及既有用户改动；未部署或重启生产）。
+记录日期：`2026-09-08`（当前工作树含异步生图状态展示/重试状态修复及既有用户改动；未部署或重启生产）。
 
 | 项目 | 当前记录 |
 |---|---|
-| 发布版本文件 | `backend/cmd/server/VERSION`=`0.1.173.41` |
-| 文档记录时 HEAD | `cc55ab9a181490ada4124d0eb84688a425d1ce43` |
-| HEAD 描述 | `v0.1.173.41-1-gcc55ab9-dirty` |
+| 发布版本文件 | `backend/cmd/server/VERSION`=`0.1.173.43` |
+| 文档记录时 HEAD | `eecbd846cf2d0c5b0a1a25e07a226994e3711cab` |
+| HEAD 描述 | `v0.1.173.43-1-geecbd84-dirty` |
 | 当前及后续默认分支 | `main` |
 | 已合并原作者主线 | 以 `git log` / `upstream/main` 实际为准 |
 | SC 上传安全迁移 | `backend/migrations/187_ZJ_async_image_upload_reservations.sql` |

@@ -360,6 +360,43 @@ func TestAsyncImageTaskCenterAdminDetailIncludesRoutingNames(t *testing.T) {
 	require.Equal(t, "openai-prod-1", envelope.Data.Task["account_name"])
 }
 
+func TestAsyncImageTaskCenterShowsUnassignedInvokingTaskAsQueued(t *testing.T) {
+	now := time.Now().UTC()
+	withoutAccount := &service.AsyncImageTask{
+		TaskID: "asyncimg_waiting", UserID: 2, APIKeyID: 5, GroupID: 2,
+		Platform: service.PlatformOpenAI, RequestType: service.AsyncImageRequestTypeTextToImage,
+		Model: "gpt-image-2", Status: service.AsyncImageTaskStatusInvoking,
+		BillingStatus: service.AsyncImageBillingStatusPending, SubmittedAt: now, CreatedAt: now, UpdatedAt: now,
+	}
+	view := newAsyncImageTaskCenterView(withoutAccount, nil, true)
+	require.Equal(t, service.AsyncImageTaskStatusQueued, view.Status)
+
+	accountID := int64(9)
+	withAccount := *withoutAccount
+	withAccount.AccountID = &accountID
+	view = newAsyncImageTaskCenterView(&withAccount, nil, true)
+	require.Equal(t, service.AsyncImageTaskStatusInvoking, view.Status)
+}
+
+func TestAsyncImageTaskCenterTimelineShowsUnassignedInvocationAsQueued(t *testing.T) {
+	now := time.Now().UTC()
+	toInvoking := service.AsyncImageTaskStatusInvoking
+	task := &service.AsyncImageTask{
+		TaskID: "asyncimg_timeline_waiting", Status: service.AsyncImageTaskStatusInvoking,
+		SubmittedAt: now, CreatedAt: now, UpdatedAt: now,
+	}
+	details := &service.AsyncImageTaskDetails{
+		Task: task,
+		Events: []service.AsyncImageEvent{{EventType: "invocation_started", ToStatus: &toInvoking, CreatedAt: now}},
+	}
+	h := &AsyncImageTaskCenterHandler{}
+	view, err := h.detailView(context.Background(), details, false)
+	require.NoError(t, err)
+	require.Len(t, view.Events, 1)
+	require.Equal(t, service.AsyncImageTaskStatusQueued, view.Events[0].Status)
+	require.Equal(t, service.AsyncImageTaskStatusInvoking, *view.Events[0].ToStatus)
+}
+
 func TestAsyncImageTaskCenterAccountAuditIsAdminOnlyAndRedacted(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	now := time.Now().UTC()
@@ -459,7 +496,7 @@ func TestAsyncImageTaskCenterAdminTerminateReturnsDetails(t *testing.T) {
 		} `json:"data"`
 	}
 	require.NoError(t, json.Unmarshal(recorder.Body.Bytes(), &envelope))
-	require.Equal(t, service.AsyncImageTaskStatusInvoking, envelope.Data.Task.Status)
+	require.Equal(t, service.AsyncImageTaskStatusQueued, envelope.Data.Task.Status)
 }
 
 func TestAsyncImageTaskCenterUserResultRedirectSignsAfterOwnershipLookup(t *testing.T) {

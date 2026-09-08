@@ -580,7 +580,7 @@ POST /api/v1/admin/async-image-tasks/{task_id}/terminate
 | 内部状态 | 含义 | BB / SC 对外状态 |
 |---|---|---|
 | `queued` | 已写入 PostgreSQL 与 Outbox，等待 Worker | `queued` / `pending` |
-| `invoking` | 正在通过现有 Gemini/OpenAI 链路调用上游 | `processing` / `processing` |
+| `invoking` | 已抢占执行权；账号路由和容量准入可能仍在进行，账号落库后才进入现有 Gemini/OpenAI 链路；重试回队列或重新抢占时会清除当前 `account_id`，账号尝试审计仍保留 | `queued` / `queued`（未分配账号）或 `processing` / `processing`（账号已落库） |
 | `upstream_succeeded` | 上游图片与固定计费计划已进入短期暂存 | `processing` / `processing` |
 | `uploading` | 正在上传生成物 | `processing` / `processing` |
 | `billing_pending` | 图片已持久化，等待扣费确认 | `processing` / `processing` |
@@ -590,7 +590,7 @@ POST /api/v1/admin/async-image-tasks/{task_id}/terminate
 | `failed` / `expired` | 执行失败或任务过期 | `failed` / `failed` |
 | `execution_unknown` | 上游请求发出后进程中断，无法确认是否产生结果 | `failed` / `failed` |
 
-只有 OSS 结果清单已持久化且账务状态已确认，任务才对外显示成功。标准模式要求原计费入口确认成功；全站 `simple` 模式沿用项目现有“不扣费但记录用量”语义，以 `not_billable` 作为已确认终态。因而 `processing` 可能表示图片已经生成但仍在上传或结算，客户端必须继续轮询。
+只有 OSS 结果清单已持久化且账务状态已确认，任务才对外显示成功。标准模式要求原计费入口确认成功；全站 `simple` 模式沿用项目现有“不扣费但记录用量”语义，以 `not_billable` 作为已确认终态。因而 `processing` 可能表示图片已经生成但仍在上传或结算，客户端必须继续轮询。Worker 在账号路由前会先将任务 CAS 为内部 `invoking` 以防重复执行；此时若 `account_id` 尚未落库，公共 BB/SC 查询和任务中心时间线仍显示 `queued`，避免把尚未调用上游的调度窗口误报为调用中；重试回到 `queued` 或下一次重新抢占时会清除旧的当前账号字段，但保留 `account_attempts` / `attempted_account_ids` 审计；原始事件 `to_status` 仍保留供管理员审计。
 
 单次上游调用受 `async_image.execution_timeout_seconds` 限制（默认 `1200`，即 20 分钟）。Worker 会对该次 invoke 使用 `context` 超时；若上游忽略取消、心跳又不断刷新 `updated_at`，恢复环仍会按 `started_at`（没有则用 `created_at`）的墙钟时间把仍为 `invoking` 的任务标记为 `failed`，`error_code=execution_timeout`。对外 BB `fail_reason` / SC `failReason` 为可读超时文案。配置文件与后台图片存储设置里的异步运行参数均可调整；已保存的后台设置优先于配置文件。`async_image.auto_archive_to_library` 默认关闭：成功结果仍会保存到持久化图片存储，任务查询照常返回 `data[].url`，但不会创建个人图库记录或触发图库逻辑字节配额；开启后才执行幂等图库归档。
 

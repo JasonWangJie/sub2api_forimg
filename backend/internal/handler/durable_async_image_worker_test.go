@@ -140,6 +140,26 @@ func TestRecordAsyncImageReferenceFetchFailureUsesSelectedAccount(t *testing.T) 
 	require.Len(t, capture.Attempts(), 2, "a handler-recorded reference failure must not be duplicated")
 }
 
+func TestEnrichAsyncImageAttemptTransitionCanClearCurrentAccount(t *testing.T) {
+	accountID := int64(7)
+	task := &service.AsyncImageTask{
+		TaskID: "asyncimg_retry_account", AccountID: &accountID,
+		AccountAttempts: json.RawMessage(`[{"account_id":7,"status":"failed"}]`),
+	}
+	capture := &service.AsyncImageAccountAttemptCapture{}
+	ctx := service.WithAsyncImageAccountAttemptCapture(context.Background(), capture)
+	service.RecordAsyncImageAccountAttempt(ctx, service.AsyncImageAccountAttempt{
+		AccountID: 7, Status: service.AsyncImageAccountAttemptFailed,
+	})
+
+	transition := enrichAsyncImageAttemptTransition(ctx, task, service.AsyncImageTaskTransition{
+		TaskID: task.TaskID, ToStatus: service.AsyncImageTaskStatusQueued, ClearAccountID: true,
+	})
+	require.Nil(t, transition.AccountID)
+	require.NotEmpty(t, transition.AccountAttempts)
+	require.NotEmpty(t, transition.AttemptedAccountIDs)
+}
+
 func TestAsyncImageExplicitReferenceFetchFailure(t *testing.T) {
 	msg := "上游生图失败（HTTP 400）：image_url fetch failed: Failed to perform, curl: (28) Connection timed out after 60002 milliseconds. See https://cdn.example/a.png first for more details."
 	require.True(t, isAsyncImageExplicitReferenceFetchFailure(msg))

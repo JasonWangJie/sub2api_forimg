@@ -244,7 +244,14 @@ func buildAsyncImageTaskFilter(filter service.AsyncImageTaskFilter) (string, []a
 		add("request_type", "=", filter.RequestType)
 	}
 	if filter.Status != "" {
-		add("status", "=", filter.Status)
+		switch filter.Status {
+		case service.AsyncImageTaskStatusQueued:
+			clauses = append(clauses, "(status = 'queued' OR (status = 'invoking' AND (account_id IS NULL OR account_id <= 0)))")
+		case service.AsyncImageTaskStatusInvoking:
+			clauses = append(clauses, "(status = 'invoking' AND account_id > 0)")
+		default:
+			add("status", "=", filter.Status)
+		}
 	}
 	if filter.BillingStatus != "" {
 		add("billing_status", "=", filter.BillingStatus)
@@ -446,7 +453,7 @@ func updateAsyncImageTaskTransition(ctx context.Context, sqlq asyncImageSQLExecu
 UPDATE async_image_tasks SET
     status = $2,
     progress = CASE WHEN $3::boolean THEN $4 ELSE progress END,
-    account_id = CASE WHEN $5::boolean THEN $6 ELSE account_id END,
+    account_id = CASE WHEN $52::boolean THEN NULL WHEN $5::boolean THEN $6 ELSE account_id END,
     billing_status = CASE WHEN $7::boolean THEN $8 ELSE billing_status END,
     actual_cost = CASE WHEN $9::boolean THEN $10 ELSE actual_cost END,
     actual_image_size = CASE WHEN $11::boolean THEN $12 ELSE actual_image_size END,
@@ -506,6 +513,7 @@ RETURNING ` + asyncImageTaskColumns
 		len(transition.AccountAttempts) > 0, normalizeJSONArrayPayload(transition.AccountAttempts),
 		len(transition.AttemptedAccountIDs) > 0, normalizeJSONArrayPayload(transition.AttemptedAccountIDs),
 		transition.ReconciliationStatus != nil, transition.ReconciliationStatus,
+		transition.ClearAccountID,
 	))
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, service.ErrAsyncImageInvalidTransition

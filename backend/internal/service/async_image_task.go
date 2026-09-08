@@ -176,13 +176,16 @@ type AsyncImageTaskCenterStatsService interface {
 }
 
 type AsyncImageTaskTransition struct {
-	TaskID               string
-	ExpectedVersion      int64
-	UpdatedBefore        *time.Time
-	FromStatuses         []string
-	ToStatus             string
-	Progress             *int
-	AccountID            *int64
+	TaskID          string
+	ExpectedVersion int64
+	UpdatedBefore   *time.Time
+	FromStatuses    []string
+	ToStatus        string
+	Progress        *int
+	AccountID       *int64
+	// ClearAccountID removes the current execution account while preserving
+	// account_attempts/attempted_account_ids audit history.
+	ClearAccountID       bool
 	AccountAttempts      json.RawMessage
 	AttemptedAccountIDs  json.RawMessage
 	BillingStatus        *string

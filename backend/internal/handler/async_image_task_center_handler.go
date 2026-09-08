@@ -479,10 +479,16 @@ func (h *AsyncImageTaskCenterHandler) detailView(ctx context.Context, details *s
 		return nil, err
 	}
 	events := make([]asyncImageTaskEventView, 0, len(details.Events))
+	displayStatus := asyncImageTaskDisplayStatus(details.Task)
 	for _, event := range details.Events {
 		status := event.EventType
 		if event.ToStatus != nil && strings.TrimSpace(*event.ToStatus) != "" {
 			status = *event.ToStatus
+		}
+		// invocation_started records the internal execution lock. Until account
+		// routing completes, keep the user-facing timeline aligned with queued.
+		if displayStatus == service.AsyncImageTaskStatusQueued && status == service.AsyncImageTaskStatusInvoking {
+			status = service.AsyncImageTaskStatusQueued
 		}
 		events = append(events, asyncImageTaskEventView{
 			ID: event.ID, EventType: event.EventType, Status: status,
@@ -530,7 +536,7 @@ func newAsyncImageTaskCenterView(task *service.AsyncImageTask, results []service
 		ID: task.TaskID, TaskID: task.TaskID, UserID: userID,
 		APIKeyID: task.APIKeyID, GroupID: task.GroupID, AccountID: accountID,
 		Protocol: task.Protocol, Platform: task.Platform, RequestType: task.RequestType,
-		Model: task.Model, Status: task.Status, BillingStatus: task.BillingStatus, Progress: task.Progress,
+		Model: task.Model, Status: asyncImageTaskDisplayStatus(task), BillingStatus: task.BillingStatus, Progress: task.Progress,
 		RequestedSize: task.RequestedImageSize, RequestedImageSize: task.RequestedImageSize,
 		ActualSize: task.ActualImageSize, ActualImageSize: task.ActualImageSize,
 		AspectRatio: task.AspectRatio, ImageCount: task.ImageCount, ResultCount: len(results),
@@ -550,6 +556,19 @@ func newAsyncImageTaskCenterView(task *service.AsyncImageTask, results []service
 			view.LastFailureReason, view.ReconciliationStatus = asyncImageAccountAuditView(task)
 	}
 	return view
+}
+
+// asyncImageTaskDisplayStatus keeps the internal invoking claim separate from
+// the user-facing execution state. A worker claims invoking before account
+// routing; without an account, the task is still waiting for capacity.
+func asyncImageTaskDisplayStatus(task *service.AsyncImageTask) string {
+	if task == nil {
+		return service.AsyncImageTaskStatusFailed
+	}
+	if task.Status == service.AsyncImageTaskStatusInvoking && (task.AccountID == nil || *task.AccountID <= 0) {
+		return service.AsyncImageTaskStatusQueued
+	}
+	return task.Status
 }
 
 func asyncImageAccountAuditView(task *service.AsyncImageTask) (*int, []int64, []asyncImageAccountAttemptView, *string, string) {

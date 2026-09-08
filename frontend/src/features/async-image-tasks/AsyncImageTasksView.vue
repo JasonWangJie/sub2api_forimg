@@ -644,7 +644,7 @@ const timelineEvents = computed<AsyncImageTaskEvent[]>(() => {
     return [...detail.value.events].sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime())
   }
   const events: AsyncImageTaskEvent[] = [{ status: 'queued', created_at: submittedAt(detail.value) || detail.value.created_at }]
-  if (detail.value.started_at) events.push({ status: 'invoking', created_at: detail.value.started_at })
+  if (detail.value.started_at && detail.value.status !== 'queued') events.push({ status: 'invoking', created_at: detail.value.started_at })
   if (detail.value.finished_at) events.push({ status: detail.value.status, created_at: detail.value.finished_at, message: detail.value.error_message })
   return events
 })
