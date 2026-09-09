@@ -49,7 +49,11 @@ function normalizeModels(value: unknown): ImageModelCapability[] {
       const source = item as Record<string, unknown>
       const id = String(source.id || source.value || source.model || source.name || '').trim()
       if (!id) return null
-      return { id, label: String(source.label || source.display_name || source.name || id) }
+      return {
+        id,
+        label: String(source.label || source.display_name || source.name || id),
+        qualities: stringArray(source.qualities),
+      }
     })
     .filter((item): item is ImageModelCapability => item !== null)
 }

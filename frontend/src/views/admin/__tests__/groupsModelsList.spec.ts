@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  addModelsListItem,
   buildModelsListConfig,
   createModelsListState,
   hydrateModelsListState,
@@ -12,6 +13,22 @@ import {
 } from "../groupsModelsList";
 
 describe("groupsModelsList", () => {
+  it("adds a manually entered model and selects it", () => {
+    const state = createModelsListState({ enabled: true, models: ["gpt-image-2"] });
+    expect(addModelsListItem(state, "  gpt-image-future  ")).toBe(true);
+    expect(buildModelsListConfig(state)).toEqual({
+      enabled: true,
+      models: ["gpt-image-2", "gpt-image-future"],
+    });
+  });
+
+  it("reselects an existing model instead of duplicating it", () => {
+    const state = hydrateModelsListState({ enabled: true, models: ["gpt-image-2"] }, ["gpt-image-2"]);
+    toggleModelsListItem(state, "gpt-image-2");
+    expect(addModelsListItem(state, "gpt-image-2")).toBe(true);
+    expect(state.items).toEqual([{ id: "gpt-image-2", selected: true }]);
+  });
+
   it("selects all default candidates for a new disabled config", () => {
     const state = createModelsListState();
 

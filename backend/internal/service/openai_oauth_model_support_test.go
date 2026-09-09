@@ -121,6 +121,8 @@ func TestIsModelSupported_NonOpenAIPlatformsUnchanged(t *testing.T) {
 }
 
 func TestIsOpenAIOAuthServableModel(t *testing.T) {
+	require.True(t, isOpenAIOAuthServableModel("gpt-image-2.5-flare"))
+	require.True(t, isOpenAIOAuthServableModel("gpt-image-2.5-sunburst"))
 	require.True(t, isOpenAIOAuthServableModel("gpt-5.4-high"))
 	require.True(t, isOpenAIOAuthServableModel("  gpt-5.3-codex  "))
 	require.True(t, isOpenAIOAuthServableModel("claude-3-5-haiku-20241022"))

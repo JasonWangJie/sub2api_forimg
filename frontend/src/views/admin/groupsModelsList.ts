@@ -69,6 +69,24 @@ export const toggleModelsListItem = (state: ModelsListState, modelID: string) =>
   }
 }
 
+export const addModelsListItem = (state: ModelsListState, rawModelID: string): boolean => {
+  const modelID = rawModelID.trim()
+  if (!modelID) return false
+
+  if (state.items.length === 0 && state.savedModels.length > 0) {
+    state.items = state.savedModels.map(id => ({ id, selected: true }))
+  }
+
+  const existing = state.items.find(item => item.id === modelID)
+  if (existing) {
+    existing.selected = true
+    return true
+  }
+
+  state.items.push({ id: modelID, selected: true })
+  return true
+}
+
 export const selectAllModelsListItems = (state: ModelsListState) => {
   state.items.forEach(item => {
     item.selected = true

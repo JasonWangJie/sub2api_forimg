@@ -490,7 +490,10 @@ const sizeOptions = computed(() => {
   return usesResolutionAspect.value ? capabilities.value.resolutions : capabilities.value.sizes
 })
 const aspectRatioOptions = computed(() => capabilities.value?.aspect_ratios || [])
-const qualityOptions = computed(() => capabilities.value?.qualities || [])
+const selectedModelCapability = computed(() => modelOptions.value.find((model) => model.id === form.model))
+const qualityOptions = computed(() => selectedModelCapability.value?.qualities?.length
+  ? selectedModelCapability.value.qualities
+  : capabilities.value?.qualities || [])
 const formatOptions = computed(() => capabilities.value?.output_formats || [])
 const backgroundOptions = computed(() => capabilities.value?.backgrounds || [])
 const countOptions = computed(() => Array.from({ length: Math.max(1, capabilities.value?.max_images || 1) }, (_, index) => index + 1))
@@ -1184,6 +1187,10 @@ watch(() => form.apiKeyId, async () => {
 
 watch(aspectRatioOptions, (options) => {
   if (usesResolutionAspect.value && !options.includes(form.aspectRatio)) form.aspectRatio = options[0] || '1:1'
+})
+
+watch(qualityOptions, (options) => {
+  if (!options.includes(form.quality)) form.quality = options[0] || ''
 })
 
 onMounted(async () => {

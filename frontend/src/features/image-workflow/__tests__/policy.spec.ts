@@ -65,6 +65,24 @@ describe('image workbench execution policy', () => {
     expect(capabilities.max_images).toBe(1)
   })
 
+  it('keeps per-model quality capabilities for GPT Image 2.5', () => {
+    const capabilities = normalizeCapabilities({
+      platform: 'openai',
+      models: [{
+        id: 'gpt-image-2.5-flare',
+        label: 'GPT Image 2.5 Flare',
+        qualities: ['auto', 'low', 'medium', 'high', 'xhigh', 'max'],
+      }],
+      qualities: ['auto', 'low', 'medium', 'high'],
+    }, key('openai', false))
+
+    expect(capabilities.models[0]).toEqual({
+      id: 'gpt-image-2.5-flare',
+      label: 'GPT Image 2.5 Flare',
+      qualities: ['auto', 'low', 'medium', 'high', 'xhigh', 'max'],
+    })
+  })
+
   it('preserves explicit empty capabilities instead of injecting platform defaults', () => {
     const capabilities = normalizeCapabilities({
       capability_version: 'empty-openai',

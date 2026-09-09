@@ -1167,8 +1167,10 @@ export default {
         sumTooHigh: 'Min gross margin plus safety buffer must be less than 100%, otherwise every account would be excluded'
       },
       modelsList: {
-        title: 'Custom /v1/models Model List',
-        hint: 'Only changes the /v1/models response. Whitelist model calls and account routing are unchanged.',
+        title: 'Custom Model Catalog',
+        hint: 'Controls /v1/models and Image Workbench visibility. If an account uses a model-mapping allowlist, add an exact mapping or wildcard too.',
+        addPlaceholder: 'Enter a model ID (for example, gpt-image-2.5-flare)',
+        add: 'Add',
         loading: 'Loading model list...',
         empty: 'No displayable models',
         selectedSummary: 'Selected {selected} / {total}',

@@ -44,8 +44,9 @@ type ImageWorkbenchService struct {
 }
 
 type ImageWorkbenchModel struct {
-	ID    string `json:"id"`
-	Label string `json:"label"`
+	ID        string   `json:"id"`
+	Label     string   `json:"label"`
+	Qualities []string `json:"qualities,omitempty"`
 }
 
 type ImageWorkbenchEndpoints struct {
@@ -378,9 +379,21 @@ func imageWorkbenchModelsForGroup(group *Group, available []string) []ImageWorkb
 		if label == "" {
 			label = model
 		}
-		out = append(out, ImageWorkbenchModel{ID: model, Label: label})
+		out = append(out, ImageWorkbenchModel{
+			ID:        model,
+			Label:     label,
+			Qualities: imageWorkbenchModelQualities(group.Platform, model),
+		})
 	}
 	return out
+}
+
+func imageWorkbenchModelQualities(platform, model string) []string {
+	if strings.EqualFold(strings.TrimSpace(platform), PlatformOpenAI) &&
+		strings.HasPrefix(strings.ToLower(strings.TrimSpace(model)), "gpt-image-2.5-") {
+		return []string{"auto", "low", "medium", "high", "xhigh", "max"}
+	}
+	return nil
 }
 
 func expandImageWorkbenchModelPatterns(available, fallback []string) []string {

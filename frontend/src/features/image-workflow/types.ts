@@ -5,6 +5,7 @@ export type ImageAsyncProtocol = 'bb' | 'sc'
 export interface ImageModelCapability {
   id: string
   label: string
+  qualities?: string[]
 }
 
 export interface ImageWorkbenchCapabilities {

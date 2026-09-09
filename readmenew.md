@@ -1,5 +1,14 @@
 # Sub2API Fork 二次开发总览
 
+## 2026-09-09 OpenAI GPT Image 2.5 与图片工作台模型目录
+
+- OpenAI 默认模型目录新增官方 `gpt-image-2.5-flare` 与 `gpt-image-2.5-sunburst`；图片 API 原有 `gpt-image-*` 家族校验保持开放，因此新模型可直接透传，账号仍受自身 `model_mapping`/通配规则约束。
+- 图片工作台能力响应增加模型级 `qualities`；2.5 两个模型显示官方 `auto/low/medium/high/xhigh/max`，旧模型继续使用原有平台级质量选项。
+- 管理端分组的自定义模型目录在创建/编辑表单增加模型 ID 手动添加入口，支持回车或按钮添加、去重、自动勾选和原有排序；手动添加的 OpenAI `gpt-image-*` 会进入图片工作台。若账号启用了模型映射白名单，还需在账号侧补充精确映射或 `gpt-image-*` 通配规则。
+- 验证：后端 OpenAI/service/handler 定向 Go 测试通过；前端相关 Vitest 3 文件 27 项通过；`npm run typecheck` 与 `npm run build` 通过；`git diff --check` 通过。构建仅有既有 Browserslist、动态导入和大 chunk 警告。
+- 未完成项：未连接真实 OpenAI 账号、生产 PostgreSQL/Redis/上游/OSS 做端到端生图验收，未做登录后浏览器视觉验收，未部署或重启生产，Fork CI 未运行。
+- 当前实际基线：分支 `main`；HEAD `abb8a33d71aa5d05a5fc9437fee4d365582d43c5`；`git describe=v0.1.173.46-dirty`；VERSION=`0.1.173.44`。
+
 ## 2026-09-09 管理员批量结束当前页异步生图任务
 
 - `/admin/async-image-tasks` 新增“结束当前页”管理员操作，只收集当前已加载页中 `can_terminate` 或处于可结束状态的任务；点击时冻结任务 ID 快照，经一次危险操作确认后批量提交，不维护跨页选择。

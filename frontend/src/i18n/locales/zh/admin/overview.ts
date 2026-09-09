@@ -1164,8 +1164,10 @@ export default {
         sumTooHigh: '最低毛利率与安全缓冲之和必须小于 100%，否则将排除全部账号'
       },
       modelsList: {
-        title: '自定义 /v1/models 模型列表',
-        hint: '仅影响 /v1/models 展示结果，不影响白名单模型调用和账号调度。',
+        title: '自定义模型目录',
+        hint: '控制 /v1/models 和图片工作台展示；若账号启用了模型映射白名单，还需添加精确映射或通配规则。',
+        addPlaceholder: '输入模型 ID（如 gpt-image-2.5-flare）',
+        add: '添加',
         loading: '正在加载模型列表...',
         empty: '暂无可展示模型',
         selectedSummary: '已选 {selected} / {total}',

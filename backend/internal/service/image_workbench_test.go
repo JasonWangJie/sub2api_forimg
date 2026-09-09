@@ -75,6 +75,41 @@ func TestImageWorkbenchCapabilitiesOpenAIAsyncUsesGroupModelList(t *testing.T) {
 	require.NotEmpty(t, got.CapabilityVersion)
 }
 
+func TestImageWorkbenchCapabilitiesOpenAI25ModelsExposeExtendedQualities(t *testing.T) {
+	key := imageWorkbenchTestKey(PlatformOpenAI)
+	key.Group.ModelsListConfig = GroupModelsListConfig{
+		Enabled: true,
+		Models:  []string{"gpt-image-2.5-flare", "gpt-image-2.5-sunburst"},
+	}
+	svc := NewImageWorkbenchService(
+		imageWorkbenchAPIKeyReaderStub{key: key},
+		imageWorkbenchModelCatalogStub{models: []string{"gpt-image-*"}},
+	)
+
+	got, err := svc.GetCapabilities(context.Background(), 7, 10)
+	require.NoError(t, err)
+	require.Equal(t, []ImageWorkbenchModel{
+		{ID: "gpt-image-2.5-flare", Label: "GPT Image 2.5 Flare", Qualities: []string{"auto", "low", "medium", "high", "xhigh", "max"}},
+		{ID: "gpt-image-2.5-sunburst", Label: "GPT Image 2.5 Sunburst", Qualities: []string{"auto", "low", "medium", "high", "xhigh", "max"}},
+	}, got.Models)
+}
+
+func TestImageWorkbenchCapabilitiesOpenAICustomImageModelCanBeAddedManually(t *testing.T) {
+	key := imageWorkbenchTestKey(PlatformOpenAI)
+	key.Group.ModelsListConfig = GroupModelsListConfig{
+		Enabled: true,
+		Models:  []string{"gpt-image-future"},
+	}
+	svc := NewImageWorkbenchService(
+		imageWorkbenchAPIKeyReaderStub{key: key},
+		imageWorkbenchModelCatalogStub{models: []string{"gpt-image-2"}},
+	)
+
+	got, err := svc.GetCapabilities(context.Background(), 7, 10)
+	require.NoError(t, err)
+	require.Equal(t, []ImageWorkbenchModel{{ID: "gpt-image-future", Label: "gpt-image-future"}}, got.Models)
+}
+
 func TestImageWorkbenchCapabilitiesGeminiRealtimeSupportsExplicitAliasAndWildcard(t *testing.T) {
 	key := imageWorkbenchTestKey(PlatformGemini)
 	key.Group.ModelsListConfig = GroupModelsListConfig{

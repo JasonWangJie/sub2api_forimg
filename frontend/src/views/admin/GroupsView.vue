@@ -806,6 +806,24 @@
             v-if="createModelsListState.enabled"
             class="overflow-hidden rounded-lg border border-gray-200 bg-gray-50/50 dark:border-dark-600 dark:bg-dark-800/40"
           >
+            <div class="flex items-center gap-2 border-b border-gray-200 p-2 dark:border-dark-600">
+              <input
+                v-model="createModelsListCustomInput"
+                type="text"
+                class="input min-w-0 flex-1"
+                :placeholder="t('admin.groups.modelsList.addPlaceholder')"
+                @keydown.enter.prevent="addCreateModelsListItem"
+              />
+              <button
+                type="button"
+                class="btn btn-secondary flex-shrink-0"
+                :disabled="!createModelsListCustomInput.trim()"
+                @click="addCreateModelsListItem"
+              >
+                <Icon name="plus" size="sm" class="mr-1" />
+                {{ t('admin.groups.modelsList.add') }}
+              </button>
+            </div>
             <div
               v-if="!createModelsListLoading && createModelsListState.items.length > 0"
               class="flex items-center justify-between gap-2 border-b border-gray-200 bg-gray-50 px-3 py-2 text-xs dark:border-dark-600 dark:bg-dark-800"
@@ -2541,6 +2559,24 @@
             v-if="editModelsListState.enabled"
             class="overflow-hidden rounded-lg border border-gray-200 bg-gray-50/50 dark:border-dark-600 dark:bg-dark-800/40"
           >
+            <div class="flex items-center gap-2 border-b border-gray-200 p-2 dark:border-dark-600">
+              <input
+                v-model="editModelsListCustomInput"
+                type="text"
+                class="input min-w-0 flex-1"
+                :placeholder="t('admin.groups.modelsList.addPlaceholder')"
+                @keydown.enter.prevent="addEditModelsListItem"
+              />
+              <button
+                type="button"
+                class="btn btn-secondary flex-shrink-0"
+                :disabled="!editModelsListCustomInput.trim()"
+                @click="addEditModelsListItem"
+              >
+                <Icon name="plus" size="sm" class="mr-1" />
+                {{ t('admin.groups.modelsList.add') }}
+              </button>
+            </div>
             <div
               v-if="!editModelsListLoading && editModelsListState.items.length > 0"
               class="flex items-center justify-between gap-2 border-b border-gray-200 bg-gray-50 px-3 py-2 text-xs dark:border-dark-600 dark:bg-dark-800"
@@ -4484,6 +4520,7 @@ import {
   type MessagesDispatchMappingRow,
 } from "./groupsMessagesDispatch";
 import {
+  addModelsListItem,
   buildModelsListConfig,
   createModelsListState as createInitialModelsListState,
   invertModelsListSelection,
@@ -4990,6 +5027,8 @@ const createMessagesDispatchDefaults = createDefaultMessagesDispatchFormState();
 const editMessagesDispatchDefaults = createDefaultMessagesDispatchFormState();
 const createModelsListState = reactive(createInitialModelsListState());
 const editModelsListState = reactive(createInitialModelsListState());
+const createModelsListCustomInput = ref("");
+const editModelsListCustomInput = ref("");
 const createModelsListLoading = ref(false);
 const editModelsListLoading = ref(false);
 type ReasoningEffortPolicyFieldsExpose = {
@@ -5282,6 +5321,23 @@ const resetModelsListState = (
   state.enabled = fresh.enabled;
   state.savedModels = fresh.savedModels;
   state.items = fresh.items;
+  if (state === createModelsListState) {
+    createModelsListCustomInput.value = "";
+  } else {
+    editModelsListCustomInput.value = "";
+  }
+};
+
+const addCreateModelsListItem = () => {
+  if (addModelsListItem(createModelsListState, createModelsListCustomInput.value)) {
+    createModelsListCustomInput.value = "";
+  }
+};
+
+const addEditModelsListItem = () => {
+  if (addModelsListItem(editModelsListState, editModelsListCustomInput.value)) {
+    editModelsListCustomInput.value = "";
+  }
 };
 
 const loadModelsListCandidates = async (

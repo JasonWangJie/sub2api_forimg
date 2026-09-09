@@ -1,5 +1,13 @@
 # AI 交接文档
 
+## 2026-09-09 OpenAI GPT Image 2.5 与图片工作台模型目录交接
+
+- OpenAI 图片接口的 `IsGPTImageGenerationModel`/校验按 `gpt-image-*` 前缀工作，未做固定枚举限制；默认目录现在包含 `gpt-image-2.5-flare` 和 `gpt-image-2.5-sunburst`。官方 2.5 模型支持 `auto/low/medium/high/xhigh/max`，请求参数会继续透传给上游。
+- `backend/internal/service/image_workbench.go` 的 `ImageWorkbenchModel` 新增可选 `qualities`。只有 `gpt-image-2.5-*` 返回扩展质量；前端按当前选择的模型覆盖平台级质量选项，避免旧模型误发 `xhigh/max`。
+- `frontend/src/views/admin/GroupsView.vue` 的创建/编辑分组模型目录均可手动输入 ID，`groupsModelsList.ts` 的 `addModelsListItem` 负责去重、自动选中和持久化顺序。保存后新打开/刷新图片工作台会读取新目录；若账号存在模型映射白名单，要同时在账号配置中添加精确 ID 或 `gpt-image-*` 通配规则。
+- 已验证：相关 Go 定向测试、前端 Vitest 27/27、`npm run typecheck`、`npm run build`、`git diff --check`。未做真实账号/上游、数据库/Redis/OSS、浏览器登录视觉、生产部署或 Fork CI 验证。
+- 当前实际基线：`main`，HEAD `abb8a33d71aa5d05a5fc9437fee4d365582d43c5`，`git describe=v0.1.173.46-dirty`，VERSION=`0.1.173.44`；保留发布手册原有未提交改动。
+
 ## 2026-09-09 管理员批量结束当前页异步任务交接
 
 - 管理端 `/admin/async-image-tasks` 顶部新增“结束当前页（N）”。`N` 只统计当前 API 页中可结束的任务；点击时把这些任务 ID 冻结为快照，经一次确认后调用 `POST /api/v1/admin/async-image-tasks/batch-terminate`。没有跨页选择状态，普通用户页不显示按钮。
