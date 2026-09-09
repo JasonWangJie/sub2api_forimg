@@ -1569,6 +1569,47 @@ export async function resetWebSearchUsage(payload: {
   );
 }
 
+// --- Gateway Image Concurrency ---
+
+export interface ImageConcurrencySettings {
+  enabled: boolean;
+  max_concurrent_requests: number;
+  overflow_mode: "wait" | "reject";
+  wait_timeout_seconds: number;
+  max_waiting_requests: number;
+}
+
+export interface ImageConcurrencySettingsView {
+  configured: boolean;
+  source: "system_settings" | "config_yaml";
+  effective: ImageConcurrencySettings;
+  fallback: ImageConcurrencySettings;
+}
+
+export async function getImageConcurrencySettings(): Promise<ImageConcurrencySettingsView> {
+  const { data } = await apiClient.get<ImageConcurrencySettingsView>(
+    "/admin/settings/image-concurrency",
+  );
+  return data;
+}
+
+export async function updateImageConcurrencySettings(
+  settings: ImageConcurrencySettings,
+): Promise<ImageConcurrencySettingsView> {
+  const { data } = await apiClient.put<ImageConcurrencySettingsView>(
+    "/admin/settings/image-concurrency",
+    settings,
+  );
+  return data;
+}
+
+export async function resetImageConcurrencySettings(): Promise<ImageConcurrencySettingsView> {
+  const { data } = await apiClient.delete<ImageConcurrencySettingsView>(
+    "/admin/settings/image-concurrency",
+  );
+  return data;
+}
+
 export const settingsAPI = {
   getSettings,
   updateSettings,
@@ -1598,6 +1639,9 @@ export const settingsAPI = {
   updateWebSearchEmulationConfig,
   testWebSearchEmulation,
   resetWebSearchUsage,
+  getImageConcurrencySettings,
+  updateImageConcurrencySettings,
+  resetImageConcurrencySettings,
 };
 
 export default settingsAPI;

@@ -162,6 +162,7 @@ export default {
         imageCircuitBreakerFailureThreshold: '连续失败阈值',
         imageCircuitBreakerCooldownSeconds: '暂停调度时长（秒）',
         workerConcurrency: 'Worker 并发数',
+        workerConcurrencyHint: '不再限制最大值；数值过大会增加数据库连接和内存压力。保存后需重启服务才会按新并发数启动 Worker。',
         executionTimeoutSeconds: '任务执行超时（秒，默认 1200）',
         accountAttemptTimeoutSeconds: '单账号尝试超时（秒）',
         accountAttemptTimeoutHint: '默认 300 秒，超时后切换其他可用账号；不超过任务总超时。',

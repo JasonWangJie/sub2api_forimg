@@ -2,6 +2,7 @@ import { apiClient } from '@/api/client'
 
 import type {
   AsyncImageTask,
+  AsyncImageTaskBatchTerminationResult,
   AsyncImageTaskEvent,
   AsyncImageTaskListParams,
   AsyncImageTaskListResponse,
@@ -153,6 +154,14 @@ async function terminate(id: string | number): Promise<AsyncImageTask> {
   return normalizeDetails(data)
 }
 
+async function batchTerminate(taskIds: Array<string | number>): Promise<AsyncImageTaskBatchTerminationResult> {
+  const { data } = await apiClient.post<AsyncImageTaskBatchTerminationResult>(
+    '/admin/async-image-tasks/batch-terminate',
+    { task_ids: taskIds.map(String) },
+  )
+  return data
+}
+
 async function resolveView(viewUrl: string, signal?: AbortSignal): Promise<AsyncImageResultAccess> {
   const { data } = await apiClient.get<AsyncImageResultAccess>(viewUrl, {
     headers: { Accept: 'application/json' },
@@ -171,6 +180,7 @@ export const asyncImageTasksAPI = {
     get: (id: string | number, signal?: AbortSignal) => get('admin', id, signal),
     resume,
     terminate,
+    batchTerminate,
   },
   resolveView,
 }

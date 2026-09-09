@@ -1,5 +1,23 @@
 # AI 交接文档
 
+## 2026-09-09 管理员批量结束当前页异步任务交接
+
+- 管理端 `/admin/async-image-tasks` 顶部新增“结束当前页（N）”。`N` 只统计当前 API 页中可结束的任务；点击时把这些任务 ID 冻结为快照，经一次确认后调用 `POST /api/v1/admin/async-image-tasks/batch-terminate`。没有跨页选择状态，普通用户页不显示按钮。
+- 批量接口最多接收 100 个 ID，并按输入顺序去重、逐条处理。每项复用单任务 `terminateAsFailed` 的版本/状态 CAS，成功仍写 `failed`、`admin_terminated`、`admin_task_terminated` 并清除加密请求载荷；已进入不可结束终态或 CAS 冲突计为 `skipped`，缺失等其他错误计为 `failed`，不会覆盖并发 Worker 的成功结果。
+- 前端按 `terminated/skipped/failed` 汇总提示，随后重新加载当前页与全局统计；如整个请求失败，目标快照和确认框保留，管理员可重试或取消。
+- 已验证：`go test ./internal/service ./internal/handler ./internal/server/routes`；异步任务 API/页面组件 Vitest 2 文件 11 项；目标 ESLint；`pnpm typecheck`；`pnpm build`；`git diff --check`。构建只有既有 pnpm overrides、Browserslist、动态导入和大 chunk 警告。
+- 下一步边界：需要运行时验收时，先在隔离数据库制造排队、已成功和 CAS 竞态任务，核对逐项结果、任务事件与请求载荷清除；本轮未连接真实 PostgreSQL/Redis/上游/OSS，未做登录后浏览器视觉，未部署、未重启、未运行 Fork CI。
+- 当前实际基线：`main`，HEAD `b373fa5906abee97b90d0d4890264d1917c2371c`，`git describe=v0.1.173.44-1-gb373fa5-dirty`，VERSION=`0.1.173.44`；工作树还包含此前尚未提交的生图并发系统设置与 Worker 上限改动，后续不得回滚覆盖。
+
+## 2026-09-09 生图并发设置与 Worker 并发交接
+
+- 管理端网关页现有独立 `ImageConcurrencySettingsCard.vue`，API 为 `GET/PUT/DELETE /api/v1/admin/settings/image-concurrency`。数据库键 `gateway_image_concurrency_settings` 存完整 JSON；有键时系统设置优先，无键或 DELETE 后读取启动时 `config.yaml` 的 `gateway.image_concurrency`。
+- `config.Config.ImageConcurrencySettings()` 是 OpenAI/Gemini 生图入口的运行时读取点；`SetImageConcurrencySettings()` 更新原子快照。当前实例写后立即生效，其他实例由 Redis `settings:image_concurrency` 通知；只影响新进入请求，不终止活动请求，已经进入旧等待循环的请求仍保留原等待参数。
+- 异步 `worker_concurrency` 已移除 UI `max=64` 与服务端 64 截断，可保存任意正整数；`<=0` 仍归一化为默认 4。Worker 池大小只在服务启动时读取，修改后必须重启，生产不能忽略数据库连接、Redis 轮询、内存、OSS 与上游容量。
+- Wire 已重新生成。为防止生成时删除既有图片账号熔断注入，`NewImageAccountCircuitBreaker` 已进入 Repository ProviderSet，`provideImageAccountCircuitBreakerRuntime` 在启动构图时正式完成 breaker 配置和三个 Gateway Service 注入。
+- 已验证：后端 handler/service/config/repository/admin handler/routes/cmd server 全包测试（含上限从 1 热改为 2 后 OpenAI/Gemini 新请求共享槽位）、Wire 生成、前端 typecheck/build、3 文件 46 项 Vitest、目标 ESLint、Vite 根页面 HTTP 200 和 `git diff --check`。未做登录后的浏览器视觉、真实数据库/Redis/上游/OSS、多实例或生产验收；未部署、未重启、未运行 Fork CI。
+- 当前实际基线：`main`，HEAD `b373fa5906abee97b90d0d4890264d1917c2371c`，`git describe=v0.1.173.44-1-gb373fa5-dirty`，VERSION=`0.1.173.44`。
+
 ## 2026-09-08 异步生图冒烟复核与重试状态修复
 
 - 本轮确认的逻辑漏洞：首次 `invoking` 无账号已显示为 `queued`，但账号 7 失败后回到 `queued` 未清除旧 `account_id`，下一次重新抢占且尚未选号时会误显示 `processing`；任务中心状态筛选也曾按原始状态过滤，和展示状态不一致。
@@ -56,11 +74,11 @@
 
 这是 `JasonWangJie/sub2api_forimg` Fork，默认在 `main` 开发。交接基线（以本轮命令实际输出为准）：
 
-- HEAD：`eecbd846cf2d0c5b0a1a25e07a226994e3711cab`
-- `git describe --tags --always --dirty`：`v0.1.173.43-1-geecbd84-dirty`
-- `backend/cmd/server/VERSION`：`0.1.173.43`
-- 最近功能：异步生图未分配账号窗口对外显示为排队、重试清除旧当前账号、任务中心状态筛选与展示归一化
-- 本次冒烟结论：Handler/Repository 全包 Go 测试、Service 异步定向测试与编译检查、前端异步 API Vitest `8/8`、`pnpm typecheck` 和 `git diff --check` 通过；Markdown 全仓检查仅发现既有 3 条断链（`wiki/Home.md`、`wiki/Gateway-API.md` 和 `README.md` 指向缺失文档）
+- HEAD：`b373fa5906abee97b90d0d4890264d1917c2371c`
+- `git describe --tags --always --dirty`：`v0.1.173.44-1-gb373fa5-dirty`
+- `backend/cmd/server/VERSION`：`0.1.173.44`
+- 最近功能：生图并发系统设置优先/YAML 回退和多实例热通知；异步 Worker 并发移除 64 上限（仍需重启生效）
+- 本次验证结论：后端 handler/service/config/repository/admin handler/routes/cmd server 测试、Wire 生成、前端 46 项定向 Vitest、`pnpm typecheck`、`pnpm build`、目标 ESLint、Vite 根页面 HTTP 200 和 `git diff --check` 通过；未做登录后的浏览器视觉及外部服务验收
 - 生产环境：未连接、未修改、未部署、未重启；未做真实 PostgreSQL/Redis/上游/OSS 端到端验证
 
 开始工作前必须运行：

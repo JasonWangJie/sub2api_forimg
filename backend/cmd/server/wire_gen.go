@@ -215,11 +215,6 @@ func initializeApplication(buildInfo handler.BuildInfo) (*Application, error) {
 	imageLibraryRepository := repository.NewImageLibraryRepository(db)
 	imageStorageIdentityGuard := service.ProvideImageStorageIdentityGuard(imageLibraryRepository)
 	imageStorageSettingService := service.ProvideImageStorageSettingService(settingRepository, secretEncryptor, backupService, imageStorageFactory, imageStorageIdentityGuard, configConfig)
-	imageAccountCircuitBreaker := repository.NewImageAccountCircuitBreaker(redisClient)
-	repository.ConfigureImageAccountCircuitBreaker(imageAccountCircuitBreaker, imageStorageSettingService)
-	gatewayService.SetImageAccountCircuitBreaker(imageAccountCircuitBreaker)
-	openAIGatewayService.SetImageAccountCircuitBreaker(imageAccountCircuitBreaker)
-	geminiMessagesCompatService.SetImageAccountCircuitBreaker(imageAccountCircuitBreaker)
 	backupHandler := admin.NewBackupHandler(backupService, userService, imageStorageSettingService)
 	asyncImageTaskRepository := repository.NewAsyncImageTaskRepository(db)
 	asyncImageTaskService := service.NewAsyncImageTaskService(asyncImageTaskRepository)
@@ -355,12 +350,14 @@ func initializeApplication(buildInfo handler.BuildInfo) (*Application, error) {
 	proxyExpiryService := service.ProvideProxyExpiryService(proxyRepository)
 	subscriptionExpiryService := service.ProvideSubscriptionExpiryService(userSubscriptionRepository, settingRepository, notificationEmailService, leaderLockCache, db)
 	batchImageWorkerRuntime := service.ProvideBatchImageWorkerRuntime(batchImageRepository, accountRepository, batchImageQueue, usageBillingRepository, usageLogRepository, batchImageModelPricingResolver, apiKeyAuthCacheInvalidator, configConfig)
+	imageAccountCircuitBreaker := repository.NewImageAccountCircuitBreaker(redisClient)
+	mainImageAccountCircuitBreakerRuntime := provideImageAccountCircuitBreakerRuntime(imageAccountCircuitBreaker, imageStorageSettingService, gatewayService, openAIGatewayService, geminiMessagesCompatService)
 	scheduledTestRunnerService := service.ProvideScheduledTestRunnerService(scheduledTestPlanRepository, scheduledTestService, accountTestService, rateLimitService, configConfig)
 	paymentOrderExpiryService := service.ProvidePaymentOrderExpiryService(paymentService, leaderLockCache, db)
 	channelMonitorRunner := service.ProvideChannelMonitorRunner(channelMonitorService, settingService)
 	channelMonitorV2Aggregator := service.ProvideChannelMonitorV2Aggregator(channelMonitorV2Repository, db, settingService)
 	userPlatformQuotaUsageFlusher := service.ProvideUserPlatformQuotaUsageFlusher(configConfig, billingCache, serviceUserPlatformQuotaRepository, timingWheelService)
-	v := provideCleanup(client, redisClient, opsMetricsCollector, opsAggregationService, opsAlertEvaluatorService, opsCleanupService, opsScheduledReportService, opsSystemLogSink, opsService, opsIngressRejectAggregator, settingService, apiKeyService, authCacheInvalidationWorker, schedulerSnapshotService, tokenRefreshService, accountExpiryService, openAICodexVersionSyncService, proxyExpiryService, subscriptionExpiryService, usageCleanupService, idempotencyCleanupService, batchImageCleanupService, batchImageWorkerRuntime, durableAsyncImageHandler, imageLibraryMaintenanceService, pricingService, emailQueueService, billingCacheService, usageRecordWorkerPool, subscriptionService, oAuthService, openAIOAuthService, geminiOAuthService, antigravityOAuthService, grokOAuthService, openAIGatewayService, scheduledTestRunnerService, backupService, paymentOrderExpiryService, channelMonitorRunner, channelMonitorV2Aggregator, userPlatformQuotaUsageFlusher, upstreamBillingProbeService, ollamaCloudUsageService, auditLogService, promptService)
+	v := provideCleanup(client, redisClient, opsMetricsCollector, opsAggregationService, opsAlertEvaluatorService, opsCleanupService, opsScheduledReportService, opsSystemLogSink, opsService, opsIngressRejectAggregator, settingService, apiKeyService, authCacheInvalidationWorker, schedulerSnapshotService, tokenRefreshService, accountExpiryService, openAICodexVersionSyncService, proxyExpiryService, subscriptionExpiryService, usageCleanupService, idempotencyCleanupService, batchImageCleanupService, batchImageWorkerRuntime, durableAsyncImageHandler, imageLibraryMaintenanceService, pricingService, emailQueueService, billingCacheService, usageRecordWorkerPool, subscriptionService, oAuthService, openAIOAuthService, geminiOAuthService, antigravityOAuthService, grokOAuthService, openAIGatewayService, mainImageAccountCircuitBreakerRuntime, scheduledTestRunnerService, backupService, paymentOrderExpiryService, channelMonitorRunner, channelMonitorV2Aggregator, userPlatformQuotaUsageFlusher, upstreamBillingProbeService, ollamaCloudUsageService, auditLogService, promptService)
 	application := &Application{
 		Server:      httpServer,
 		PromptAudit: promptService,
@@ -386,6 +383,22 @@ func provideServiceBuildInfo(buildInfo handler.BuildInfo) service.BuildInfo {
 		Version:   buildInfo.Version,
 		BuildType: buildInfo.BuildType,
 	}
+}
+
+type imageAccountCircuitBreakerRuntime struct{}
+
+func provideImageAccountCircuitBreakerRuntime(
+	imageCircuitBreaker service.ImageAccountCircuitBreaker,
+	imageStorageSettings *service.ImageStorageSettingService,
+	gateway *service.GatewayService,
+	openAIGateway *service.OpenAIGatewayService,
+	geminiMessagesCompat *service.GeminiMessagesCompatService,
+) *imageAccountCircuitBreakerRuntime {
+	repository.ConfigureImageAccountCircuitBreaker(imageCircuitBreaker, imageStorageSettings)
+	gateway.SetImageAccountCircuitBreaker(imageCircuitBreaker)
+	openAIGateway.SetImageAccountCircuitBreaker(imageCircuitBreaker)
+	geminiMessagesCompat.SetImageAccountCircuitBreaker(imageCircuitBreaker)
+	return &imageAccountCircuitBreakerRuntime{}
 }
 
 func provideCleanup(
@@ -425,6 +438,7 @@ func provideCleanup(
 	antigravityOAuth *service.AntigravityOAuthService,
 	grokOAuth *service.GrokOAuthService,
 	openAIGateway *service.OpenAIGatewayService,
+	_ *imageAccountCircuitBreakerRuntime,
 	scheduledTestRunner *service.ScheduledTestRunnerService,
 	backupSvc *service.BackupService,
 	paymentOrderExpiry *service.PaymentOrderExpiryService,
@@ -446,6 +460,12 @@ func provideCleanup(
 		}
 
 		parallelSteps := []cleanupStep{
+			{"ImageConcurrencySettingInvalidationSubscriber", func() error {
+				if settingService != nil {
+					settingService.StopImageConcurrencySettingInvalidationSubscriber()
+				}
+				return nil
+			}},
 			{"BillingSettingInvalidationSubscriber", func() error {
 				if settingService != nil {
 					settingService.StopBillingSettingInvalidationSubscriber()

@@ -1045,6 +1045,33 @@ type ImageConcurrencyConfig struct {
 	MaxWaitingRequests int `mapstructure:"max_waiting_requests"`
 }
 
+// ImageConcurrencySettings returns the effective process-local image
+// concurrency settings. A live system-settings override takes precedence over
+// the startup config.yaml value.
+func (c *Config) ImageConcurrencySettings() ImageConcurrencyConfig {
+	if c == nil {
+		return ImageConcurrencyConfig{}
+	}
+	if live := c.Gateway.imageConcurrencyLive; live != nil {
+		if snapshot := live.Load(); snapshot != nil {
+			return *snapshot
+		}
+	}
+	return c.Gateway.ImageConcurrency
+}
+
+// SetImageConcurrencySettings atomically replaces the effective runtime
+// settings without mutating the config.yaml fallback snapshot.
+func (c *Config) SetImageConcurrencySettings(settings ImageConcurrencyConfig) {
+	if c == nil {
+		return
+	}
+	if c.Gateway.imageConcurrencyLive == nil {
+		c.Gateway.imageConcurrencyLive = &atomic.Pointer[ImageConcurrencyConfig]{}
+	}
+	c.Gateway.imageConcurrencyLive.Store(&settings)
+}
+
 const (
 	ImageConcurrencyOverflowModeReject = "reject"
 	ImageConcurrencyOverflowModeWait   = "wait"
@@ -1125,6 +1152,9 @@ type GatewayConfig struct {
 	OpenAIProxyStreamCircuit GatewayOpenAIProxyStreamCircuitConfig `mapstructure:"openai_proxy_stream_circuit"`
 	// ImageConcurrency: 图片生成独立并发限制配置（默认关闭）
 	ImageConcurrency ImageConcurrencyConfig `mapstructure:"image_concurrency"`
+	// imageConcurrencyLive stores a system-settings override. It is excluded
+	// from config serialization so Gateway.ImageConcurrency remains the YAML fallback.
+	imageConcurrencyLive *atomic.Pointer[ImageConcurrencyConfig] `mapstructure:"-" json:"-" yaml:"-"`
 
 	// HTTP 上游连接池配置（性能优化：支持高并发场景调优）
 	// MaxIdleConns: 所有主机的最大空闲连接总数

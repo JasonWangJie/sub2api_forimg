@@ -13,6 +13,9 @@ const {
   updateSettings,
   getWebSearchEmulationConfig,
   updateWebSearchEmulationConfig,
+  getImageConcurrencySettings,
+  updateImageConcurrencySettings,
+  resetImageConcurrencySettings,
   getAdminApiKey,
   sendTestEmail,
   getOverloadCooldownSettings,
@@ -43,6 +46,9 @@ const {
   updateSettings: vi.fn(),
   getWebSearchEmulationConfig: vi.fn(),
   updateWebSearchEmulationConfig: vi.fn(),
+  getImageConcurrencySettings: vi.fn(),
+  updateImageConcurrencySettings: vi.fn(),
+  resetImageConcurrencySettings: vi.fn(),
   getAdminApiKey: vi.fn(),
   sendTestEmail: vi.fn(),
   getOverloadCooldownSettings: vi.fn(),
@@ -84,6 +90,24 @@ const {
 }));
 
 const localeRef = vi.hoisted(() => ({ value: "zh-CN" }));
+const imageConcurrencySettingsView = {
+  configured: false,
+  source: "config_yaml",
+  effective: {
+    enabled: true,
+    max_concurrent_requests: 50,
+    overflow_mode: "wait",
+    wait_timeout_seconds: 360,
+    max_waiting_requests: 120,
+  },
+  fallback: {
+    enabled: true,
+    max_concurrent_requests: 50,
+    overflow_mode: "wait",
+    wait_timeout_seconds: 360,
+    max_waiting_requests: 120,
+  },
+};
 
 vi.mock("@/api", () => ({
   adminAPI: {
@@ -92,6 +116,9 @@ vi.mock("@/api", () => ({
       updateSettings,
       getWebSearchEmulationConfig,
       updateWebSearchEmulationConfig,
+      getImageConcurrencySettings,
+      updateImageConcurrencySettings,
+      resetImageConcurrencySettings,
       getAdminApiKey,
       sendTestEmail,
       getOverloadCooldownSettings,
@@ -641,6 +668,9 @@ describe("admin SettingsView payment visible method controls", () => {
     updateSettings.mockReset();
     getWebSearchEmulationConfig.mockReset();
     updateWebSearchEmulationConfig.mockReset();
+    getImageConcurrencySettings.mockReset();
+    updateImageConcurrencySettings.mockReset();
+    resetImageConcurrencySettings.mockReset();
     getAdminApiKey.mockReset();
     sendTestEmail.mockReset();
     getOverloadCooldownSettings.mockReset();
@@ -679,6 +709,7 @@ describe("admin SettingsView payment visible method controls", () => {
       enabled: false,
       providers: [],
     });
+    getImageConcurrencySettings.mockResolvedValue(imageConcurrencySettingsView);
     getAdminApiKey.mockResolvedValue({
       exists: false,
       masked_key: "",
@@ -1723,6 +1754,9 @@ describe("admin SettingsView wechat connect controls", () => {
     updateSettings.mockReset();
     getWebSearchEmulationConfig.mockReset();
     updateWebSearchEmulationConfig.mockReset();
+    getImageConcurrencySettings.mockReset();
+    updateImageConcurrencySettings.mockReset();
+    resetImageConcurrencySettings.mockReset();
     getAdminApiKey.mockReset();
     getOverloadCooldownSettings.mockReset();
     getRateLimit429CooldownSettings.mockReset();
@@ -1758,6 +1792,7 @@ describe("admin SettingsView wechat connect controls", () => {
       enabled: false,
       providers: [],
     });
+    getImageConcurrencySettings.mockResolvedValue(imageConcurrencySettingsView);
     getAdminApiKey.mockResolvedValue({
       exists: false,
       masked_key: "",
@@ -1969,6 +2004,9 @@ describe("admin SettingsView platform quota matrix", () => {
     updateSettings.mockReset();
     getWebSearchEmulationConfig.mockReset();
     updateWebSearchEmulationConfig.mockReset();
+    getImageConcurrencySettings.mockReset();
+    updateImageConcurrencySettings.mockReset();
+    resetImageConcurrencySettings.mockReset();
     getAdminApiKey.mockReset();
     getOverloadCooldownSettings.mockReset();
     getRateLimit429CooldownSettings.mockReset();
@@ -1995,6 +2033,7 @@ describe("admin SettingsView platform quota matrix", () => {
     }));
     getWebSearchEmulationConfig.mockResolvedValue({ enabled: false, providers: [] });
     updateWebSearchEmulationConfig.mockResolvedValue({ enabled: false, providers: [] });
+    getImageConcurrencySettings.mockResolvedValue(imageConcurrencySettingsView);
     getAdminApiKey.mockResolvedValue({ exists: false, masked_key: "" });
     getOverloadCooldownSettings.mockResolvedValue({});
     getRateLimit429CooldownSettings.mockResolvedValue({});

@@ -162,6 +162,7 @@ export default {
         imageCircuitBreakerFailureThreshold: 'Consecutive failure threshold',
         imageCircuitBreakerCooldownSeconds: 'Scheduling pause (seconds)',
         workerConcurrency: 'Worker concurrency',
+        workerConcurrencyHint: 'No application maximum is enforced. Large values increase database and memory pressure. Restart the service after saving to start the new number of workers.',
         executionTimeoutSeconds: 'Execution timeout (seconds, default 1200)',
         accountAttemptTimeoutSeconds: 'Per-account attempt timeout (seconds)',
         accountAttemptTimeoutHint: 'Default 300 seconds. Switch accounts when this limit is reached; it cannot exceed the task timeout.',

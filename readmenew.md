@@ -1,5 +1,23 @@
 # Sub2API Fork 二次开发总览
 
+## 2026-09-09 管理员批量结束当前页异步生图任务
+
+- `/admin/async-image-tasks` 新增“结束当前页”管理员操作，只收集当前已加载页中 `can_terminate` 或处于可结束状态的任务；点击时冻结任务 ID 快照，经一次危险操作确认后批量提交，不维护跨页选择。
+- 新增 `POST /api/v1/admin/async-image-tasks/batch-terminate`，请求体显式携带最多 100 个任务 ID。服务端去重后逐条复用单任务的状态/版本 CAS 和 `admin_terminated` 审计语义；已完成或并发变更的任务计为跳过，其他错误按项返回，不覆盖 Worker 已完成的结果。
+- 批量结果返回请求数、已结束、跳过、失败计数及逐项状态；页面根据结果提示并刷新当前页和全局统计。普通用户任务中心不显示或调用该操作。
+- 验证：`go test ./internal/service ./internal/handler ./internal/server/routes` 通过；前端异步任务 API 与页面组件 2 文件 11 项 Vitest 通过；目标 ESLint、`pnpm typecheck`、`pnpm build` 和 `git diff --check` 通过。构建仅有既有 pnpm overrides、Browserslist、动态导入和大 chunk 警告。
+- 未完成项：未连接真实 PostgreSQL/Redis/上游/OSS 验证批量运行时竞态，未做登录后浏览器视觉验收，未部署或重启生产，Fork CI 未运行。
+- 当前实际基线：分支 `main`；HEAD `b373fa5906abee97b90d0d4890264d1917c2371c`；`git describe=v0.1.173.44-1-gb373fa5-dirty`；VERSION=`0.1.173.44`。
+
+## 2026-09-09 生图并发系统设置与 Worker 上限调整
+
+- 管理端「系统设置 / 网关服务」新增生图并发闸门：`GET/PUT/DELETE /api/v1/admin/settings/image-concurrency` 分别读取、保存系统覆盖和恢复 `config.yaml`；系统设置存在时优先，否则沿用 `gateway.image_concurrency`。
+- 生图并发策略以单个 JSON 设置原子保存，当前实例使用原子快照即时切换，Redis Pub/Sub 通知其他实例；保存后新进入的 OpenAI/Gemini、同步/异步生图请求立即使用新值，正在执行或已经排队的请求不被中断。
+- 异步 `worker_concurrency` 删除前端 `max=64` 和后端大于 64 的静默截断，现在没有代码最大值；Worker goroutine 仍只在进程启动时创建，所以修改后必须重启服务，且大值需要自行评估数据库、Redis、内存、OSS 和上游容量。
+- 验证：`go generate ./cmd/server`；`go test ./internal/handler ./internal/service ./internal/config ./internal/repository ./internal/handler/admin ./internal/server/routes ./cmd/server -count=1`（含上限从 1 热改为 2 后 OpenAI/Gemini 新请求共享槽位的回归测试）；前端 `pnpm typecheck`、`pnpm build`；定向 Vitest 3 文件共 46 项；目标 ESLint（0 error、4 条旧测试未使用 import warning）；Vite 开发服务器根页面 HTTP 200；`git diff --check` 均通过。
+- 未完成项：未启动浏览器做页面视觉验收，未连接真实 PostgreSQL/Redis/上游/OSS 做多实例或端到端验证，未部署或重启生产，Fork CI 未运行。
+- 当前实际基线：分支 `main`；HEAD `b373fa5906abee97b90d0d4890264d1917c2371c`；`git describe=v0.1.173.44-1-gb373fa5-dirty`；VERSION=`0.1.173.44`。
+
 ## 2026-09-08 异步生图冒烟复核与重试状态修复
 
 - 冒烟复核发现并修复两处状态一致性缺陷：账号容量/上游临时错误/参考图重试回到 `queued` 时清除当前执行 `account_id`，但保留 `account_attempts` 与 `attempted_account_ids` 审计；任务中心筛选 `queued`/`invoking` 时与未分配账号的展示状态保持一致。
@@ -69,13 +87,13 @@ codegraph init
 
 ## 当前版本快照
 
-记录日期：`2026-09-08`（当前工作树含异步生图状态展示/重试状态修复及既有用户改动；未部署或重启生产）。
+记录日期：`2026-09-09`（当前工作树含管理员批量结束当前页异步任务、生图并发系统设置、Worker 上限调整及文档同步；未部署或重启生产）。
 
 | 项目 | 当前记录 |
 |---|---|
-| 发布版本文件 | `backend/cmd/server/VERSION`=`0.1.173.43` |
-| 文档记录时 HEAD | `eecbd846cf2d0c5b0a1a25e07a226994e3711cab` |
-| HEAD 描述 | `v0.1.173.43-1-geecbd84-dirty` |
+| 发布版本文件 | `backend/cmd/server/VERSION`=`0.1.173.44` |
+| 文档记录时 HEAD | `b373fa5906abee97b90d0d4890264d1917c2371c` |
+| HEAD 描述 | `v0.1.173.44-1-gb373fa5-dirty` |
 | 当前及后续默认分支 | `main` |
 | 已合并原作者主线 | 以 `git log` / `upstream/main` 实际为准 |
 | SC 上传安全迁移 | `backend/migrations/187_ZJ_async_image_upload_reservations.sql` |
@@ -199,7 +217,7 @@ codegraph init
 - PostgreSQL `updated_at` 同时覆盖调用、上传和账务后处理心跳。Redis 租约被恢复但数据库心跳仍在有效窗口时，后来的投递不会提前把任务标为 `execution_unknown`；只有数据库心跳也超过租约窗口才进入不确定状态。
 - Outbox 每批认领写入 UUID claim token；发布、失败回退和终态更新都校验 `id + claim_token`，超时的旧 dispatcher 不能覆盖新 dispatcher 的结果。
 - 本地图片并发门禁拒绝发生在确认未调用上游时，任务从 `invoking` 回到 `queued` 并延迟重排；真正的上游 `429` 不走该分支。
-- 单实例 `worker_concurrency` 硬上限为 64，默认 4；多实例总并发是各实例之和。Worker 数量只在进程启动时创建，修改该配置后必须重启服务。
+- 单实例 `worker_concurrency` 默认 4、没有代码最大值；多实例总并发是各实例之和。Worker 数量只在进程启动时创建，修改该配置后必须重启服务；提高前先评估数据库、Redis、内存、OSS 和上游容量。
 - Gemini 参考图默认限制为单图 40 MP、最多 8 张、总计 64 MiB/80 MP；硬上限为单图 80 MP、16 张、总计 256 MiB/320 MP。绑定的 SC OSS 输入由 Worker 直接 `Read`，不再经预签名 URL 回环下载；读取后仍重新校验 MIME、完整解码、像素和 SHA-256。
 - 单任务结果上传保持串行，避免少量图片下额外 goroutine、锁和峰值内存。扩容应先观察数据库连接池、Redis 命令延迟、图片并发门禁、staging 字节和 OSS 吞吐，再逐步提高实例数或 Worker 数。
 
@@ -255,7 +273,7 @@ codegraph init
 | 每用户导入限频 | 20 次/分钟 |
 | 每用户投稿限频 | 10 次/分钟 |
 | 异步参考图保留 | 24 小时 |
-| 异步 Worker | 每实例默认 4，硬上限 64；修改后重启 |
+| 异步 Worker | 每实例默认 4，无代码最大值；修改后重启并自行评估资源容量 |
 | 参考图任务总预算 | 默认 8 张、64 MiB、80 MP |
 | SC 参考图 OSS 上传超时 | 300 秒（最大 600） |
 | 每输入对象 URL alias | 最多 128 个 |

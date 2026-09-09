@@ -10,6 +10,58 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+// GetImageConcurrencySettings 获取生图并发闸门的有效配置和 YAML 回退值。
+// GET /api/v1/admin/settings/image-concurrency
+func (h *SettingHandler) GetImageConcurrencySettings(c *gin.Context) {
+	settings, err := h.settingService.GetImageConcurrencySettings(c.Request.Context())
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, settings)
+}
+
+type UpdateImageConcurrencySettingsRequest struct {
+	Enabled               bool   `json:"enabled"`
+	MaxConcurrentRequests int    `json:"max_concurrent_requests"`
+	OverflowMode          string `json:"overflow_mode"`
+	WaitTimeoutSeconds    int    `json:"wait_timeout_seconds"`
+	MaxWaitingRequests    int    `json:"max_waiting_requests"`
+}
+
+// UpdateImageConcurrencySettings 保存系统设置覆盖并立即应用。
+// PUT /api/v1/admin/settings/image-concurrency
+func (h *SettingHandler) UpdateImageConcurrencySettings(c *gin.Context) {
+	var req UpdateImageConcurrencySettingsRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.BadRequest(c, "Invalid request: "+err.Error())
+		return
+	}
+	updated, err := h.settingService.SetImageConcurrencySettings(c.Request.Context(), &service.ImageConcurrencySettings{
+		Enabled:               req.Enabled,
+		MaxConcurrentRequests: req.MaxConcurrentRequests,
+		OverflowMode:          req.OverflowMode,
+		WaitTimeoutSeconds:    req.WaitTimeoutSeconds,
+		MaxWaitingRequests:    req.MaxWaitingRequests,
+	})
+	if err != nil {
+		response.BadRequest(c, err.Error())
+		return
+	}
+	response.Success(c, updated)
+}
+
+// ResetImageConcurrencySettings 删除系统设置覆盖并恢复 config.yaml。
+// DELETE /api/v1/admin/settings/image-concurrency
+func (h *SettingHandler) ResetImageConcurrencySettings(c *gin.Context) {
+	settings, err := h.settingService.ResetImageConcurrencySettings(c.Request.Context())
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, settings)
+}
+
 // GetAdminAPIKey 获取管理员 API Key 状态
 // GET /api/v1/admin/settings/admin-api-key
 func (h *SettingHandler) GetAdminAPIKey(c *gin.Context) {

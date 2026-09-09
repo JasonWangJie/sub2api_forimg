@@ -9,7 +9,10 @@ import (
 	"github.com/redis/go-redis/v9"
 )
 
-const billingChargeMultiplierChannel = "settings:billing_charge_multiplier"
+const (
+	billingChargeMultiplierChannel  = "settings:billing_charge_multiplier"
+	imageConcurrencySettingsChannel = "settings:image_concurrency"
+)
 
 type billingSettingInvalidation struct {
 	rdb *redis.Client
@@ -27,13 +30,28 @@ func (i *billingSettingInvalidation) PublishBillingChargeMultiplier(ctx context.
 }
 
 func (i *billingSettingInvalidation) SubscribeBillingChargeMultiplier(ctx context.Context, handler func(value string)) error {
+	return i.subscribe(ctx, billingChargeMultiplierChannel, "billing setting invalidation", handler)
+}
+
+func (i *billingSettingInvalidation) PublishImageConcurrencySettings(ctx context.Context, value string) error {
 	if i == nil || i.rdb == nil {
-		return errors.New("billing setting invalidation is not configured")
+		return errors.New("image concurrency setting invalidation is not configured")
 	}
-	pubsub := i.rdb.Subscribe(ctx, billingChargeMultiplierChannel)
+	return i.rdb.Publish(ctx, imageConcurrencySettingsChannel, value).Err()
+}
+
+func (i *billingSettingInvalidation) SubscribeImageConcurrencySettings(ctx context.Context, handler func(value string)) error {
+	return i.subscribe(ctx, imageConcurrencySettingsChannel, "image concurrency setting invalidation", handler)
+}
+
+func (i *billingSettingInvalidation) subscribe(ctx context.Context, channel, description string, handler func(value string)) error {
+	if i == nil || i.rdb == nil {
+		return fmt.Errorf("%s is not configured", description)
+	}
+	pubsub := i.rdb.Subscribe(ctx, channel)
 	if _, err := pubsub.Receive(ctx); err != nil {
 		_ = pubsub.Close()
-		return fmt.Errorf("subscribe to billing setting invalidation: %w", err)
+		return fmt.Errorf("subscribe to %s: %w", description, err)
 	}
 	defer func() { _ = pubsub.Close() }()
 	for {
@@ -42,7 +60,7 @@ func (i *billingSettingInvalidation) SubscribeBillingChargeMultiplier(ctx contex
 			return ctx.Err()
 		case message, ok := <-pubsub.Channel():
 			if !ok {
-				return errors.New("billing setting invalidation channel closed")
+				return fmt.Errorf("%s channel closed", description)
 			}
 			if message != nil && handler != nil {
 				handler(message.Payload)
@@ -52,3 +70,4 @@ func (i *billingSettingInvalidation) SubscribeBillingChargeMultiplier(ctx contex
 }
 
 var _ service.BillingSettingInvalidation = (*billingSettingInvalidation)(nil)
+var _ service.ImageConcurrencySettingInvalidation = (*billingSettingInvalidation)(nil)

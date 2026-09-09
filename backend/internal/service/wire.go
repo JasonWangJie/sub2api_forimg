@@ -728,7 +728,11 @@ func ProvideSettingService(settingRepo SettingRepository, groupRepo GroupReposit
 	svc.SetProxyRepository(proxyRepo)
 	svc.SetBillingSettingInvalidation(billingInvalidation)
 	svc.StartBillingSettingInvalidationSubscriber(context.Background())
+	svc.StartImageConcurrencySettingInvalidationSubscriber(context.Background())
 	svc.WarmBillingChargeMultiplier(context.Background())
+	if err := svc.LoadImageConcurrencySettings(context.Background()); err != nil {
+		logger.LegacyPrintf("service.setting", "Warning: load image concurrency settings failed; using config.yaml fallback: %v", err)
+	}
 	if err := svc.LoadForwardedClientIPSettings(context.Background()); err != nil {
 		logger.LegacyPrintf("service.setting", "Warning: load forwarded client IP settings failed: %v", err)
 	}

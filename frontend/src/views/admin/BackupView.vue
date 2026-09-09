@@ -223,7 +223,8 @@
             </div>
             <div>
               <label class="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">{{ t('admin.backup.imageStorage.workerConcurrency') }}</label>
-              <input v-model.number="imageStorageForm.async_image.worker_concurrency" type="number" min="1" max="64" class="input w-full" />
+              <input v-model.number="imageStorageForm.async_image.worker_concurrency" type="number" min="1" step="1" class="input w-full" />
+              <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">{{ t('admin.backup.imageStorage.workerConcurrencyHint') }}</p>
             </div>
               <div>
                 <label class="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">{{ t('admin.backup.imageStorage.executionTimeoutSeconds') }}</label>

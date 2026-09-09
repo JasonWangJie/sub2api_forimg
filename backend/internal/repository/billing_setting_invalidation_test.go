@@ -39,3 +39,33 @@ func TestBillingSettingInvalidationPublishesAndSubscribes(t *testing.T) {
 	cancel()
 	require.ErrorIs(t, <-done, context.Canceled)
 }
+
+func TestImageConcurrencySettingInvalidationPublishesAndSubscribes(t *testing.T) {
+	server := miniredis.RunT(t)
+	client := redis.NewClient(&redis.Options{Addr: server.Addr()})
+	defer func() { _ = client.Close() }()
+
+	invalidation := &billingSettingInvalidation{rdb: client}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	received := make(chan string, 1)
+	done := make(chan error, 1)
+	go func() {
+		done <- invalidation.SubscribeImageConcurrencySettings(ctx, func(value string) {
+			received <- value
+		})
+	}()
+
+	require.Eventually(t, func() bool {
+		return server.PubSubNumSub(imageConcurrencySettingsChannel)[imageConcurrencySettingsChannel] == 1
+	}, time.Second, 10*time.Millisecond)
+	require.NoError(t, invalidation.PublishImageConcurrencySettings(context.Background(), `{"configured":false}`))
+	select {
+	case value := <-received:
+		require.JSONEq(t, `{"configured":false}`, value)
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for image concurrency setting invalidation")
+	}
+	cancel()
+	require.ErrorIs(t, <-done, context.Canceled)
+}

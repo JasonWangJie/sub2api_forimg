@@ -25,7 +25,18 @@
               {{ t('asyncImageTasks.summary.averageDuration', { duration: averageDurationLabel }) }}
             </span>
           </div>
-          <div class="flex items-center gap-2">
+          <div class="flex flex-wrap items-center justify-end gap-2">
+            <button
+              v-if="admin"
+              type="button"
+              class="btn btn-danger btn-sm inline-flex items-center gap-1.5"
+              :disabled="loading || batchTerminating || currentPageTerminableTasks.length === 0"
+              data-test="batch-terminate-current-page"
+              @click="askBatchTerminateCurrentPage"
+            >
+              <Icon name="ban" size="sm" />
+              {{ t('asyncImageTasks.terminate.currentPageAction', { count: currentPageTerminableTasks.length }) }}
+            </button>
             <AutoRefreshButton
               :enabled="autoRefresh.enabled.value"
               :interval-seconds="autoRefresh.intervalSeconds.value"
@@ -246,6 +257,8 @@
                 class="inline-flex h-8 w-8 items-center justify-center rounded-md text-rose-600 hover:bg-rose-50 hover:text-rose-700 dark:text-rose-400 dark:hover:bg-rose-950/30"
                 :title="t('asyncImageTasks.terminate.action')"
                 :aria-label="t('asyncImageTasks.terminate.action')"
+                :disabled="terminating || batchTerminating"
+                :class="{ 'cursor-not-allowed opacity-50': terminating || batchTerminating }"
                 @click="askTerminate(row)"
               >
                 <Icon name="ban" size="sm" />
@@ -319,6 +332,7 @@
               v-if="admin && canTerminate(detail)"
               type="button"
               class="btn btn-danger btn-sm inline-flex items-center gap-1.5"
+              :disabled="terminating || batchTerminating"
               @click="askTerminate(detail)"
             >
               <Icon name="ban" size="sm" />
@@ -500,6 +514,17 @@
       @cancel="terminateTarget = null"
     />
 
+    <ConfirmDialog
+      :show="batchTerminateTargets.length > 0"
+      :title="t('asyncImageTasks.terminate.currentPageTitle')"
+      :message="t('asyncImageTasks.terminate.currentPageMessage', { count: batchTerminateTargets.length })"
+      :confirm-text="t('asyncImageTasks.terminate.currentPageConfirm', { count: batchTerminateTargets.length })"
+      :cancel-text="t('common.cancel')"
+      :danger="true"
+      @confirm="batchTerminateCurrentPage"
+      @cancel="cancelBatchTerminate"
+    />
+
     <ImageLightbox :src="lightboxSrc" :alt="lightboxAlt" @close="lightboxSrc = ''" />
   </AppLayout>
 </template>
@@ -580,6 +605,8 @@ const resumeTarget = ref<AsyncImageTask | null>(null)
 const resuming = ref(false)
 const terminateTarget = ref<AsyncImageTask | null>(null)
 const terminating = ref(false)
+const batchTerminateTargets = ref<string[]>([])
+const batchTerminating = ref(false)
 const pagination = reactive({ page: 1, page_size: 20, total: 0, pages: 0 })
 const filters = reactive({
   q: '',
@@ -601,6 +628,7 @@ const completedTaskCount = computed(() => stats.value.completed)
 const attentionTaskCount = computed(() => stats.value.failed)
 const successRateLabel = computed(() => `${stats.value.success_rate.toFixed(1)}%`)
 const averageDurationLabel = computed(() => formatDuration(stats.value.average_duration_ms))
+const currentPageTerminableTasks = computed(() => tasks.value.filter(canTerminate))
 
 const columns = computed<Column[]>(() => [
   { key: 'id', label: t('asyncImageTasks.columns.taskId'), class: admin.value ? 'w-[220px] max-w-[220px]' : undefined },
@@ -657,7 +685,7 @@ const autoRefresh = useAutoRefresh({
     await loadTasks(true)
     if (detailVisible.value && detail.value) await loadDetail(taskKey(detail.value), true)
   },
-  shouldPause: () => document.hidden || loading.value || detailLoading.value,
+  shouldPause: () => document.hidden || loading.value || detailLoading.value || batchTerminating.value,
 })
 
 function taskKey(task: AsyncImageTask): string | number {
@@ -1002,6 +1030,40 @@ async function terminateTask(): Promise<void> {
     appStore.showError(extractApiErrorMessage(error, t('asyncImageTasks.errors.terminate')))
   } finally {
     terminating.value = false
+  }
+}
+
+function askBatchTerminateCurrentPage(): void {
+  if (batchTerminating.value) return
+  batchTerminateTargets.value = Array.from(new Set(
+    currentPageTerminableTasks.value.map((task) => String(taskKey(task))),
+  ))
+}
+
+function cancelBatchTerminate(): void {
+  if (batchTerminating.value) return
+  batchTerminateTargets.value = []
+}
+
+async function batchTerminateCurrentPage(): Promise<void> {
+  if (batchTerminateTargets.value.length === 0 || batchTerminating.value) return
+  const taskIDs = [...batchTerminateTargets.value]
+  batchTerminating.value = true
+  try {
+    const result = await asyncImageTasksAPI.admin.batchTerminate(taskIDs)
+    const message = t('asyncImageTasks.terminate.currentPageResult', {
+      terminated: result.terminated,
+      skipped: result.skipped,
+      failed: result.failed,
+    })
+    if (result.skipped > 0 || result.failed > 0) appStore.showWarning(message)
+    else appStore.showSuccess(message)
+    batchTerminateTargets.value = []
+    await loadTasks(true)
+  } catch (error) {
+    appStore.showError(extractApiErrorMessage(error, t('asyncImageTasks.errors.batchTerminate')))
+  } finally {
+    batchTerminating.value = false
   }
 }
 

@@ -2484,7 +2484,7 @@ func (h *OpenAIGatewayHandler) acquireImageGenerationSlot(c *gin.Context, stream
 	if h == nil || h.cfg == nil || h.imageLimiter == nil {
 		return nil, true
 	}
-	imageConcurrency := h.cfg.Gateway.ImageConcurrency
+	imageConcurrency := h.cfg.ImageConcurrencySettings()
 	wait := strings.TrimSpace(imageConcurrency.OverflowMode) == config.ImageConcurrencyOverflowModeWait
 	release, acquired := h.imageLimiter.Acquire(
 		c.Request.Context(),

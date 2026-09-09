@@ -1510,8 +1510,8 @@ async_image:
   public_base_url: ""
   # 异步任务成功后是否自动创建个人图库记录；关闭时仍保存结果并返回图片 URL（默认 false）。
   auto_archive_to_library: false
-  # 单实例同时执行的异步生图 Worker 数（默认 4，最大 64）。多实例部署时总并发为各实例之和；
-  # Worker 数在进程启动时确定，修改后需重启服务。
+  # 单实例同时执行的异步生图 Worker 数（默认 4，无代码最大值）。多实例部署时总并发为各实例之和；
+  # Worker 数在进程启动时确定，修改后需重启服务。大值会增加数据库、Redis、内存、OSS 和上游压力。
   worker_concurrency: 4
   # Redis inflight 租约与 Worker 心跳失效判定时间，单位秒（默认 120）。
   worker_lease_seconds: 120

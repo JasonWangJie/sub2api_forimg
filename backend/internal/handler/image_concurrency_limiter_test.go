@@ -141,6 +141,46 @@ func TestOpenAIGatewayHandlerAcquireImageGenerationSlot_Returns429WhenFull(t *te
 	require.Contains(t, rec.Body.String(), "Image generation concurrency limit exceeded")
 }
 
+func TestImageConcurrencyHandlersUseRuntimeOverrideWithoutRestart(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	cfg := &config.Config{Gateway: config.GatewayConfig{ImageConcurrency: config.ImageConcurrencyConfig{
+		Enabled:               true,
+		MaxConcurrentRequests: 1,
+		OverflowMode:          config.ImageConcurrencyOverflowModeReject,
+	}}}
+	limiter := &imageConcurrencyLimiter{}
+	openAI := &OpenAIGatewayHandler{cfg: cfg, imageLimiter: limiter}
+	gemini := &GatewayHandler{cfg: cfg, imageLimiter: limiter}
+
+	openAIContext, _ := gin.CreateTestContext(httptest.NewRecorder())
+	openAIContext.Request = httptest.NewRequest(http.MethodPost, "/v1/images/generations", nil)
+	firstRelease, acquired := openAI.acquireImageGenerationSlot(openAIContext, false)
+	require.True(t, acquired)
+	require.NotNil(t, firstRelease)
+	defer firstRelease()
+
+	cfg.SetImageConcurrencySettings(config.ImageConcurrencyConfig{
+		Enabled:               true,
+		MaxConcurrentRequests: 2,
+		OverflowMode:          config.ImageConcurrencyOverflowModeReject,
+	})
+
+	geminiContext, _ := gin.CreateTestContext(httptest.NewRecorder())
+	geminiContext.Request = httptest.NewRequest(http.MethodPost, "/v1beta/models/gemini:generateContent", nil)
+	secondRelease, acquired := gemini.acquireGeminiImageGenerationSlot(geminiContext)
+	require.True(t, acquired)
+	require.NotNil(t, secondRelease)
+	defer secondRelease()
+
+	blockedRecorder := httptest.NewRecorder()
+	blockedContext, _ := gin.CreateTestContext(blockedRecorder)
+	blockedContext.Request = httptest.NewRequest(http.MethodPost, "/v1/images/generations", nil)
+	blockedRelease, acquired := openAI.acquireImageGenerationSlot(blockedContext, false)
+	require.False(t, acquired)
+	require.Nil(t, blockedRelease)
+	require.Equal(t, http.StatusTooManyRequests, blockedRecorder.Code)
+}
+
 func TestOpenAIGatewayHandlerResponses_ImageIntentRejectedByImageConcurrency(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	body := `{"model":"gpt-5.4","input":"draw","tools":[{"type":"image_generation"}]}`

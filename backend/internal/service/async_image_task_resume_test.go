@@ -121,3 +121,68 @@ func TestAsyncImageTaskTerminateAsFailedRejectsSuccessfulTask(t *testing.T) {
 	require.ErrorIs(t, err, ErrAsyncImageTaskTerminationNotAllowed)
 	require.Empty(t, repo.sequence)
 }
+
+type asyncImageBatchTerminateRepositoryStub struct {
+	AsyncImageTaskRepository
+	tasks           map[string]*AsyncImageTask
+	transitionError map[string]error
+	transitions     []AsyncImageTaskTransition
+}
+
+func (s *asyncImageBatchTerminateRepositoryStub) GetAsyncImageTaskByTaskID(_ context.Context, taskID string) (*AsyncImageTask, error) {
+	return s.tasks[taskID], nil
+}
+
+func (s *asyncImageBatchTerminateRepositoryStub) TransitionAsyncImageTask(_ context.Context, transition AsyncImageTaskTransition) (*AsyncImageTask, error) {
+	s.transitions = append(s.transitions, transition)
+	if err := s.transitionError[transition.TaskID]; err != nil {
+		return nil, err
+	}
+	task := s.tasks[transition.TaskID]
+	task.Status = transition.ToStatus
+	task.Version++
+	return task, nil
+}
+
+func TestAsyncImageTaskBatchTerminateAsFailedReportsPerTaskOutcomes(t *testing.T) {
+	now := time.Now().UTC()
+	repo := &asyncImageBatchTerminateRepositoryStub{
+		tasks: map[string]*AsyncImageTask{
+			"asyncimg_queue": {TaskID: "asyncimg_queue", Status: AsyncImageTaskStatusQueued, Version: 1, CreatedAt: now},
+			"asyncimg_done":  {TaskID: "asyncimg_done", Status: AsyncImageTaskStatusSucceeded, Version: 2, CreatedAt: now},
+			"asyncimg_race":  {TaskID: "asyncimg_race", Status: AsyncImageTaskStatusInvoking, Version: 3, CreatedAt: now},
+		},
+		transitionError: map[string]error{
+			"asyncimg_race": ErrAsyncImageInvalidTransition,
+		},
+	}
+	svc := NewAsyncImageTaskService(repo)
+
+	result, err := svc.BatchTerminateAsFailed(context.Background(), []string{
+		" asyncimg_queue ", "asyncimg_done", "asyncimg_race", "asyncimg_missing", "asyncimg_queue",
+	})
+	require.NoError(t, err)
+	require.Equal(t, 4, result.Requested)
+	require.Equal(t, 1, result.Terminated)
+	require.Equal(t, 2, result.Skipped)
+	require.Equal(t, 1, result.Failed)
+	require.Equal(t, []AsyncImageTaskBatchTerminationItem{
+		{TaskID: "asyncimg_queue", Status: AsyncImageTaskBatchTerminationStatusTerminated},
+		{TaskID: "asyncimg_done", Status: AsyncImageTaskBatchTerminationStatusSkipped, ErrorCode: "ASYNC_IMAGE_TASK_TERMINATION_NOT_ALLOWED", Message: "only non-successful asynchronous image tasks can be manually ended"},
+		{TaskID: "asyncimg_race", Status: AsyncImageTaskBatchTerminationStatusSkipped, ErrorCode: "ASYNC_IMAGE_INVALID_TRANSITION", Message: "asynchronous image task state changed or transition is invalid"},
+		{TaskID: "asyncimg_missing", Status: AsyncImageTaskBatchTerminationStatusFailed, ErrorCode: "ASYNC_IMAGE_TASK_NOT_FOUND", Message: "asynchronous image task not found"},
+	}, result.Items)
+	require.Equal(t, AsyncImageTaskStatusFailed, repo.tasks["asyncimg_queue"].Status)
+	require.Len(t, repo.transitions, 2)
+}
+
+func TestAsyncImageTaskBatchTerminateAsFailedRejectsMoreThanPageLimit(t *testing.T) {
+	ids := make([]string, AsyncImageTaskBatchTerminationLimit+1)
+	for i := range ids {
+		ids[i] = "asyncimg_limit"
+	}
+
+	svc := NewAsyncImageTaskService(&asyncImageBatchTerminateRepositoryStub{tasks: map[string]*AsyncImageTask{}})
+	_, err := svc.BatchTerminateAsFailed(context.Background(), ids)
+	require.ErrorIs(t, err, ErrAsyncImageTaskBatchTerminationInvalid)
+}

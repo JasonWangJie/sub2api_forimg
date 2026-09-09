@@ -290,6 +290,9 @@ func billingChargeMultiplierGroupIDs(cached *cachedBillingChargeMultiplier) []in
 func (s *SettingService) SetBillingSettingInvalidation(invalidation BillingSettingInvalidation) {
 	if s != nil {
 		s.billingSettingInvalidation = invalidation
+		if imageInvalidation, ok := invalidation.(ImageConcurrencySettingInvalidation); ok {
+			s.imageConcurrencyInvalidation = imageInvalidation
+		}
 	}
 }
 

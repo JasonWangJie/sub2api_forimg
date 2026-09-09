@@ -93,7 +93,7 @@ func TestAsyncImageRuntimeConfigNormalizesRetryBoundsAndModes(t *testing.T) {
 	require.Equal(t, minAsyncImageDownloadPixels, cfg.DownloadMaxPixels)
 }
 
-func TestNormalizeAsyncImageRuntimeConfigCapsWorkerAndReferenceResources(t *testing.T) {
+func TestNormalizeAsyncImageRuntimeConfigPreservesWorkerConcurrencyAndCapsReferenceResources(t *testing.T) {
 	cfg := AsyncImageRuntimeConfig{
 		WorkerConcurrency:       10000,
 		WorkerLeaseSeconds:      1,
@@ -103,7 +103,7 @@ func TestNormalizeAsyncImageRuntimeConfigCapsWorkerAndReferenceResources(t *test
 		MaxReferenceTotalPixels: 1_000_000_000,
 	}
 	normalizeAsyncImageRuntimeConfig(&cfg)
-	require.Equal(t, maxAsyncImageWorkerConcurrency, cfg.WorkerConcurrency)
+	require.Equal(t, 10000, cfg.WorkerConcurrency)
 	require.Equal(t, minAsyncImageWorkerLease, cfg.WorkerLeaseSeconds)
 	require.Equal(t, maxAsyncImageDownloadPixels, cfg.DownloadMaxPixels)
 	require.Equal(t, maxAsyncImageReferenceImages, cfg.MaxReferenceImages)

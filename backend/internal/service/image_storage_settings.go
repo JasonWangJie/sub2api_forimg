@@ -1143,7 +1143,6 @@ const (
 	AsyncImageReferenceTransportLocal                    = "local"
 	AsyncImageReferenceTransportPassthroughFallbackLocal = "passthrough_fallback_local"
 
-	maxAsyncImageWorkerConcurrency        = 64
 	minAsyncImageDownloadPixels           = int64(1_000_000)
 	maxAsyncImageDownloadBytes            = int64(64 << 20)
 	maxAsyncImageDownloadPixels           = int64(80_000_000)
@@ -1266,8 +1265,6 @@ func normalizeAsyncImageRuntimeConfig(in *AsyncImageRuntimeConfig) {
 	in.PublicBaseURL = strings.TrimRight(strings.TrimSpace(in.PublicBaseURL), "/")
 	if in.WorkerConcurrency <= 0 {
 		in.WorkerConcurrency = defaults.WorkerConcurrency
-	} else if in.WorkerConcurrency > maxAsyncImageWorkerConcurrency {
-		in.WorkerConcurrency = maxAsyncImageWorkerConcurrency
 	}
 	if in.WorkerLeaseSeconds <= 0 {
 		in.WorkerLeaseSeconds = defaults.WorkerLeaseSeconds

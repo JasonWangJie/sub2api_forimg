@@ -171,6 +171,28 @@ describe('async image task API', () => {
     expect(client.post).toHaveBeenCalledWith('/admin/async-image-tasks/imgtask_hung/terminate')
   })
 
+  it('sends an explicit task ID snapshot for current-page batch termination', async () => {
+    client.post.mockResolvedValue({
+      data: {
+        requested: 2,
+        terminated: 1,
+        skipped: 1,
+        failed: 0,
+        items: [
+          { task_id: 'imgtask_queued', status: 'terminated' },
+          { task_id: 'imgtask_raced', status: 'skipped' },
+        ],
+      },
+    })
+
+    const result = await asyncImageTasksAPI.admin.batchTerminate(['imgtask_queued', 'imgtask_raced'])
+
+    expect(client.post).toHaveBeenCalledWith('/admin/async-image-tasks/batch-terminate', {
+      task_ids: ['imgtask_queued', 'imgtask_raced'],
+    })
+    expect(result).toMatchObject({ requested: 2, terminated: 1, skipped: 1, failed: 0 })
+  })
+
   it('resolves a stable result view through the authenticated API client', async () => {
     client.get.mockResolvedValue({
       data: {

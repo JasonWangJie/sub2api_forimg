@@ -48,6 +48,7 @@ func initializeApplication(buildInfo handler.BuildInfo) (*Application, error) {
 
 		// Privacy client factory for OpenAI training opt-out
 		providePrivacyClientFactory,
+		provideImageAccountCircuitBreakerRuntime,
 
 		// BuildInfo provider
 		provideServiceBuildInfo,
@@ -70,6 +71,22 @@ func provideServiceBuildInfo(buildInfo handler.BuildInfo) service.BuildInfo {
 		Version:   buildInfo.Version,
 		BuildType: buildInfo.BuildType,
 	}
+}
+
+type imageAccountCircuitBreakerRuntime struct{}
+
+func provideImageAccountCircuitBreakerRuntime(
+	imageCircuitBreaker service.ImageAccountCircuitBreaker,
+	imageStorageSettings *service.ImageStorageSettingService,
+	gateway *service.GatewayService,
+	openAIGateway *service.OpenAIGatewayService,
+	geminiMessagesCompat *service.GeminiMessagesCompatService,
+) *imageAccountCircuitBreakerRuntime {
+	repository.ConfigureImageAccountCircuitBreaker(imageCircuitBreaker, imageStorageSettings)
+	gateway.SetImageAccountCircuitBreaker(imageCircuitBreaker)
+	openAIGateway.SetImageAccountCircuitBreaker(imageCircuitBreaker)
+	geminiMessagesCompat.SetImageAccountCircuitBreaker(imageCircuitBreaker)
+	return &imageAccountCircuitBreakerRuntime{}
 }
 
 func provideCleanup(
@@ -109,6 +126,7 @@ func provideCleanup(
 	antigravityOAuth *service.AntigravityOAuthService,
 	grokOAuth *service.GrokOAuthService,
 	openAIGateway *service.OpenAIGatewayService,
+	_ *imageAccountCircuitBreakerRuntime,
 	scheduledTestRunner *service.ScheduledTestRunnerService,
 	backupSvc *service.BackupService,
 	paymentOrderExpiry *service.PaymentOrderExpiryService,
@@ -131,6 +149,12 @@ func provideCleanup(
 
 		// 应用层清理步骤可并行执行，基础设施资源（Redis/Ent）最后按顺序关闭。
 		parallelSteps := []cleanupStep{
+			{"ImageConcurrencySettingInvalidationSubscriber", func() error {
+				if settingService != nil {
+					settingService.StopImageConcurrencySettingInvalidationSubscriber()
+				}
+				return nil
+			}},
 			{"BillingSettingInvalidationSubscriber", func() error {
 				if settingService != nil {
 					settingService.StopBillingSettingInvalidationSubscriber()

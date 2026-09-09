@@ -34,6 +34,10 @@ type asyncImageTaskTerminator interface {
 	TerminateAsFailed(context.Context, string) (*service.AsyncImageTaskDetails, error)
 }
 
+type asyncImageTaskBatchTerminator interface {
+	BatchTerminateAsFailed(context.Context, []string) (*service.AsyncImageTaskBatchTerminationResult, error)
+}
+
 type asyncImageTaskCenterPage struct {
 	Items    []asyncImageTaskCenterView  `json:"items"`
 	Total    int64                       `json:"total"`
@@ -342,6 +346,30 @@ func (h *AsyncImageTaskCenterHandler) TerminateAsFailed(c *gin.Context) {
 		return
 	}
 	response.Success(c, out)
+}
+
+// BatchTerminateAsFailed closes the explicitly supplied current-page task IDs.
+// Per-task status/version checks remain authoritative when workers race with
+// the administrator action.
+func (h *AsyncImageTaskCenterHandler) BatchTerminateAsFailed(c *gin.Context) {
+	terminator, ok := h.tasks.(asyncImageTaskBatchTerminator)
+	if !ok {
+		response.ErrorFrom(c, service.ErrAsyncImageTaskTerminationNotAllowed)
+		return
+	}
+	var request struct {
+		TaskIDs []string `json:"task_ids"`
+	}
+	if err := c.ShouldBindJSON(&request); err != nil {
+		response.BadRequest(c, "Invalid request body")
+		return
+	}
+	result, err := terminator.BatchTerminateAsFailed(c.Request.Context(), request.TaskIDs)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, result)
 }
 
 type asyncImageTaskCenterView struct {

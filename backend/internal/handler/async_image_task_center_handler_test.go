@@ -28,6 +28,10 @@ type asyncImageTaskCenterServiceStub struct {
 	resumeCalls      int
 	terminateDetails *service.AsyncImageTaskDetails
 	terminateCalls   int
+	batchResult      *service.AsyncImageTaskBatchTerminationResult
+	batchIDs         []string
+	batchCalls       int
+	batchErr         error
 	stats            service.AsyncImageTaskStats
 	statsErr         error
 	statsUserID      int64
@@ -71,6 +75,12 @@ func (s *asyncImageTaskCenterServiceStub) TerminateAsFailed(_ context.Context, _
 		return s.terminateDetails, s.err
 	}
 	return s.details, s.err
+}
+
+func (s *asyncImageTaskCenterServiceStub) BatchTerminateAsFailed(_ context.Context, taskIDs []string) (*service.AsyncImageTaskBatchTerminationResult, error) {
+	s.batchCalls++
+	s.batchIDs = append([]string(nil), taskIDs...)
+	return s.batchResult, s.batchErr
 }
 
 func (s *asyncImageTaskCenterServiceStub) StatsForUser(_ context.Context, userID int64, filter service.AsyncImageTaskFilter) (service.AsyncImageTaskStats, error) {
@@ -386,7 +396,7 @@ func TestAsyncImageTaskCenterTimelineShowsUnassignedInvocationAsQueued(t *testin
 		SubmittedAt: now, CreatedAt: now, UpdatedAt: now,
 	}
 	details := &service.AsyncImageTaskDetails{
-		Task: task,
+		Task:   task,
 		Events: []service.AsyncImageEvent{{EventType: "invocation_started", ToStatus: &toInvoking, CreatedAt: now}},
 	}
 	h := &AsyncImageTaskCenterHandler{}
@@ -497,6 +507,41 @@ func TestAsyncImageTaskCenterAdminTerminateReturnsDetails(t *testing.T) {
 	}
 	require.NoError(t, json.Unmarshal(recorder.Body.Bytes(), &envelope))
 	require.Equal(t, service.AsyncImageTaskStatusQueued, envelope.Data.Task.Status)
+}
+
+func TestAsyncImageTaskCenterAdminBatchTerminateReturnsSummary(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	tasks := &asyncImageTaskCenterServiceStub{batchResult: &service.AsyncImageTaskBatchTerminationResult{
+		Requested: 2, Terminated: 1, Skipped: 1,
+		Items: []service.AsyncImageTaskBatchTerminationItem{
+			{TaskID: "asyncimg_queue", Status: service.AsyncImageTaskBatchTerminationStatusTerminated},
+			{TaskID: "asyncimg_done", Status: service.AsyncImageTaskBatchTerminationStatusSkipped},
+		},
+	}}
+	h := &AsyncImageTaskCenterHandler{tasks: tasks}
+	router := gin.New()
+	router.POST("/api/v1/admin/async-image-tasks/batch-terminate", h.BatchTerminateAsFailed)
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest(
+		http.MethodPost,
+		"/api/v1/admin/async-image-tasks/batch-terminate",
+		strings.NewReader(`{"task_ids":["asyncimg_queue","asyncimg_done"]}`),
+	)
+	request.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(recorder, request)
+
+	require.Equal(t, http.StatusOK, recorder.Code)
+	require.Equal(t, 1, tasks.batchCalls)
+	require.Equal(t, []string{"asyncimg_queue", "asyncimg_done"}, tasks.batchIDs)
+	var envelope struct {
+		Data service.AsyncImageTaskBatchTerminationResult `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(recorder.Body.Bytes(), &envelope))
+	require.Equal(t, 2, envelope.Data.Requested)
+	require.Equal(t, 1, envelope.Data.Terminated)
+	require.Equal(t, 1, envelope.Data.Skipped)
+	require.Zero(t, envelope.Data.Failed)
+	require.Len(t, envelope.Data.Items, 2)
 }
 
 func TestAsyncImageTaskCenterUserResultRedirectSignsAfterOwnershipLookup(t *testing.T) {

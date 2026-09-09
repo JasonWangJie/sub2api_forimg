@@ -114,6 +114,13 @@ type BillingSettingInvalidation interface {
 	SubscribeBillingChargeMultiplier(ctx context.Context, handler func(value string)) error
 }
 
+// ImageConcurrencySettingInvalidation propagates image-concurrency settings
+// updates so every running application instance refreshes its local snapshot.
+type ImageConcurrencySettingInvalidation interface {
+	PublishImageConcurrencySettings(ctx context.Context, value string) error
+	SubscribeImageConcurrencySettings(ctx context.Context, handler func(value string)) error
+}
+
 // DefaultSubscriptionGroupReader validates group references used by default subscriptions.
 type DefaultSubscriptionGroupReader interface {
 	GetByID(ctx context.Context, id int64) (*Group, error)
@@ -161,17 +168,22 @@ type SettingService struct {
 	// billingChargeMultiplierCache holds the system charge multiplier (default 1).
 	// A generation prevents a DB read started before an admin update from
 	// overwriting the new write-through value after that update commits.
-	billingChargeMultiplierCache      atomic.Value // *cachedBillingChargeMultiplier
-	billingChargeMultiplierGeneration atomic.Uint64
-	billingChargeMultiplierMu         sync.Mutex
-	billingChargeMultiplierSF         singleflight.Group
-	billingSettingInvalidation        BillingSettingInvalidation
-	billingInvalidationStart          sync.Once
-	billingInvalidationStop           sync.Once
-	billingInvalidationCancel         context.CancelFunc
-	billingInvalidationWG             sync.WaitGroup
-	channelMonitorRuntimeListenersMu  sync.Mutex
-	channelMonitorRuntimeListeners    []func()
+	billingChargeMultiplierCache       atomic.Value // *cachedBillingChargeMultiplier
+	billingChargeMultiplierGeneration  atomic.Uint64
+	billingChargeMultiplierMu          sync.Mutex
+	billingChargeMultiplierSF          singleflight.Group
+	billingSettingInvalidation         BillingSettingInvalidation
+	billingInvalidationStart           sync.Once
+	billingInvalidationStop            sync.Once
+	billingInvalidationCancel          context.CancelFunc
+	billingInvalidationWG              sync.WaitGroup
+	imageConcurrencyInvalidation       ImageConcurrencySettingInvalidation
+	imageConcurrencyInvalidationStart  sync.Once
+	imageConcurrencyInvalidationStop   sync.Once
+	imageConcurrencyInvalidationCancel context.CancelFunc
+	imageConcurrencyInvalidationWG     sync.WaitGroup
+	channelMonitorRuntimeListenersMu   sync.Mutex
+	channelMonitorRuntimeListeners     []func()
 }
 
 // DefaultPlatformQuotaSetting 单 platform 三档限额（nil = 沿用上层；0 = 显式禁用；>0 = 上限）
@@ -302,10 +314,16 @@ const (
 
 // NewSettingService 创建系统设置服务实例
 func NewSettingService(settingRepo SettingRepository, cfg *config.Config) *SettingService {
-	return &SettingService{
+	service := &SettingService{
 		settingRepo: settingRepo,
 		cfg:         cfg,
 	}
+	if cfg != nil {
+		// Initialize the atomic holder before the Pub/Sub subscriber can race
+		// with startup loading or an admin update.
+		cfg.SetImageConcurrencySettings(cfg.Gateway.ImageConcurrency)
+	}
+	return service
 }
 
 // SetDefaultSubscriptionGroupReader injects an optional group reader for default subscription validation.

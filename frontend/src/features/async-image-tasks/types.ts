@@ -147,3 +147,20 @@ export interface AsyncImageResultAccess {
   url: string
   expires_at?: string | null
 }
+
+export type AsyncImageTaskBatchTerminationStatus = 'terminated' | 'skipped' | 'failed'
+
+export interface AsyncImageTaskBatchTerminationItem {
+  task_id: string
+  status: AsyncImageTaskBatchTerminationStatus
+  error_code?: string
+  message?: string
+}
+
+export interface AsyncImageTaskBatchTerminationResult {
+  requested: number
+  terminated: number
+  skipped: number
+  failed: number
+  items: AsyncImageTaskBatchTerminationItem[]
+}
