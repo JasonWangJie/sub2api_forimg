@@ -72,6 +72,7 @@ func createGroupRecord(ctx context.Context, client *dbent.Client, groupIn *servi
 		SetAllowImageGeneration(groupIn.AllowImageGeneration).
 		SetAllowBatchImageGeneration(groupIn.AllowBatchImageGeneration).
 		SetAllowAsyncImageGeneration(groupIn.AllowAsyncImageGeneration).
+		SetImageAccountPoolMode(service.NormalizeImageAccountPoolMode(groupIn.ImageAccountPoolMode)).
 		SetImageRateIndependent(groupIn.ImageRateIndependent).
 		SetImageRateMultiplier(groupIn.ImageRateMultiplier).
 		SetNillableImagePrice1k(groupIn.ImagePrice1K).
@@ -197,6 +198,23 @@ func (r *groupRepository) CreateFromSource(ctx context.Context, groupIn *service
 	if count, countErr := result.RowsAffected(); countErr == nil {
 		groupIn.AccountCount = count
 	}
+	if _, err := txClient.ExecContext(
+		ctx,
+		`INSERT INTO group_image_size_accounts (group_id, model, size_tier, account_id, priority, created_at)
+		 SELECT $2, pool.model, pool.size_tier, pool.account_id, pool.priority, NOW()
+		 FROM group_image_size_accounts pool
+		 JOIN accounts a ON a.id = pool.account_id
+		 WHERE pool.group_id = $1
+		   AND a.deleted_at IS NULL
+		   AND (NOT $3 OR a.type <> $4)
+		 ON CONFLICT (group_id, model, size_tier, account_id) DO NOTHING`,
+		sourceGroupID,
+		groupIn.ID,
+		groupIn.RequireOAuthOnly,
+		service.AccountTypeAPIKey,
+	); err != nil {
+		return err
+	}
 	if err := enqueueSchedulerOutbox(ctx, txClient, service.SchedulerOutboxEventGroupChanged, nil, &groupIn.ID, nil); err != nil {
 		return err
 	}
@@ -251,6 +269,7 @@ func (r *groupRepository) Update(ctx context.Context, groupIn *service.Group) er
 		SetAllowImageGeneration(groupIn.AllowImageGeneration).
 		SetAllowBatchImageGeneration(groupIn.AllowBatchImageGeneration).
 		SetAllowAsyncImageGeneration(groupIn.AllowAsyncImageGeneration).
+		SetImageAccountPoolMode(service.NormalizeImageAccountPoolMode(groupIn.ImageAccountPoolMode)).
 		SetImageRateIndependent(groupIn.ImageRateIndependent).
 		SetImageRateMultiplier(groupIn.ImageRateMultiplier).
 		SetNillableImagePrice1k(groupIn.ImagePrice1K).

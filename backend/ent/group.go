@@ -65,6 +65,8 @@ type Group struct {
 	AllowBatchImageGeneration bool `json:"allow_batch_image_generation,omitempty"`
 	// Whether this Gemini/OpenAI group allows durable asynchronous image generation
 	AllowAsyncImageGeneration bool `json:"allow_async_image_generation,omitempty"`
+	// Image account pool routing mode: resolution, model, or model_resolution
+	ImageAccountPoolMode string `json:"image_account_pool_mode,omitempty"`
 	// 图片生成是否使用独立倍率；false 表示共享分组有效倍率
 	ImageRateIndependent bool `json:"image_rate_independent,omitempty"`
 	// 图片生成独立倍率，仅 image_rate_independent=true 时生效
@@ -257,7 +259,7 @@ func (*Group) scanValues(columns []string) ([]any, error) {
 			values[i] = new(sql.NullFloat64)
 		case group.FieldID, group.FieldDefaultValidityDays, group.FieldFallbackGroupID, group.FieldFallbackGroupIDOnInvalidRequest, group.FieldSortOrder, group.FieldRpmLimit:
 			values[i] = new(sql.NullInt64)
-		case group.FieldName, group.FieldSection, group.FieldDescription, group.FieldPeakStart, group.FieldPeakEnd, group.FieldStatus, group.FieldDuplicateOperationID, group.FieldPlatform, group.FieldSubscriptionType, group.FieldDefaultMappedModel, group.FieldMaxReasoningEffort:
+		case group.FieldName, group.FieldSection, group.FieldDescription, group.FieldPeakStart, group.FieldPeakEnd, group.FieldStatus, group.FieldDuplicateOperationID, group.FieldPlatform, group.FieldSubscriptionType, group.FieldImageAccountPoolMode, group.FieldDefaultMappedModel, group.FieldMaxReasoningEffort:
 			values[i] = new(sql.NullString)
 		case group.FieldCreatedAt, group.FieldUpdatedAt, group.FieldDeletedAt:
 			values[i] = new(sql.NullTime)
@@ -425,6 +427,12 @@ func (_m *Group) assignValues(columns []string, values []any) error {
 				return fmt.Errorf("unexpected type %T for field allow_async_image_generation", values[i])
 			} else if value.Valid {
 				_m.AllowAsyncImageGeneration = value.Bool
+			}
+		case group.FieldImageAccountPoolMode:
+			if value, ok := values[i].(*sql.NullString); !ok {
+				return fmt.Errorf("unexpected type %T for field image_account_pool_mode", values[i])
+			} else if value.Valid {
+				_m.ImageAccountPoolMode = value.String
 			}
 		case group.FieldImageRateIndependent:
 			if value, ok := values[i].(*sql.NullBool); !ok {
@@ -841,6 +849,9 @@ func (_m *Group) String() string {
 	builder.WriteString(", ")
 	builder.WriteString("allow_async_image_generation=")
 	builder.WriteString(fmt.Sprintf("%v", _m.AllowAsyncImageGeneration))
+	builder.WriteString(", ")
+	builder.WriteString("image_account_pool_mode=")
+	builder.WriteString(_m.ImageAccountPoolMode)
 	builder.WriteString(", ")
 	builder.WriteString("image_rate_independent=")
 	builder.WriteString(fmt.Sprintf("%v", _m.ImageRateIndependent))

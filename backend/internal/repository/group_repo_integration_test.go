@@ -70,12 +70,13 @@ func (s *GroupRepoSuite) TestCreate() {
 
 func (s *GroupRepoSuite) TestCreateFromSourcePreservesPriorityAndFiltersIneligibleAccounts() {
 	source := &service.Group{
-		Name:             "duplicate-source",
-		Platform:         service.PlatformOpenAI,
-		RateMultiplier:   1,
-		Status:           service.StatusActive,
-		SubscriptionType: service.SubscriptionTypeStandard,
-		RequireOAuthOnly: true,
+		Name:                 "duplicate-source",
+		Platform:             service.PlatformOpenAI,
+		RateMultiplier:       1,
+		Status:               service.StatusActive,
+		SubscriptionType:     service.SubscriptionTypeStandard,
+		RequireOAuthOnly:     true,
+		ImageAccountPoolMode: service.ImageAccountPoolModeModelResolution,
 	}
 	s.Require().NoError(s.repo.Create(s.ctx, source))
 
@@ -110,6 +111,21 @@ func (s *GroupRepoSuite) TestCreateFromSourcePreservesPriorityAndFiltersIneligib
 		)
 		s.Require().NoError(err)
 	}
+	for _, binding := range []struct {
+		accountID int64
+		priority  int
+	}{{oauthID, 17}, {apiKeyID, 6}, {deletedID, 2}} {
+		_, err := s.tx.ExecContext(
+			s.ctx,
+			"INSERT INTO group_image_size_accounts (group_id, model, size_tier, account_id, priority) VALUES ($1, $2, $3, $4, $5)",
+			source.ID,
+			"gpt-image-2",
+			service.ImageBillingSize4K,
+			binding.accountID,
+			binding.priority,
+		)
+		s.Require().NoError(err)
+	}
 
 	duplicate := &service.Group{
 		Name:                 "duplicate-source (Copy)",
@@ -118,6 +134,7 @@ func (s *GroupRepoSuite) TestCreateFromSourcePreservesPriorityAndFiltersIneligib
 		Status:               "inactive",
 		SubscriptionType:     source.SubscriptionType,
 		RequireOAuthOnly:     true,
+		ImageAccountPoolMode: source.ImageAccountPoolMode,
 		DuplicateOperationID: strings.Repeat("a", 64),
 	}
 	s.Require().NoError(s.repo.CreateFromSource(s.ctx, duplicate, source.ID))
@@ -138,6 +155,24 @@ func (s *GroupRepoSuite) TestCreateFromSourcePreservesPriorityAndFiltersIneligib
 	s.Require().Equal(37, copiedPriority)
 	s.Require().False(rows.Next(), "API-key and soft-deleted accounts must not be copied")
 
+	var poolAccountID int64
+	var poolModel, poolTier string
+	var poolPriority int
+	s.Require().NoError(scanSingleRow(
+		s.ctx,
+		s.tx,
+		"SELECT account_id, model, size_tier, priority FROM group_image_size_accounts WHERE group_id = $1",
+		[]any{duplicate.ID},
+		&poolAccountID,
+		&poolModel,
+		&poolTier,
+		&poolPriority,
+	))
+	s.Require().Equal(oauthID, poolAccountID)
+	s.Require().Equal("gpt-image-2", poolModel)
+	s.Require().Equal(service.ImageBillingSize4K, poolTier)
+	s.Require().Equal(17, poolPriority)
+
 	recovered, err := s.repo.FindByDuplicateOperationID(s.ctx, duplicate.DuplicateOperationID)
 	s.Require().NoError(err)
 	s.Require().Equal(duplicate.ID, recovered.ID)
@@ -151,6 +186,55 @@ func (s *GroupRepoSuite) TestCreateFromSourcePreservesPriorityAndFiltersIneligib
 		&outboxCount,
 	))
 	s.Require().Equal(1, outboxCount)
+}
+
+func (s *GroupRepoSuite) TestLegacyImageSizeReplacePreservesModelPoolsAndMode() {
+	group := &service.Group{
+		Name:                 "legacy-image-pool-adapter",
+		Platform:             service.PlatformOpenAI,
+		RateMultiplier:       1,
+		Status:               service.StatusActive,
+		SubscriptionType:     service.SubscriptionTypeStandard,
+		ImageAccountPoolMode: service.ImageAccountPoolModeModelResolution,
+	}
+	s.Require().NoError(s.repo.Create(s.ctx, group))
+	account, err := s.tx.Client().Account.Create().
+		SetName("legacy-image-pool-account").
+		SetPlatform(service.PlatformOpenAI).
+		SetType(service.AccountTypeOAuth).
+		Save(s.ctx)
+	s.Require().NoError(err)
+
+	repo := &accountRepository{client: s.tx.Client(), sql: s.tx}
+	pools := service.EmptyGroupImageAccountPools(service.ImageAccountPoolModeModelResolution)
+	pools.ResolutionPools[service.ImageBillingSize1K] = []service.GroupImageSizeAccount{{AccountID: account.ID, Priority: 3}}
+	pools.ModelPools = []service.ImageModelAccountPool{{Model: "gpt-image-2", Accounts: []service.GroupImageSizeAccount{{AccountID: account.ID, Priority: 4}}}}
+	pools.ModelResolutionPools = []service.ImageModelResolutionAccountPool{{
+		Model: "gpt-image-2.5-sunburst",
+		Resolutions: map[string][]service.GroupImageSizeAccount{
+			service.ImageBillingSize4K: {{AccountID: account.ID, Priority: 5}},
+		},
+	}}
+	s.Require().NoError(repo.ReplaceImageAccountPools(s.ctx, group.ID, pools))
+	s.Require().NoError(repo.ReplaceImageSizeAccounts(s.ctx, group.ID, service.GroupImageSizeAccountBindings{
+		service.ImageBillingSize2K: {{AccountID: account.ID, Priority: 7}},
+	}))
+
+	rows, err := repo.ListImageSizeAccounts(s.ctx, group.ID)
+	s.Require().NoError(err)
+	s.Require().Len(rows, 3)
+	s.Require().ElementsMatch([]struct{ model, tier string }{
+		{"", service.ImageBillingSize2K},
+		{"gpt-image-2", ""},
+		{"gpt-image-2.5-sunburst", service.ImageBillingSize4K},
+	}, []struct{ model, tier string }{
+		{rows[0].Model, rows[0].SizeTier},
+		{rows[1].Model, rows[1].SizeTier},
+		{rows[2].Model, rows[2].SizeTier},
+	})
+	mode, err := repo.GetImageAccountPoolMode(s.ctx, group.ID)
+	s.Require().NoError(err)
+	s.Require().Equal(service.ImageAccountPoolModeModelResolution, mode)
 }
 
 func (s *GroupRepoSuite) TestGetByID_NotFound() {

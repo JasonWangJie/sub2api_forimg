@@ -99,8 +99,8 @@ func (s *GatewayService) SelectAccountForModelWithExclusions(ctx context.Context
 // metadataUserID: 用于客户端亲和调度，从中提取客户端 ID
 // sub2apiUserID: 系统用户 ID，用于二维亲和调度
 func (s *GatewayService) SelectAccountWithLoadAwareness(ctx context.Context, groupID *int64, sessionHash string, requestedModel string, excludedIDs map[int64]struct{}, metadataUserID string, sub2apiUserID int64) (*AccountSelectionResult, error) {
-	if tier, ok := ImageSizeAccountPoolTierFromContext(ctx); ok && groupID != nil && *groupID > 0 {
-		poolAccounts, configured, err := ResolveImageSizeAccountPool(ctx, s.accountRepo, *groupID, tier, []string{
+	if _, hasImageRoute := ImageAccountPoolRouteFromContext(ctx); hasImageRoute && groupID != nil && *groupID > 0 {
+		poolAccounts, configured, err := ResolveImageAccountPool(ctx, s.accountRepo, *groupID, []string{
 			PlatformGemini, PlatformAntigravity, PlatformOpenAI,
 		})
 		if err != nil {
@@ -1121,6 +1121,16 @@ func (s *GatewayService) filterImageCircuitOpenAccounts(ctx context.Context, acc
 // 用于 Handler 层在首次请求时提前设置 SingleAccountRetry context，
 // 避免单账号分组收到 503 时错误地设置模型限流标记导致后续请求连续快速失败。
 func (s *GatewayService) IsSingleAntigravityAccountGroup(ctx context.Context, groupID *int64) bool {
+	if _, imageRoute := ImageAccountPoolRouteFromContext(ctx); imageRoute && groupID != nil && *groupID > 0 {
+		accounts, configured, err := ResolveImageAccountPool(ctx, s.accountRepo, *groupID, []string{PlatformAntigravity})
+		if err != nil {
+			return false
+		}
+		if configured {
+			accounts = s.filterImageCircuitOpenAccounts(ctx, s.filterAccountsBySchedulingThreshold(ctx, accounts))
+			return len(accounts) == 1
+		}
+	}
 	accounts, _, err := s.listSchedulableAccounts(ctx, groupID, PlatformAntigravity, true)
 	if err != nil {
 		return false

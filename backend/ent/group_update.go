@@ -394,6 +394,20 @@ func (_u *GroupUpdate) SetNillableAllowAsyncImageGeneration(v *bool) *GroupUpdat
 	return _u
 }
 
+// SetImageAccountPoolMode sets the "image_account_pool_mode" field.
+func (_u *GroupUpdate) SetImageAccountPoolMode(v string) *GroupUpdate {
+	_u.mutation.SetImageAccountPoolMode(v)
+	return _u
+}
+
+// SetNillableImageAccountPoolMode sets the "image_account_pool_mode" field if the given value is not nil.
+func (_u *GroupUpdate) SetNillableImageAccountPoolMode(v *string) *GroupUpdate {
+	if v != nil {
+		_u.SetImageAccountPoolMode(*v)
+	}
+	return _u
+}
+
 // SetImageRateIndependent sets the "image_rate_independent" field.
 func (_u *GroupUpdate) SetImageRateIndependent(v bool) *GroupUpdate {
 	_u.mutation.SetImageRateIndependent(v)
@@ -1457,6 +1471,11 @@ func (_u *GroupUpdate) check() error {
 			return &ValidationError{Name: "subscription_type", err: fmt.Errorf(`ent: validator failed for field "Group.subscription_type": %w`, err)}
 		}
 	}
+	if v, ok := _u.mutation.ImageAccountPoolMode(); ok {
+		if err := group.ImageAccountPoolModeValidator(v); err != nil {
+			return &ValidationError{Name: "image_account_pool_mode", err: fmt.Errorf(`ent: validator failed for field "Group.image_account_pool_mode": %w`, err)}
+		}
+	}
 	if v, ok := _u.mutation.SearchPricePer1k(); ok {
 		if err := group.SearchPricePer1kValidator(v); err != nil {
 			return &ValidationError{Name: "search_price_per_1k", err: fmt.Errorf(`ent: validator failed for field "Group.search_price_per_1k": %w`, err)}
@@ -1600,6 +1619,9 @@ func (_u *GroupUpdate) sqlSave(ctx context.Context) (_node int, err error) {
 	}
 	if value, ok := _u.mutation.AllowAsyncImageGeneration(); ok {
 		_spec.SetField(group.FieldAllowAsyncImageGeneration, field.TypeBool, value)
+	}
+	if value, ok := _u.mutation.ImageAccountPoolMode(); ok {
+		_spec.SetField(group.FieldImageAccountPoolMode, field.TypeString, value)
 	}
 	if value, ok := _u.mutation.ImageRateIndependent(); ok {
 		_spec.SetField(group.FieldImageRateIndependent, field.TypeBool, value)
@@ -2504,6 +2526,20 @@ func (_u *GroupUpdateOne) SetAllowAsyncImageGeneration(v bool) *GroupUpdateOne {
 func (_u *GroupUpdateOne) SetNillableAllowAsyncImageGeneration(v *bool) *GroupUpdateOne {
 	if v != nil {
 		_u.SetAllowAsyncImageGeneration(*v)
+	}
+	return _u
+}
+
+// SetImageAccountPoolMode sets the "image_account_pool_mode" field.
+func (_u *GroupUpdateOne) SetImageAccountPoolMode(v string) *GroupUpdateOne {
+	_u.mutation.SetImageAccountPoolMode(v)
+	return _u
+}
+
+// SetNillableImageAccountPoolMode sets the "image_account_pool_mode" field if the given value is not nil.
+func (_u *GroupUpdateOne) SetNillableImageAccountPoolMode(v *string) *GroupUpdateOne {
+	if v != nil {
+		_u.SetImageAccountPoolMode(*v)
 	}
 	return _u
 }
@@ -3584,6 +3620,11 @@ func (_u *GroupUpdateOne) check() error {
 			return &ValidationError{Name: "subscription_type", err: fmt.Errorf(`ent: validator failed for field "Group.subscription_type": %w`, err)}
 		}
 	}
+	if v, ok := _u.mutation.ImageAccountPoolMode(); ok {
+		if err := group.ImageAccountPoolModeValidator(v); err != nil {
+			return &ValidationError{Name: "image_account_pool_mode", err: fmt.Errorf(`ent: validator failed for field "Group.image_account_pool_mode": %w`, err)}
+		}
+	}
 	if v, ok := _u.mutation.SearchPricePer1k(); ok {
 		if err := group.SearchPricePer1kValidator(v); err != nil {
 			return &ValidationError{Name: "search_price_per_1k", err: fmt.Errorf(`ent: validator failed for field "Group.search_price_per_1k": %w`, err)}
@@ -3744,6 +3785,9 @@ func (_u *GroupUpdateOne) sqlSave(ctx context.Context) (_node *Group, err error)
 	}
 	if value, ok := _u.mutation.AllowAsyncImageGeneration(); ok {
 		_spec.SetField(group.FieldAllowAsyncImageGeneration, field.TypeBool, value)
+	}
+	if value, ok := _u.mutation.ImageAccountPoolMode(); ok {
+		_spec.SetField(group.FieldImageAccountPoolMode, field.TypeString, value)
 	}
 	if value, ok := _u.mutation.ImageRateIndependent(); ok {
 		_spec.SetField(group.FieldImageRateIndependent, field.TypeBool, value)

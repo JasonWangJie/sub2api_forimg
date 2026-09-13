@@ -364,6 +364,14 @@ func (s *stubAdminService) ReplaceGroupImageSizeAccounts(ctx context.Context, gr
 	return s.ListGroupImageSizeAccounts(ctx, groupID)
 }
 
+func (s *stubAdminService) GetGroupImageAccountPools(ctx context.Context, groupID int64) (service.GroupImageAccountPools, error) {
+	return service.EmptyGroupImageAccountPools(service.ImageAccountPoolModeResolution), nil
+}
+
+func (s *stubAdminService) ReplaceGroupImageAccountPools(ctx context.Context, groupID int64, pools service.GroupImageAccountPools) (service.GroupImageAccountPools, error) {
+	return pools, nil
+}
+
 func (s *stubAdminService) CreateGroup(ctx context.Context, input *service.CreateGroupInput) (*service.Group, error) {
 	group := service.Group{ID: 200, Name: input.Name, Status: service.StatusActive}
 	return &group, nil

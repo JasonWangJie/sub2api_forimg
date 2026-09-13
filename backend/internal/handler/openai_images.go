@@ -144,6 +144,11 @@ func (h *OpenAIGatewayHandler) Images(c *gin.Context) {
 	}
 
 	requestCtx := service.WithOpenAIImagesEndpoint(service.WithOpenAIImageGenerationIntent(c.Request.Context()))
+	requestCtx, err = service.WithImageAccountPoolRoute(requestCtx, clientRequestModel, parsed.SizeTier)
+	if err != nil {
+		h.errorResponse(c, http.StatusBadRequest, "invalid_request_error", err.Error())
+		return
+	}
 	asyncImageGeneration := asyncImageUsageCaptureFromContext(c.Request.Context()) != nil
 	// Durable reference-image retries use a task-scoped sticky hash so the
 	// selected account is reused until the retry policy explicitly switches it.
@@ -286,7 +291,7 @@ func (h *OpenAIGatewayHandler) Images(c *gin.Context) {
 			err = &service.UpstreamFailoverError{StatusCode: http.StatusGatewayTimeout, ResponseBody: []byte("upstream account attempt timed out"), ResponseHeaders: c.Writer.Header().Clone()}
 		}
 		if !(asyncImageGeneration && attemptTimedOut && result == nil) {
-		h.gatewayService.ReportImageAccountResult(accountForwardCtx, account.ID, err == nil && result != nil, err)
+			h.gatewayService.ReportImageAccountResult(accountForwardCtx, account.ID, err == nil && result != nil, err)
 		}
 		forwardDurationMs := time.Since(forwardStart).Milliseconds()
 		upstreamLatencyMs, _ := getContextInt64(c, service.OpsUpstreamLatencyMsKey)

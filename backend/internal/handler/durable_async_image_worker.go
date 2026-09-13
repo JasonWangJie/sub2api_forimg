@@ -581,8 +581,14 @@ func (h *DurableAsyncImageHandler) invokeAsyncImageTask(parent context.Context, 
 	usageCapture := &AsyncImageUsageCapture{}
 	ctx = withAsyncImageUsageCapture(ctx, usageCapture)
 	geminiCapture := &service.GeminiImageResponseCapture{}
-	if task.RequestedImageSize != nil && strings.TrimSpace(*task.RequestedImageSize) != "" {
-		ctx = service.WithImageSizeAccountPoolTier(ctx, *task.RequestedImageSize)
+	requestedSize := ""
+	if task.RequestedImageSize != nil {
+		requestedSize = *task.RequestedImageSize
+	}
+	ctx, err = service.WithImageAccountPoolRoute(ctx, task.Model, requestedSize)
+	if err != nil {
+		h.failAsyncImageTask(parent, task, "invalid_model", asyncImageSafeError(err), false)
+		return asyncImageWorkerDisposition{}
 	}
 	if task.Platform == service.PlatformGemini {
 		ctx = service.WithGeminiAsyncImageGeneration(ctx)

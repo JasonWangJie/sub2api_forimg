@@ -318,6 +318,41 @@ func (h *GroupHandler) ReplaceImageSizeAccounts(c *gin.Context) {
 	response.Success(c, view)
 }
 
+// GetImageAccountPools returns the mode and all independently saved image pools.
+// GET /api/v1/admin/groups/:id/image-account-pools
+func (h *GroupHandler) GetImageAccountPools(c *gin.Context) {
+	groupID, ok := parsePositiveIDParam(c, "id")
+	if !ok {
+		return
+	}
+	view, err := h.adminService.GetGroupImageAccountPools(c.Request.Context(), groupID)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, view)
+}
+
+// ReplaceImageAccountPools atomically replaces mode and all three pool sets.
+// PUT /api/v1/admin/groups/:id/image-account-pools
+func (h *GroupHandler) ReplaceImageAccountPools(c *gin.Context) {
+	groupID, ok := parsePositiveIDParam(c, "id")
+	if !ok {
+		return
+	}
+	var pools service.GroupImageAccountPools
+	if err := c.ShouldBindJSON(&pools); err != nil {
+		response.BadRequest(c, "Invalid request body: "+err.Error())
+		return
+	}
+	view, err := h.adminService.ReplaceGroupImageAccountPools(c.Request.Context(), groupID, pools)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, view)
+}
+
 // ListCompositeRoutes handles listing composite model routes for one group.
 // GET /api/v1/admin/groups/:id/composite-routes
 func (h *GroupHandler) ListCompositeRoutes(c *gin.Context) {

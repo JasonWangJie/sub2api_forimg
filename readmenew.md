@@ -1,5 +1,24 @@
 # Sub2API Fork 二次开发总览
 
+## 2026-09-13 生图账号池多维调度冒烟复核
+
+- 本轮按“池键 → 候选账号 → 兼容性/状态/限流/熔断/排除 → 最终账号 → 原计费链”复核并修复边界：Gemini 非方图按短边档位同时用于路由和计费；独立池不能绕过 `require_oauth_only`；Antigravity 原生生图会建立图片路由/计费上下文，并按当前池判断单账号 503 重试；渠道别名映射到 Gemini 生图模型时仍以客户端原始 ID 查池。
+- 管理端现在拒绝 Antigravity 分组绑定运行时永远无法选择的 Gemini 账号；候选列表过滤不可保存的通配模型；迁移 225 重复执行前会先移除同名新约束，避免幂等重跑冲突。对应池存在但过滤后为空仍严格失败，不会越池回退。
+- 计费函数、分组图片价格、独立图片倍率和账单落库流程均未被账号池替换；池查询转换完整保留账号 `RateMultiplier`，新增回归断言覆盖倍率保留及 Gemini `1792x1024` 路由/计费同为 1K。Service/Handler/Repository/Routes/Migrations 六包完整测试通过，unit-tag Gemini 测试、全仓 Go 编译、前端 Vitest 5/5、typecheck、目标 ESLint 和生产构建通过。
+- Ent 在工作树直接生成时两次遇到 Windows 随机文件映射锁；失败中间产物已全部恢复，随后在临时干净克隆中完整生成并同步 13 个预期文件，`go test ./ent/... -run '^$' -count=1` 通过，临时目录已删除。
+- 未在真实 PostgreSQL 执行迁移：本机无 `psql`/Docker，且仓库运行配置指向非隔离外部服务，因此没有为冒烟擅自启动服务或连接数据库。未做登录后浏览器、真实 Redis/上游/OSS、生产部署/重启或 Fork CI。
+- 当前实际基线：分支 `main`；HEAD `38372af3ebf76fea96493f60cb49c35cbf5edd0a`；`git describe=v0.1.173.47-1-g38372af-dirty`；VERSION=`0.1.173.47`；保留本任务范围外的发布手册改动。
+
+## 2026-09-13 生图账号池多维调度
+
+- 管理端 `/admin/groups` 的生图账号池从单一 1K/2K/4K 扩展为“按清晰度”“按生图模型”“模型 + 清晰度”三种互斥运行模式；三套绑定独立保存，切换模式或关闭生图不会清除配置。
+- 新迁移 `225_ZJ_image_account_pool_modes.sql` 默认所有既有与新建分组使用 `resolution`，原 `group_image_size_accounts` 表和旧行保留；新键为 `group_id + model + size_tier + account_id`。新增管理员 `GET/PUT /api/v1/admin/groups/:id/image-account-pools`，旧 `/image-size-accounts` 仍只读写清晰度行，不修改模式或模型行。
+- 调度按客户端请求模型精确、区分大小写匹配；缺维度或缺绑定时回退分组默认池，已有绑定但全部不可调度时不越池。接入原清晰度池范围内的 OpenAI 专用图片接口、Gemini 原生/兼容入口、持久异步 Worker 和对应 Composite 调度；Responses/WS、GPT 图片 Chat Completions 工具路径及 Gemini 批量入口保持原选号。
+- 管理端支持候选模型搜索、手工精确 ID、模型卡片、priority 往返、键盘单选、暗色与窄屏布局；账号池加载失败时不会以空草稿覆盖已有配置。专题见 [wiki-new/生图账号池多维调度.md](wiki-new/生图账号池多维调度.md)。
+- 验证：Ent 生成通过；后端迁移/Service/Admin Handler 定向测试通过；`go test ./... -run '^$' -count=1` 全仓编译通过；前端定向 Vitest 5/5、`pnpm typecheck`、目标 ESLint、`pnpm build` 通过；构建仅有既有 Browserslist、动态导入和大 chunk 警告。
+- 未完成项：未在隔离 PostgreSQL 真实执行 222→225 升级及 integration build-tag 用例，未连接真实 Redis/上游/OSS，未做登录后浏览器视觉验收，未部署或重启生产，Fork CI 未运行。
+- 当前实际基线：分支 `main`；HEAD `38372af3ebf76fea96493f60cb49c35cbf5edd0a`；`git describe=v0.1.173.47-1-g38372af-dirty`；VERSION=`0.1.173.47`；工作树另有本任务范围外的发布手册改动，未覆盖。
+
 ## 2026-09-09 OpenAI GPT Image 2.5 与图片工作台模型目录
 
 - OpenAI 默认模型目录新增官方 `gpt-image-2.5-flare` 与 `gpt-image-2.5-sunburst`；图片 API 原有 `gpt-image-*` 家族校验保持开放，因此新模型可直接透传，账号仍受自身 `model_mapping`/通配规则约束。
@@ -96,13 +115,13 @@ codegraph init
 
 ## 当前版本快照
 
-记录日期：`2026-09-09`（当前工作树含管理员批量结束当前页异步任务、生图并发系统设置、Worker 上限调整及文档同步；未部署或重启生产）。
+记录日期：`2026-09-13`（当前工作树含生图账号池多维调度及文档同步；未部署或重启生产）。
 
 | 项目 | 当前记录 |
 |---|---|
-| 发布版本文件 | `backend/cmd/server/VERSION`=`0.1.173.44` |
-| 文档记录时 HEAD | `b373fa5906abee97b90d0d4890264d1917c2371c` |
-| HEAD 描述 | `v0.1.173.44-1-gb373fa5-dirty` |
+| 发布版本文件 | `backend/cmd/server/VERSION`=`0.1.173.47` |
+| 文档记录时 HEAD | `38372af3ebf76fea96493f60cb49c35cbf5edd0a` |
+| HEAD 描述 | `v0.1.173.47-1-g38372af-dirty` |
 | 当前及后续默认分支 | `main` |
 | 已合并原作者主线 | 以 `git log` / `upstream/main` 实际为准 |
 | SC 上传安全迁移 | `backend/migrations/187_ZJ_async_image_upload_reservations.sql` |
@@ -111,6 +130,7 @@ codegraph init
 | API Key 双平台生图映射 | `backend/migrations/221_ZJ_api_key_platform_groups.sql` |
 | 异步参考图与分类重试迁移 | `backend/migrations/223_ZJ_async_image_reference_retry_state.sql` |
 | 异步账号尝试与超时对账迁移 | `backend/migrations/224_ZJ_async_image_account_attempts.sql` |
+| 生图账号池多维调度迁移 | `backend/migrations/225_ZJ_image_account_pool_modes.sql`；默认 `resolution` |
 | 异步图库自动归档 | `async_image.auto_archive_to_library`，默认 `false`；结果对象和查询 URL 不受影响 |
 | 异步生图用户统计 | `GET /v1/images/tasks_async/stats`；按服务器时区统计用户当天全部异步任务 |
 | Fork CI | 发版时在 `JasonWangJie/sub2api_forimg/actions` 核对实际结果 |

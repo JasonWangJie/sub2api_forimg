@@ -1,5 +1,26 @@
 # AI 交接文档
 
+## 2026-09-13 生图账号池多维调度冒烟复核交接
+
+- 本轮在原多维账号池实现上补了六类边界：Gemini 非方图的池档位改用与计费相同的短边规则；独立绑定在保存和运行时都不能绕过 `require_oauth_only`；强制 Antigravity 原生入口会建立图片意图/池/计费上下文；单账号 503 判断读取当前图片池；渠道别名映射到 Gemini 生图模型时仍以请求侧 ID 查池；Antigravity 分组不再接受运行时永远不可选的 Gemini 账号。
+- 严格池边界不变：缺维度或没有精确绑定才回退 `account_groups`；精确键有绑定但被 OAuth、平台、状态、过期/限流、模型、熔断或 failover 排除清空时返回 `ErrNoAvailableAccounts`。不要在错误处理里增加默认池二次查询。
+- 计费链未重写。池绑定只覆盖调度 `Priority`，Repository 转换继续保留账号 `RateMultiplier`；最终仍由既有分组图片价格、图片独立倍率、用户/高峰/全局倍率和同步/异步账单流程结算。回归已锁定 Gemini `1792x1024` 的路由/计费同档，以及 OAuth 过滤后倍率字段不丢失。
+- 迁移 225 的三个新命名约束在 ADD 前均 DROP IF EXISTS；模型候选不会再返回无法保存的 `*` 通配项。旧清晰度接口仍只改 `model=''` 行，模式与模型行不动。
+- 验证已通过：六个核心后端包完整测试、相关定向测试、unit-tag Gemini/Chat/Image/Billing、全仓 Go 编译、Ent 全包编译、前端 5 项 Vitest、typecheck、目标 ESLint 和生产构建。工作树直接 Ent 生成两次被 Windows 文件映射锁中断，已恢复全部中间产物；临时干净克隆生成成功并只同步 13 个预期文件，临时目录已删除。
+- 仍未验证真实 PostgreSQL 222→225、integration build-tag、登录后浏览器、真实 Redis/上游/OSS、生产部署/重启或 Fork CI。本机没有 `psql`/Docker，且配置指向非隔离外部服务；后续必须准备隔离环境，不能直接用当前配置补数据库或页面证据。
+- 当前实际基线：`main`；完整 HEAD `38372af3ebf76fea96493f60cb49c35cbf5edd0a`；`git describe=v0.1.173.47-1-g38372af-dirty`；VERSION=`0.1.173.47`。继续保留本任务范围外的 `发行版发布与安装操作手册.md` 改动。
+
+## 2026-09-13 生图账号池多维调度交接
+
+- 数据真值在 `groups.image_account_pool_mode` 与沿用旧表名的 `group_image_size_accounts`：`model='' + tier` 是清晰度，`model + tier=''` 是模型，`model + tier` 是组合。迁移 225 默认 `resolution` 并保留旧行；不能把空模型改成 NULL，也不能删除旧 `/image-size-accounts` 适配接口。
+- 管理入口是 `GET/PUT /api/v1/admin/groups/:id/image-account-pools`。PUT 必须继续通过仓储事务同时改模式、删除旧三维行并重建；旧 PUT 只能删除 `model=''` 行。账号池允许独立绑定未在 `account_groups` 中的账号，但账号必须存在、未删除且平台兼容。
+- `WithImageAccountPoolRoute` 保存客户端请求侧精确模型和清晰度，账号/渠道映射不改池键。当前模式缺必要维度或没有精确绑定时回退默认分组池；有绑定但调度过滤后为空时必须保持 `ErrNoAvailableAccounts`，不得再查询默认池。
+- 接入范围只包括 OpenAI 专用图片生成/编辑、Gemini 原生与兼容生图、持久异步 OpenAI/Gemini Worker 及这些路径中的 Composite。共享 Gateway 只有在上下文存在图片路由时才读池模式，所以 Responses/WS、普通 Chat Completions、批量生图和非图片请求不改变选号。
+- 前端 `groupsImageAccountPools.ts` 管理三套独立草稿，`GroupsView.vue` 即使关闭生图也保留并提交已加载配置；加载新接口失败时 `editImageAccountPoolsLoaded=false`，本次保存跳过账号池 PUT，防止空覆盖。模型区分大小写、拒绝 `*` 和控制字符，服务端另按 UTF-8 255 字节兜底。
+- 已验证 Ent 生成、后端定向测试、全仓 Go 编译、前端 5 项定向 Vitest、typecheck、目标 ESLint、生产构建。未执行 PostgreSQL integration build-tag、真实外部服务、登录后视觉、生产部署/重启或 Fork CI；本机配置不是隔离本地数据库/Redis，不要为补视觉证据直接启动并连接未知环境。
+- 当前实际基线：`main`；完整 HEAD `38372af3ebf76fea96493f60cb49c35cbf5edd0a`；`git describe=v0.1.173.47-1-g38372af-dirty`；VERSION=`0.1.173.47`。工作树另有本任务范围外的 `发行版发布与安装操作手册.md` 改动，后续不得回滚覆盖。
+- 继续验收时先阅读 [wiki-new/生图账号池多维调度.md](wiki-new/生图账号池多维调度.md)，在隔离 PostgreSQL 验证 222→225 和 `-tags=integration` 用例，再启动本地服务做 `/admin/groups` 的亮/暗色、键盘和窄屏检查。
+
 ## 2026-09-09 OpenAI GPT Image 2.5 与图片工作台模型目录交接
 
 - OpenAI 图片接口的 `IsGPTImageGenerationModel`/校验按 `gpt-image-*` 前缀工作，未做固定枚举限制；默认目录现在包含 `gpt-image-2.5-flare` 和 `gpt-image-2.5-sunburst`。官方 2.5 模型支持 `auto/low/medium/high/xhigh/max`，请求参数会继续透传给上游。

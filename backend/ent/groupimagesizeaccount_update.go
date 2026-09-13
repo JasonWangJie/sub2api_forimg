@@ -43,6 +43,20 @@ func (_u *GroupImageSizeAccountUpdate) SetNillableGroupID(v *int64) *GroupImageS
 	return _u
 }
 
+// SetModel sets the "model" field.
+func (_u *GroupImageSizeAccountUpdate) SetModel(v string) *GroupImageSizeAccountUpdate {
+	_u.mutation.SetModel(v)
+	return _u
+}
+
+// SetNillableModel sets the "model" field if the given value is not nil.
+func (_u *GroupImageSizeAccountUpdate) SetNillableModel(v *string) *GroupImageSizeAccountUpdate {
+	if v != nil {
+		_u.SetModel(*v)
+	}
+	return _u
+}
+
 // SetSizeTier sets the "size_tier" field.
 func (_u *GroupImageSizeAccountUpdate) SetSizeTier(v string) *GroupImageSizeAccountUpdate {
 	_u.mutation.SetSizeTier(v)
@@ -148,6 +162,11 @@ func (_u *GroupImageSizeAccountUpdate) ExecX(ctx context.Context) {
 
 // check runs all checks and user-defined validators on the builder.
 func (_u *GroupImageSizeAccountUpdate) check() error {
+	if v, ok := _u.mutation.Model(); ok {
+		if err := groupimagesizeaccount.ModelValidator(v); err != nil {
+			return &ValidationError{Name: "model", err: fmt.Errorf(`ent: validator failed for field "GroupImageSizeAccount.model": %w`, err)}
+		}
+	}
 	if v, ok := _u.mutation.SizeTier(); ok {
 		if err := groupimagesizeaccount.SizeTierValidator(v); err != nil {
 			return &ValidationError{Name: "size_tier", err: fmt.Errorf(`ent: validator failed for field "GroupImageSizeAccount.size_tier": %w`, err)}
@@ -173,6 +192,9 @@ func (_u *GroupImageSizeAccountUpdate) sqlSave(ctx context.Context) (_node int, 
 				ps[i](selector)
 			}
 		}
+	}
+	if value, ok := _u.mutation.Model(); ok {
+		_spec.SetField(groupimagesizeaccount.FieldModel, field.TypeString, value)
 	}
 	if value, ok := _u.mutation.SizeTier(); ok {
 		_spec.SetField(groupimagesizeaccount.FieldSizeTier, field.TypeString, value)
@@ -271,6 +293,20 @@ func (_u *GroupImageSizeAccountUpdateOne) SetGroupID(v int64) *GroupImageSizeAcc
 func (_u *GroupImageSizeAccountUpdateOne) SetNillableGroupID(v *int64) *GroupImageSizeAccountUpdateOne {
 	if v != nil {
 		_u.SetGroupID(*v)
+	}
+	return _u
+}
+
+// SetModel sets the "model" field.
+func (_u *GroupImageSizeAccountUpdateOne) SetModel(v string) *GroupImageSizeAccountUpdateOne {
+	_u.mutation.SetModel(v)
+	return _u
+}
+
+// SetNillableModel sets the "model" field if the given value is not nil.
+func (_u *GroupImageSizeAccountUpdateOne) SetNillableModel(v *string) *GroupImageSizeAccountUpdateOne {
+	if v != nil {
+		_u.SetModel(*v)
 	}
 	return _u
 }
@@ -393,6 +429,11 @@ func (_u *GroupImageSizeAccountUpdateOne) ExecX(ctx context.Context) {
 
 // check runs all checks and user-defined validators on the builder.
 func (_u *GroupImageSizeAccountUpdateOne) check() error {
+	if v, ok := _u.mutation.Model(); ok {
+		if err := groupimagesizeaccount.ModelValidator(v); err != nil {
+			return &ValidationError{Name: "model", err: fmt.Errorf(`ent: validator failed for field "GroupImageSizeAccount.model": %w`, err)}
+		}
+	}
 	if v, ok := _u.mutation.SizeTier(); ok {
 		if err := groupimagesizeaccount.SizeTierValidator(v); err != nil {
 			return &ValidationError{Name: "size_tier", err: fmt.Errorf(`ent: validator failed for field "GroupImageSizeAccount.size_tier": %w`, err)}
@@ -435,6 +476,9 @@ func (_u *GroupImageSizeAccountUpdateOne) sqlSave(ctx context.Context) (_node *G
 				ps[i](selector)
 			}
 		}
+	}
+	if value, ok := _u.mutation.Model(); ok {
+		_spec.SetField(groupimagesizeaccount.FieldModel, field.TypeString, value)
 	}
 	if value, ok := _u.mutation.SizeTier(); ok {
 		_spec.SetField(groupimagesizeaccount.FieldSizeTier, field.TypeString, value)

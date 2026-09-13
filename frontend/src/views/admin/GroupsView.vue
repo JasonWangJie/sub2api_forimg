@@ -2751,7 +2751,7 @@
             </div>
           </div>
           <div
-            v-if="supportsImageSizeAccountPools(editForm.platform) && editForm.allow_image_generation"
+            v-if="supportsImageSizeAccountPools(editForm.platform) && editForm.allow_image_generation && editImageAccountPoolsLoaded"
             class="mt-4 border-t border-dashed border-gray-200 pt-4 dark:border-dark-700"
           >
             <div class="text-sm font-medium text-gray-700 dark:text-gray-300">
@@ -2760,7 +2760,33 @@
             <p class="mt-2 text-xs text-gray-500 dark:text-gray-400">
               {{ t("admin.groups.imagePricing.accountPoolsHint") }}
             </p>
-            <div class="mt-3 grid grid-cols-1 gap-3">
+            <fieldset class="mt-3">
+              <legend class="sr-only">
+                {{ t("admin.groups.imagePricing.poolModeLegend") }}
+              </legend>
+              <div class="grid grid-cols-1 overflow-hidden rounded-lg border border-gray-200 bg-gray-50 p-1 sm:grid-cols-3 dark:border-dark-600 dark:bg-dark-800">
+                <label
+                  v-for="mode in ['resolution', 'model', 'model_resolution']"
+                  :key="mode"
+                  class="cursor-pointer rounded-md px-3 py-2 text-center text-xs font-medium transition-colors focus-within:ring-2 focus-within:ring-blue-500 focus-within:ring-offset-1 dark:focus-within:ring-offset-dark-800"
+                  :class="editImageAccountPools.mode === mode ? 'bg-white text-blue-700 shadow-sm dark:bg-dark-700 dark:text-blue-300' : 'text-gray-600 hover:text-gray-900 dark:text-gray-400 dark:hover:text-gray-200'"
+                >
+                  <input
+                    v-model="editImageAccountPools.mode"
+                    type="radio"
+                    class="sr-only"
+                    name="image-account-pool-mode"
+                    :value="mode"
+                  />
+                  {{ t(`admin.groups.imagePricing.poolMode.${mode}`) }}
+                </label>
+              </div>
+            </fieldset>
+
+            <div
+              v-if="editImageAccountPools.mode === 'resolution'"
+              class="mt-4 grid grid-cols-1 gap-3"
+            >
               <div v-for="tier in imageSizePoolTier" :key="tier">
                 <label class="input-label">{{
                   t(
@@ -2772,13 +2798,113 @@
                   )
                 }}</label>
                 <input
-                  v-model="editImageSizePoolDraft[tier]"
+                  v-model="editImageAccountPools.resolution_pools[tier]"
                   type="text"
                   class="input"
                   :placeholder="t('admin.groups.imagePricing.poolPlaceholder')"
                 />
               </div>
             </div>
+
+            <div v-else class="mt-4">
+              <div class="flex flex-col gap-2 sm:flex-row">
+                <input
+                  v-model="editImagePoolModelInput"
+                  type="text"
+                  maxlength="255"
+                  class="input flex-1 font-mono text-sm"
+                  list="edit-image-account-pool-model-candidates"
+                  :placeholder="t('admin.groups.imagePricing.modelPlaceholder')"
+                  @keyup.enter.prevent="addEditImagePoolModel"
+                />
+                <datalist id="edit-image-account-pool-model-candidates">
+                  <option
+                    v-for="model in editImageAccountPools.model_candidates"
+                    :key="model"
+                    :value="model"
+                  />
+                </datalist>
+                <button type="button" class="btn btn-secondary" @click="addEditImagePoolModel">
+                  <Icon name="plus" size="sm" class="mr-1" />
+                  {{ t("admin.groups.imagePricing.addModel") }}
+                </button>
+              </div>
+
+              <div v-if="editImageAccountPools.mode === 'model'" class="mt-3 space-y-3">
+                <article
+                  v-for="(pool, index) in editImageAccountPools.model_pools"
+                  :key="pool.model"
+                  class="rounded-lg border border-gray-200 bg-gray-50 p-3 dark:border-dark-600 dark:bg-dark-800"
+                >
+                  <div class="mb-3 flex items-center justify-between gap-3">
+                    <code class="min-w-0 break-all text-xs font-semibold text-gray-800 dark:text-gray-200">{{ pool.model }}</code>
+                    <button
+                      type="button"
+                      class="rounded p-1 text-gray-400 hover:bg-red-50 hover:text-red-600 focus:outline-none focus:ring-2 focus:ring-red-500 dark:hover:bg-red-950/30"
+                      :aria-label="t('admin.groups.imagePricing.removeModel', { model: pool.model })"
+                      @click="removeEditImagePoolModel(index)"
+                    >
+                      <Icon name="trash" size="sm" />
+                    </button>
+                  </div>
+
+                  <label class="input-label">{{ t("admin.groups.imagePricing.modelAccounts") }}</label>
+                  <input
+                    v-model="pool.accounts"
+                    type="text"
+                    class="input"
+                    :placeholder="t('admin.groups.imagePricing.poolPlaceholder')"
+                  />
+                </article>
+                <p
+                  v-if="editImageAccountPools.model_pools.length === 0"
+                  class="rounded-lg border border-dashed border-gray-300 px-3 py-5 text-center text-xs text-gray-500 dark:border-dark-600 dark:text-gray-400"
+                >
+                  {{ t("admin.groups.imagePricing.noModelsConfigured") }}
+                </p>
+              </div>
+
+              <div v-else class="mt-3 space-y-3">
+                <article
+                  v-for="(pool, index) in editImageAccountPools.model_resolution_pools"
+                  :key="pool.model"
+                  class="rounded-lg border border-gray-200 bg-gray-50 p-3 dark:border-dark-600 dark:bg-dark-800"
+                >
+                  <div class="mb-3 flex items-center justify-between gap-3">
+                    <code class="min-w-0 break-all text-xs font-semibold text-gray-800 dark:text-gray-200">{{ pool.model }}</code>
+                    <button
+                      type="button"
+                      class="rounded p-1 text-gray-400 hover:bg-red-50 hover:text-red-600 focus:outline-none focus:ring-2 focus:ring-red-500 dark:hover:bg-red-950/30"
+                      :aria-label="t('admin.groups.imagePricing.removeModel', { model: pool.model })"
+                      @click="removeEditImagePoolModel(index)"
+                    >
+                      <Icon name="trash" size="sm" />
+                    </button>
+                  </div>
+                  <div class="grid grid-cols-1 gap-3">
+                    <div v-for="tier in imageSizePoolTier" :key="tier">
+                      <label class="input-label">{{ tier }}</label>
+                      <input
+                        v-model="pool.resolutions[tier]"
+                        type="text"
+                        class="input"
+                        :placeholder="t('admin.groups.imagePricing.poolPlaceholder')"
+                      />
+                    </div>
+                  </div>
+                </article>
+                <p
+                  v-if="editImageAccountPools.model_resolution_pools.length === 0"
+                  class="rounded-lg border border-dashed border-gray-300 px-3 py-5 text-center text-xs text-gray-500 dark:border-dark-600 dark:text-gray-400"
+                >
+                  {{ t("admin.groups.imagePricing.noModelsConfigured") }}
+                </p>
+              </div>
+            </div>
+
+            <p class="mt-3 text-xs leading-5 text-amber-700 dark:text-amber-300">
+              {{ t("admin.groups.imagePricing.poolFallbackHint") }}
+            </p>
           </div>
           <div
             v-if="['gemini', 'openai'].includes(editForm.platform) && editForm.allow_image_generation"
@@ -4556,11 +4682,12 @@ import {
   videoPricingI18nKey,
 } from "./groupsImagePricing";
 import {
-  emptyImageSizePoolView,
-  formatImageSizePoolInput,
-  normalizeImageSizePoolView,
+  addImageAccountPoolModel,
+  emptyImageAccountPoolsDraft,
+  imageAccountPoolsViewToDraft,
   supportsImageSizeAccountPools,
-  toImageSizePoolPayload,
+  toImageAccountPoolsPayload,
+  type ImageAccountPoolsDraft,
   type ImageSizePoolTier,
 } from "./groupsImageAccountPools";
 import {
@@ -5496,25 +5623,32 @@ const editForm = reactive({
   reasoning_effort_mappings: [] as ReasoningEffortMappingRow[],
 });
 
-const editImageSizePoolDraft = reactive<Record<ImageSizePoolTier, string>>({
-  "1K": "",
-  "2K": "",
-  "4K": "",
-});
+const editImageAccountPools = reactive<ImageAccountPoolsDraft>(
+  emptyImageAccountPoolsDraft(),
+);
+const editImageAccountPoolsLoaded = ref(false);
+const editImagePoolModelInput = ref("");
 const imageSizePoolTier: ImageSizePoolTier[] = ["1K", "2K", "4K"];
 
-const resetEditImageSizePoolDraft = () => {
-  const empty = emptyImageSizePoolView();
-  for (const tier of imageSizePoolTier) {
-    editImageSizePoolDraft[tier] = formatImageSizePoolInput(empty[tier]);
-  }
+const resetEditImageAccountPools = () => {
+  Object.assign(editImageAccountPools, emptyImageAccountPoolsDraft());
+  editImageAccountPoolsLoaded.value = false;
+  editImagePoolModelInput.value = "";
 };
 
-const applyEditImageSizePoolView = (
-  view: ReturnType<typeof normalizeImageSizePoolView>,
-) => {
-  for (const tier of imageSizePoolTier) {
-    editImageSizePoolDraft[tier] = formatImageSizePoolInput(view[tier]);
+const addEditImagePoolModel = () => {
+  if (!addImageAccountPoolModel(editImageAccountPools, editImagePoolModelInput.value)) {
+    appStore.showError(t("admin.groups.imagePricing.modelInvalidOrDuplicate"));
+    return;
+  }
+  editImagePoolModelInput.value = "";
+};
+
+const removeEditImagePoolModel = (index: number) => {
+  if (editImageAccountPools.mode === "model") {
+    editImageAccountPools.model_pools.splice(index, 1);
+  } else if (editImageAccountPools.mode === "model_resolution") {
+    editImageAccountPools.model_resolution_pools.splice(index, 1);
   }
 };
 
@@ -6168,13 +6302,15 @@ const handleEdit = async (group: AdminGroup) => {
   editForm.image_price_1k = group.image_price_1k;
   editForm.image_price_2k = group.image_price_2k;
   editForm.image_price_4k = group.image_price_4k;
-  resetEditImageSizePoolDraft();
+  resetEditImageAccountPools();
   if (supportsImageSizeAccountPools(group.platform)) {
     try {
-      const pools = await adminAPI.groups.listImageSizeAccounts(group.id);
-      applyEditImageSizePoolView(normalizeImageSizePoolView(pools));
+      const pools = await adminAPI.groups.getImageAccountPools(group.id);
+      Object.assign(editImageAccountPools, imageAccountPoolsViewToDraft(pools));
+      editImageAccountPoolsLoaded.value = true;
     } catch (error) {
-      console.error("Failed to load image size account pools:", error);
+      appStore.showError(t("admin.groups.imagePricing.poolLoadFailed"));
+      console.error("Failed to load image account pools:", error);
     }
   }
   editForm.video_rate_independent = group.video_rate_independent ?? false;
@@ -6279,7 +6415,7 @@ const closeEditModal = () => {
   resetMessagesDispatchFormState(editForm);
   editForm.allow_live = false;
   resetModelsListState(editModelsListState);
-  resetEditImageSizePoolDraft();
+  resetEditImageAccountPools();
 };
 
 const handleUpdateGroup = async () => {
@@ -6407,16 +6543,11 @@ const handleUpdateGroup = async () => {
     await adminAPI.groups.update(editingGroup.value.id, payload);
     if (
       supportsImageSizeAccountPools(editForm.platform) &&
-      editForm.allow_image_generation
+      editImageAccountPoolsLoaded.value
     ) {
-      await adminAPI.groups.replaceImageSizeAccounts(
+      await adminAPI.groups.replaceImageAccountPools(
         editingGroup.value.id,
-        toImageSizePoolPayload(editImageSizePoolDraft),
-      );
-    } else if (supportsImageSizeAccountPools(editForm.platform)) {
-      await adminAPI.groups.replaceImageSizeAccounts(
-        editingGroup.value.id,
-        toImageSizePoolPayload({ "1K": "", "2K": "", "4K": "" }),
+        toImageAccountPoolsPayload(editImageAccountPools),
       );
     }
     appStore.showSuccess(t("admin.groups.groupUpdated"));

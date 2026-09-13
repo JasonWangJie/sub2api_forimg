@@ -16,6 +16,35 @@ type imageSizePoolRepositoryStub struct {
 	err        error
 }
 
+type imageAccountPoolRepositoryStub struct {
+	AccountRepository
+	mode         string
+	configured   bool
+	accounts     []Account
+	err          error
+	gotModel     string
+	gotTier      string
+	gotPlatforms []string
+}
+
+func (s *imageAccountPoolRepositoryStub) GetImageAccountPoolMode(context.Context, int64) (string, error) {
+	return s.mode, s.err
+}
+
+func (s *imageAccountPoolRepositoryStub) HasImageAccountPoolConfigured(_ context.Context, _ int64, model, tier string) (bool, error) {
+	s.gotModel, s.gotTier = model, tier
+	return s.configured, s.err
+}
+
+func (s *imageAccountPoolRepositoryStub) ListSchedulableByGroupImageAccountPool(_ context.Context, _ int64, model, tier string, platforms []string) ([]Account, error) {
+	s.gotModel, s.gotTier, s.gotPlatforms = model, tier, platforms
+	return s.accounts, s.err
+}
+
+func (s *imageAccountPoolRepositoryStub) ListImageSizeAccountIDsByGroupID(context.Context, int64) ([]int64, error) {
+	return nil, nil
+}
+
 func (s imageSizePoolRepositoryStub) HasImageSizeTierConfigured(context.Context, int64, string) (bool, error) {
 	return s.configured, s.err
 }
@@ -26,6 +55,18 @@ func (s imageSizePoolRepositoryStub) ListSchedulableByGroupImageSizeTier(context
 
 func (s imageSizePoolRepositoryStub) ListImageSizeAccountIDsByGroupID(context.Context, int64) ([]int64, error) {
 	return nil, nil
+}
+
+func (s imageSizePoolRepositoryStub) GetImageAccountPoolMode(context.Context, int64) (string, error) {
+	return ImageAccountPoolModeResolution, s.err
+}
+
+func (s imageSizePoolRepositoryStub) HasImageAccountPoolConfigured(context.Context, int64, string, string) (bool, error) {
+	return s.configured, s.err
+}
+
+func (s imageSizePoolRepositoryStub) ListSchedulableByGroupImageAccountPool(context.Context, int64, string, string, []string) ([]Account, error) {
+	return s.accounts, s.err
 }
 
 type schedulerSnapshotImageSizePoolStub struct {
@@ -54,6 +95,9 @@ func TestExtractImageSizePoolTierFromRequestBody(t *testing.T) {
 	require.Equal(t, ImageBillingSize4K, ExtractImageSizePoolTierFromRequestBody([]byte(`{"extra_body":{"google":{"image_config":{"image_size":"4K"}}}}`)))
 	require.Equal(t, ImageBillingSize1K, ExtractImageSizePoolTierFromRequestBody([]byte(`{"resolution":"1K"}`)))
 	require.Equal(t, ImageBillingSize2K, ExtractImageSizePoolTierFromRequestBody([]byte(`{"generationConfig":{"imageConfig":{"imageSize":"2K"}}}`)))
+	nonSquareTier := ExtractImageSizePoolTierFromRequestBody([]byte(`{"size":"1792x1024"}`))
+	require.Equal(t, ImageBillingSize1K, nonSquareTier)
+	require.Equal(t, ResolveGeminiImageBillingSize("1792x1024", nil).BillingSize, nonSquareTier, "Gemini routing must use the same short-edge tier as billing")
 	require.Equal(t, "", ExtractImageSizePoolTierFromRequestBody([]byte(`{"model":"x"}`)))
 }
 
@@ -62,6 +106,124 @@ func TestWithImageSizeAccountPoolTierContext(t *testing.T) {
 	tier, ok := ImageSizeAccountPoolTierFromContext(ctx)
 	require.True(t, ok)
 	require.Equal(t, ImageBillingSize2K, tier)
+}
+
+func TestWithImageAccountPoolRouteUsesExactTrimmedRequestModel(t *testing.T) {
+	ctx, err := WithImageAccountPoolRoute(context.Background(), " gpt-image-2.5-Flare ", "4k")
+	require.NoError(t, err)
+	route, ok := ImageAccountPoolRouteFromContext(ctx)
+	require.True(t, ok)
+	require.Equal(t, "gpt-image-2.5-Flare", route.Model)
+	require.Equal(t, ImageBillingSize4K, route.SizeTier)
+
+	_, err = WithImageAccountPoolRoute(context.Background(), "gpt-image-*", "1K")
+	require.ErrorContains(t, err, "wildcard")
+	_, err = WithImageAccountPoolRoute(context.Background(), "gpt-image-2\n", "1K")
+	require.NoError(t, err, "leading/trailing whitespace is trimmed before control-character validation")
+	_, err = WithImageAccountPoolRoute(context.Background(), "gpt-image\x00-2", "1K")
+	require.ErrorContains(t, err, "control")
+}
+
+func TestResolveImageAccountPoolModesAndFallback(t *testing.T) {
+	tests := []struct {
+		name      string
+		mode      string
+		model     string
+		tier      string
+		wantModel string
+		wantTier  string
+	}{
+		{name: "resolution", mode: ImageAccountPoolModeResolution, model: "gpt-image-2", tier: "2K", wantTier: "2K"},
+		{name: "model", mode: ImageAccountPoolModeModel, model: "gpt-image-2", tier: "2K", wantModel: "gpt-image-2"},
+		{name: "combined", mode: ImageAccountPoolModeModelResolution, model: "gpt-image-2.5-sunburst", tier: "4K", wantModel: "gpt-image-2.5-sunburst", wantTier: "4K"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx, err := WithImageAccountPoolRoute(context.Background(), tt.model, tt.tier)
+			require.NoError(t, err)
+			repo := &imageAccountPoolRepositoryStub{mode: tt.mode, configured: true, accounts: []Account{{ID: 9}}}
+			accounts, configured, err := ResolveImageAccountPool(ctx, repo, 7, []string{PlatformOpenAI})
+			require.NoError(t, err)
+			require.True(t, configured)
+			require.Equal(t, []Account{{ID: 9}}, accounts)
+			require.Equal(t, tt.wantModel, repo.gotModel)
+			require.Equal(t, tt.wantTier, repo.gotTier)
+		})
+	}
+
+	ctx, err := WithImageAccountPoolRoute(context.Background(), "gpt-image-2", "")
+	require.NoError(t, err)
+	repo := &imageAccountPoolRepositoryStub{mode: ImageAccountPoolModeModelResolution, configured: true}
+	accounts, configured, err := ResolveImageAccountPool(ctx, repo, 7, nil)
+	require.NoError(t, err)
+	require.False(t, configured, "missing required resolution falls back to account_groups")
+	require.Nil(t, accounts)
+
+	repo = &imageAccountPoolRepositoryStub{mode: ImageAccountPoolModeModel, configured: false}
+	accounts, configured, err = ResolveImageAccountPool(ctx, repo, 7, nil)
+	require.NoError(t, err)
+	require.False(t, configured, "an absent exact model binding falls back")
+	require.Nil(t, accounts)
+
+	repo = &imageAccountPoolRepositoryStub{mode: ImageAccountPoolModeModel, configured: true, accounts: []Account{}}
+	accounts, configured, err = ResolveImageAccountPool(ctx, repo, 7, nil)
+	require.NoError(t, err)
+	require.True(t, configured, "a configured but unavailable pool must remain fail-closed")
+	require.Empty(t, accounts)
+}
+
+func TestResolveImageAccountPoolDoesNotBypassOAuthOnlyGroup(t *testing.T) {
+	groupID := int64(7)
+	group := &Group{
+		ID: groupID, Platform: PlatformOpenAI, Status: StatusActive, Hydrated: true,
+		RequireOAuthOnly: true,
+	}
+	ctx := context.WithValue(context.Background(), ctxkey.Group, group)
+	ctx, err := WithImageAccountPoolRoute(ctx, "gpt-image-2", "1K")
+	require.NoError(t, err)
+	rateMultiplier := 1.75
+	repo := &imageAccountPoolRepositoryStub{
+		mode:       ImageAccountPoolModeModel,
+		configured: true,
+		accounts: []Account{
+			{ID: 1, Type: AccountTypeAPIKey, RateMultiplier: &rateMultiplier},
+			{ID: 2, Type: AccountTypeOAuth, RateMultiplier: &rateMultiplier},
+		},
+	}
+
+	accounts, configured, err := ResolveImageAccountPool(ctx, repo, groupID, []string{PlatformOpenAI})
+	require.NoError(t, err)
+	require.True(t, configured)
+	require.Len(t, accounts, 1)
+	require.Equal(t, int64(2), accounts[0].ID)
+	require.Equal(t, rateMultiplier, accounts[0].BillingRateMultiplier(), "pool filtering must preserve account billing fields")
+
+	repo.accounts = []Account{{ID: 1, Type: AccountTypeAPIKey}}
+	accounts, configured, err = ResolveImageAccountPool(ctx, repo, groupID, []string{PlatformOpenAI})
+	require.NoError(t, err)
+	require.True(t, configured, "filtered OAuth-only pools must not fall back across pool boundaries")
+	require.Empty(t, accounts)
+}
+
+func TestIsSingleAntigravityAccountGroupUsesConfiguredImagePool(t *testing.T) {
+	groupID := int64(7)
+	group := &Group{ID: groupID, Platform: PlatformAntigravity, Status: StatusActive, Hydrated: true}
+	ctx := context.WithValue(context.Background(), ctxkey.Group, group)
+	ctx, err := WithImageAccountPoolRoute(ctx, "gemini-3-pro-image-preview", "2K")
+	require.NoError(t, err)
+	repo := &imageAccountPoolRepositoryStub{
+		mode:       ImageAccountPoolModeModel,
+		configured: true,
+		accounts:   []Account{{ID: 8, Platform: PlatformAntigravity, Status: StatusActive, Schedulable: true}},
+	}
+	svc := &GatewayService{accountRepo: repo}
+
+	require.True(t, svc.IsSingleAntigravityAccountGroup(ctx, &groupID))
+	require.Equal(t, "gemini-3-pro-image-preview", repo.gotModel)
+	require.Empty(t, repo.gotTier)
+
+	repo.accounts = append(repo.accounts, Account{ID: 9, Platform: PlatformAntigravity, Status: StatusActive, Schedulable: true})
+	require.False(t, svc.IsSingleAntigravityAccountGroup(ctx, &groupID))
 }
 
 func TestForcedSchedulableAccountsContext(t *testing.T) {

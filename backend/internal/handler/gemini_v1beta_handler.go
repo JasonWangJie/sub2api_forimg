@@ -183,6 +183,7 @@ func (h *GatewayHandler) GeminiV1BetaModels(c *gin.Context) {
 		googleError(c, http.StatusBadRequest, "Invalid model in URL")
 		return
 	}
+	requestModelName := modelName
 	if resolvedModel, ok := service.ResolvedUpstreamModelFromContext(c.Request.Context()); ok && strings.TrimSpace(resolvedModel) != "" {
 		modelName = strings.TrimSpace(resolvedModel)
 	}
@@ -222,7 +223,7 @@ func (h *GatewayHandler) GeminiV1BetaModels(c *gin.Context) {
 		}
 	}()
 	ensureImageGenerationGate := func(models ...string) bool {
-		if middleware.HasForcePlatform(c) || imageIntent {
+		if imageIntent {
 			return true
 		}
 		for _, candidateModel := range models {
@@ -234,6 +235,12 @@ func (h *GatewayHandler) GeminiV1BetaModels(c *gin.Context) {
 		if !imageIntent {
 			return true
 		}
+		// Dedicated /antigravity routes intentionally bypass the group feature
+		// gate, but they must still be marked as image requests so account-pool
+		// routing, image accounting and circuit-breaker reporting stay correct.
+		if middleware.HasForcePlatform(c) {
+			return true
+		}
 		if !service.GroupAllowsImageGeneration(apiKey.Group) {
 			googleError(c, http.StatusForbidden, service.ImageGenerationPermissionMessage())
 			return false
@@ -242,7 +249,7 @@ func (h *GatewayHandler) GeminiV1BetaModels(c *gin.Context) {
 		imageRelease, acquired = h.acquireGeminiImageGenerationSlot(c)
 		return acquired
 	}
-	reqModel := modelName
+	reqModel := requestModelName
 	if !ensureImageGenerationGate(reqModel) {
 		return
 	}
@@ -259,6 +266,11 @@ func (h *GatewayHandler) GeminiV1BetaModels(c *gin.Context) {
 	}
 	if imageIntent {
 		ctx := service.WithGeminiImageGenerationIntent(c.Request.Context())
+		ctx, routeErr := service.WithImageAccountPoolRoute(ctx, reqModel, service.ExtractImageSizePoolTierFromRequestBody(body))
+		if routeErr != nil {
+			googleError(c, http.StatusBadRequest, routeErr.Error())
+			return
+		}
 		c.Request = c.Request.WithContext(ctx)
 	}
 	geminiImageSticky := service.GeminiImageStickySessionRequired(imageIntent, body)
@@ -414,12 +426,6 @@ func (h *GatewayHandler) GeminiV1BetaModels(c *gin.Context) {
 		ctx := service.WithSingleAccountRetry(c.Request.Context(), true, h.metadataBridgeEnabled())
 		c.Request = c.Request.WithContext(ctx)
 	}
-	if imageIntent {
-		if tier := service.ExtractImageSizePoolTierFromRequestBody(body); tier != "" {
-			c.Request = c.Request.WithContext(service.WithImageSizeAccountPoolTier(c.Request.Context(), tier))
-		}
-	}
-
 	for {
 		selection, err := h.gatewayService.SelectAccountWithLoadAwareness(c.Request.Context(), apiKey.GroupID, sessionKey, modelName, fs.FailedAccountIDs, "", int64(0)) // Gemini 不使用会话限制
 		if err != nil {

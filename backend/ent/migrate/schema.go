@@ -918,6 +918,7 @@ var (
 		{Name: "allow_image_generation", Type: field.TypeBool, Default: false},
 		{Name: "allow_batch_image_generation", Type: field.TypeBool, Default: false},
 		{Name: "allow_async_image_generation", Type: field.TypeBool, Default: false},
+		{Name: "image_account_pool_mode", Type: field.TypeString, Size: 32, Default: "resolution"},
 		{Name: "image_rate_independent", Type: field.TypeBool, Default: false},
 		{Name: "image_rate_multiplier", Type: field.TypeFloat64, Default: 1, SchemaType: map[string]string{"postgres": "decimal(10,4)"}},
 		{Name: "image_price_1k", Type: field.TypeFloat64, Nullable: true, SchemaType: map[string]string{"postgres": "decimal(20,8)"}},
@@ -992,7 +993,7 @@ var (
 			{
 				Name:    "group_sort_order",
 				Unique:  false,
-				Columns: []*schema.Column{GroupsColumns[49]},
+				Columns: []*schema.Column{GroupsColumns[50]},
 			},
 			{
 				Name:    "idx_groups_duplicate_operation_id_active",
@@ -1007,6 +1008,7 @@ var (
 	// GroupImageSizeAccountsColumns holds the columns for the "group_image_size_accounts" table.
 	GroupImageSizeAccountsColumns = []*schema.Column{
 		{Name: "id", Type: field.TypeInt64, Increment: true},
+		{Name: "model", Type: field.TypeString, Size: 255, Default: ""},
 		{Name: "size_tier", Type: field.TypeString, Size: 8},
 		{Name: "priority", Type: field.TypeInt, Default: 50},
 		{Name: "created_at", Type: field.TypeTime, SchemaType: map[string]string{"postgres": "timestamptz"}},
@@ -1021,32 +1023,32 @@ var (
 		ForeignKeys: []*schema.ForeignKey{
 			{
 				Symbol:     "group_image_size_accounts_accounts_account",
-				Columns:    []*schema.Column{GroupImageSizeAccountsColumns[4]},
+				Columns:    []*schema.Column{GroupImageSizeAccountsColumns[5]},
 				RefColumns: []*schema.Column{AccountsColumns[0]},
 				OnDelete:   schema.NoAction,
 			},
 			{
 				Symbol:     "group_image_size_accounts_groups_group",
-				Columns:    []*schema.Column{GroupImageSizeAccountsColumns[5]},
+				Columns:    []*schema.Column{GroupImageSizeAccountsColumns[6]},
 				RefColumns: []*schema.Column{GroupsColumns[0]},
 				OnDelete:   schema.NoAction,
 			},
 		},
 		Indexes: []*schema.Index{
 			{
-				Name:    "groupimagesizeaccount_group_id_size_tier_account_id",
+				Name:    "groupimagesizeaccount_group_id_model_size_tier_account_id",
 				Unique:  true,
-				Columns: []*schema.Column{GroupImageSizeAccountsColumns[5], GroupImageSizeAccountsColumns[1], GroupImageSizeAccountsColumns[4]},
+				Columns: []*schema.Column{GroupImageSizeAccountsColumns[6], GroupImageSizeAccountsColumns[1], GroupImageSizeAccountsColumns[2], GroupImageSizeAccountsColumns[5]},
 			},
 			{
-				Name:    "groupimagesizeaccount_group_id_size_tier_priority_account_id",
+				Name:    "groupimagesizeaccount_group_id_model_size_tier_priority_account_id",
 				Unique:  false,
-				Columns: []*schema.Column{GroupImageSizeAccountsColumns[5], GroupImageSizeAccountsColumns[1], GroupImageSizeAccountsColumns[2], GroupImageSizeAccountsColumns[4]},
+				Columns: []*schema.Column{GroupImageSizeAccountsColumns[6], GroupImageSizeAccountsColumns[1], GroupImageSizeAccountsColumns[2], GroupImageSizeAccountsColumns[3], GroupImageSizeAccountsColumns[5]},
 			},
 			{
 				Name:    "groupimagesizeaccount_account_id",
 				Unique:  false,
-				Columns: []*schema.Column{GroupImageSizeAccountsColumns[4]},
+				Columns: []*schema.Column{GroupImageSizeAccountsColumns[5]},
 			},
 		},
 	}

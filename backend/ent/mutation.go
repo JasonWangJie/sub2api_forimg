@@ -21878,6 +21878,7 @@ type GroupMutation struct {
 	allow_image_generation                  *bool
 	allow_batch_image_generation            *bool
 	allow_async_image_generation            *bool
+	image_account_pool_mode                 *string
 	image_rate_independent                  *bool
 	image_rate_multiplier                   *float64
 	addimage_rate_multiplier                *float64
@@ -23089,6 +23090,42 @@ func (m *GroupMutation) OldAllowAsyncImageGeneration(ctx context.Context) (v boo
 // ResetAllowAsyncImageGeneration resets all changes to the "allow_async_image_generation" field.
 func (m *GroupMutation) ResetAllowAsyncImageGeneration() {
 	m.allow_async_image_generation = nil
+}
+
+// SetImageAccountPoolMode sets the "image_account_pool_mode" field.
+func (m *GroupMutation) SetImageAccountPoolMode(s string) {
+	m.image_account_pool_mode = &s
+}
+
+// ImageAccountPoolMode returns the value of the "image_account_pool_mode" field in the mutation.
+func (m *GroupMutation) ImageAccountPoolMode() (r string, exists bool) {
+	v := m.image_account_pool_mode
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldImageAccountPoolMode returns the old "image_account_pool_mode" field's value of the Group entity.
+// If the Group object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *GroupMutation) OldImageAccountPoolMode(ctx context.Context) (v string, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldImageAccountPoolMode is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldImageAccountPoolMode requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldImageAccountPoolMode: %w", err)
+	}
+	return oldValue.ImageAccountPoolMode, nil
+}
+
+// ResetImageAccountPoolMode resets all changes to the "image_account_pool_mode" field.
+func (m *GroupMutation) ResetImageAccountPoolMode() {
+	m.image_account_pool_mode = nil
 }
 
 // SetImageRateIndependent sets the "image_rate_independent" field.
@@ -25511,7 +25548,7 @@ func (m *GroupMutation) Type() string {
 // order to get all numeric fields that were incremented/decremented, call
 // AddedFields().
 func (m *GroupMutation) Fields() []string {
-	fields := make([]string, 0, 62)
+	fields := make([]string, 0, 63)
 	if m.created_at != nil {
 		fields = append(fields, group.FieldCreatedAt)
 	}
@@ -25580,6 +25617,9 @@ func (m *GroupMutation) Fields() []string {
 	}
 	if m.allow_async_image_generation != nil {
 		fields = append(fields, group.FieldAllowAsyncImageGeneration)
+	}
+	if m.image_account_pool_mode != nil {
+		fields = append(fields, group.FieldImageAccountPoolMode)
 	}
 	if m.image_rate_independent != nil {
 		fields = append(fields, group.FieldImageRateIndependent)
@@ -25752,6 +25792,8 @@ func (m *GroupMutation) Field(name string) (ent.Value, bool) {
 		return m.AllowBatchImageGeneration()
 	case group.FieldAllowAsyncImageGeneration:
 		return m.AllowAsyncImageGeneration()
+	case group.FieldImageAccountPoolMode:
+		return m.ImageAccountPoolMode()
 	case group.FieldImageRateIndependent:
 		return m.ImageRateIndependent()
 	case group.FieldImageRateMultiplier:
@@ -25885,6 +25927,8 @@ func (m *GroupMutation) OldField(ctx context.Context, name string) (ent.Value, e
 		return m.OldAllowBatchImageGeneration(ctx)
 	case group.FieldAllowAsyncImageGeneration:
 		return m.OldAllowAsyncImageGeneration(ctx)
+	case group.FieldImageAccountPoolMode:
+		return m.OldImageAccountPoolMode(ctx)
 	case group.FieldImageRateIndependent:
 		return m.OldImageRateIndependent(ctx)
 	case group.FieldImageRateMultiplier:
@@ -26132,6 +26176,13 @@ func (m *GroupMutation) SetField(name string, value ent.Value) error {
 			return fmt.Errorf("unexpected type %T for field %s", value, name)
 		}
 		m.SetAllowAsyncImageGeneration(v)
+		return nil
+	case group.FieldImageAccountPoolMode:
+		v, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetImageAccountPoolMode(v)
 		return nil
 	case group.FieldImageRateIndependent:
 		v, ok := value.(bool)
@@ -26980,6 +27031,9 @@ func (m *GroupMutation) ResetField(name string) error {
 	case group.FieldAllowAsyncImageGeneration:
 		m.ResetAllowAsyncImageGeneration()
 		return nil
+	case group.FieldImageAccountPoolMode:
+		m.ResetImageAccountPoolMode()
+		return nil
 	case group.FieldImageRateIndependent:
 		m.ResetImageRateIndependent()
 		return nil
@@ -27321,6 +27375,7 @@ type GroupImageSizeAccountMutation struct {
 	op             Op
 	typ            string
 	id             *int64
+	model          *string
 	size_tier      *string
 	priority       *int
 	addpriority    *int
@@ -27467,6 +27522,42 @@ func (m *GroupImageSizeAccountMutation) OldGroupID(ctx context.Context) (v int64
 // ResetGroupID resets all changes to the "group_id" field.
 func (m *GroupImageSizeAccountMutation) ResetGroupID() {
 	m.group = nil
+}
+
+// SetModel sets the "model" field.
+func (m *GroupImageSizeAccountMutation) SetModel(s string) {
+	m.model = &s
+}
+
+// Model returns the value of the "model" field in the mutation.
+func (m *GroupImageSizeAccountMutation) Model() (r string, exists bool) {
+	v := m.model
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldModel returns the old "model" field's value of the GroupImageSizeAccount entity.
+// If the GroupImageSizeAccount object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *GroupImageSizeAccountMutation) OldModel(ctx context.Context) (v string, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldModel is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldModel requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldModel: %w", err)
+	}
+	return oldValue.Model, nil
+}
+
+// ResetModel resets all changes to the "model" field.
+func (m *GroupImageSizeAccountMutation) ResetModel() {
+	m.model = nil
 }
 
 // SetSizeTier sets the "size_tier" field.
@@ -27721,9 +27812,12 @@ func (m *GroupImageSizeAccountMutation) Type() string {
 // order to get all numeric fields that were incremented/decremented, call
 // AddedFields().
 func (m *GroupImageSizeAccountMutation) Fields() []string {
-	fields := make([]string, 0, 5)
+	fields := make([]string, 0, 6)
 	if m.group != nil {
 		fields = append(fields, groupimagesizeaccount.FieldGroupID)
+	}
+	if m.model != nil {
+		fields = append(fields, groupimagesizeaccount.FieldModel)
 	}
 	if m.size_tier != nil {
 		fields = append(fields, groupimagesizeaccount.FieldSizeTier)
@@ -27747,6 +27841,8 @@ func (m *GroupImageSizeAccountMutation) Field(name string) (ent.Value, bool) {
 	switch name {
 	case groupimagesizeaccount.FieldGroupID:
 		return m.GroupID()
+	case groupimagesizeaccount.FieldModel:
+		return m.Model()
 	case groupimagesizeaccount.FieldSizeTier:
 		return m.SizeTier()
 	case groupimagesizeaccount.FieldAccountID:
@@ -27766,6 +27862,8 @@ func (m *GroupImageSizeAccountMutation) OldField(ctx context.Context, name strin
 	switch name {
 	case groupimagesizeaccount.FieldGroupID:
 		return m.OldGroupID(ctx)
+	case groupimagesizeaccount.FieldModel:
+		return m.OldModel(ctx)
 	case groupimagesizeaccount.FieldSizeTier:
 		return m.OldSizeTier(ctx)
 	case groupimagesizeaccount.FieldAccountID:
@@ -27789,6 +27887,13 @@ func (m *GroupImageSizeAccountMutation) SetField(name string, value ent.Value) e
 			return fmt.Errorf("unexpected type %T for field %s", value, name)
 		}
 		m.SetGroupID(v)
+		return nil
+	case groupimagesizeaccount.FieldModel:
+		v, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetModel(v)
 		return nil
 	case groupimagesizeaccount.FieldSizeTier:
 		v, ok := value.(string)
@@ -27884,6 +27989,9 @@ func (m *GroupImageSizeAccountMutation) ResetField(name string) error {
 	switch name {
 	case groupimagesizeaccount.FieldGroupID:
 		m.ResetGroupID()
+		return nil
+	case groupimagesizeaccount.FieldModel:
+		m.ResetModel()
 		return nil
 	case groupimagesizeaccount.FieldSizeTier:
 		m.ResetSizeTier()

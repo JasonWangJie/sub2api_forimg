@@ -12,8 +12,9 @@ import (
 	"entgo.io/ent/schema/index"
 )
 
-// GroupImageSizeAccount binds accounts to a group for a specific image size tier (1K/2K/4K).
-// Rows are optional per tier; when absent the default account_groups pool is used.
+// GroupImageSizeAccount binds accounts to a group by resolution, exact request
+// model, or exact request model plus resolution. The legacy table name is kept
+// so upgrades preserve all resolution-only bindings.
 type GroupImageSizeAccount struct {
 	ent.Schema
 }
@@ -27,9 +28,13 @@ func (GroupImageSizeAccount) Annotations() []schema.Annotation {
 func (GroupImageSizeAccount) Fields() []ent.Field {
 	return []ent.Field{
 		field.Int64("group_id"),
+		field.String("model").
+			MaxLen(255).
+			Default("").
+			Comment("Exact request-side image model ID; empty for resolution-only pools"),
 		field.String("size_tier").
 			MaxLen(8).
-			Comment("Image billing tier: 1K, 2K, or 4K"),
+			Comment("Image billing tier: 1K, 2K, 4K, or empty for model-only pools"),
 		field.Int64("account_id"),
 		field.Int("priority").
 			Default(50).
@@ -56,9 +61,9 @@ func (GroupImageSizeAccount) Edges() []ent.Edge {
 
 func (GroupImageSizeAccount) Indexes() []ent.Index {
 	return []ent.Index{
-		index.Fields("group_id", "size_tier", "account_id").
+		index.Fields("group_id", "model", "size_tier", "account_id").
 			Unique(),
-		index.Fields("group_id", "size_tier", "priority", "account_id"),
+		index.Fields("group_id", "model", "size_tier", "priority", "account_id"),
 		index.Fields("account_id"),
 	}
 }

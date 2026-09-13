@@ -21,7 +21,9 @@ type GroupImageSizeAccount struct {
 	ID int64 `json:"id,omitempty"`
 	// GroupID holds the value of the "group_id" field.
 	GroupID int64 `json:"group_id,omitempty"`
-	// Image billing tier: 1K, 2K, or 4K
+	// Exact request-side image model ID; empty for resolution-only pools
+	Model string `json:"model,omitempty"`
+	// Image billing tier: 1K, 2K, 4K, or empty for model-only pools
 	SizeTier string `json:"size_tier,omitempty"`
 	// AccountID holds the value of the "account_id" field.
 	AccountID int64 `json:"account_id,omitempty"`
@@ -75,7 +77,7 @@ func (*GroupImageSizeAccount) scanValues(columns []string) ([]any, error) {
 		switch columns[i] {
 		case groupimagesizeaccount.FieldID, groupimagesizeaccount.FieldGroupID, groupimagesizeaccount.FieldAccountID, groupimagesizeaccount.FieldPriority:
 			values[i] = new(sql.NullInt64)
-		case groupimagesizeaccount.FieldSizeTier:
+		case groupimagesizeaccount.FieldModel, groupimagesizeaccount.FieldSizeTier:
 			values[i] = new(sql.NullString)
 		case groupimagesizeaccount.FieldCreatedAt:
 			values[i] = new(sql.NullTime)
@@ -105,6 +107,12 @@ func (_m *GroupImageSizeAccount) assignValues(columns []string, values []any) er
 				return fmt.Errorf("unexpected type %T for field group_id", values[i])
 			} else if value.Valid {
 				_m.GroupID = value.Int64
+			}
+		case groupimagesizeaccount.FieldModel:
+			if value, ok := values[i].(*sql.NullString); !ok {
+				return fmt.Errorf("unexpected type %T for field model", values[i])
+			} else if value.Valid {
+				_m.Model = value.String
 			}
 		case groupimagesizeaccount.FieldSizeTier:
 			if value, ok := values[i].(*sql.NullString); !ok {
@@ -178,6 +186,9 @@ func (_m *GroupImageSizeAccount) String() string {
 	builder.WriteString(fmt.Sprintf("id=%v, ", _m.ID))
 	builder.WriteString("group_id=")
 	builder.WriteString(fmt.Sprintf("%v", _m.GroupID))
+	builder.WriteString(", ")
+	builder.WriteString("model=")
+	builder.WriteString(_m.Model)
 	builder.WriteString(", ")
 	builder.WriteString("size_tier=")
 	builder.WriteString(_m.SizeTier)

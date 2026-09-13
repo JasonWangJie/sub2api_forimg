@@ -170,6 +170,11 @@ func AllowAsyncImageGeneration(v bool) predicate.Group {
 	return predicate.Group(sql.FieldEQ(FieldAllowAsyncImageGeneration, v))
 }
 
+// ImageAccountPoolMode applies equality check predicate on the "image_account_pool_mode" field. It's identical to ImageAccountPoolModeEQ.
+func ImageAccountPoolMode(v string) predicate.Group {
+	return predicate.Group(sql.FieldEQ(FieldImageAccountPoolMode, v))
+}
+
 // ImageRateIndependent applies equality check predicate on the "image_rate_independent" field. It's identical to ImageRateIndependentEQ.
 func ImageRateIndependent(v bool) predicate.Group {
 	return predicate.Group(sql.FieldEQ(FieldImageRateIndependent, v))
@@ -1388,6 +1393,71 @@ func AllowAsyncImageGenerationEQ(v bool) predicate.Group {
 // AllowAsyncImageGenerationNEQ applies the NEQ predicate on the "allow_async_image_generation" field.
 func AllowAsyncImageGenerationNEQ(v bool) predicate.Group {
 	return predicate.Group(sql.FieldNEQ(FieldAllowAsyncImageGeneration, v))
+}
+
+// ImageAccountPoolModeEQ applies the EQ predicate on the "image_account_pool_mode" field.
+func ImageAccountPoolModeEQ(v string) predicate.Group {
+	return predicate.Group(sql.FieldEQ(FieldImageAccountPoolMode, v))
+}
+
+// ImageAccountPoolModeNEQ applies the NEQ predicate on the "image_account_pool_mode" field.
+func ImageAccountPoolModeNEQ(v string) predicate.Group {
+	return predicate.Group(sql.FieldNEQ(FieldImageAccountPoolMode, v))
+}
+
+// ImageAccountPoolModeIn applies the In predicate on the "image_account_pool_mode" field.
+func ImageAccountPoolModeIn(vs ...string) predicate.Group {
+	return predicate.Group(sql.FieldIn(FieldImageAccountPoolMode, vs...))
+}
+
+// ImageAccountPoolModeNotIn applies the NotIn predicate on the "image_account_pool_mode" field.
+func ImageAccountPoolModeNotIn(vs ...string) predicate.Group {
+	return predicate.Group(sql.FieldNotIn(FieldImageAccountPoolMode, vs...))
+}
+
+// ImageAccountPoolModeGT applies the GT predicate on the "image_account_pool_mode" field.
+func ImageAccountPoolModeGT(v string) predicate.Group {
+	return predicate.Group(sql.FieldGT(FieldImageAccountPoolMode, v))
+}
+
+// ImageAccountPoolModeGTE applies the GTE predicate on the "image_account_pool_mode" field.
+func ImageAccountPoolModeGTE(v string) predicate.Group {
+	return predicate.Group(sql.FieldGTE(FieldImageAccountPoolMode, v))
+}
+
+// ImageAccountPoolModeLT applies the LT predicate on the "image_account_pool_mode" field.
+func ImageAccountPoolModeLT(v string) predicate.Group {
+	return predicate.Group(sql.FieldLT(FieldImageAccountPoolMode, v))
+}
+
+// ImageAccountPoolModeLTE applies the LTE predicate on the "image_account_pool_mode" field.
+func ImageAccountPoolModeLTE(v string) predicate.Group {
+	return predicate.Group(sql.FieldLTE(FieldImageAccountPoolMode, v))
+}
+
+// ImageAccountPoolModeContains applies the Contains predicate on the "image_account_pool_mode" field.
+func ImageAccountPoolModeContains(v string) predicate.Group {
+	return predicate.Group(sql.FieldContains(FieldImageAccountPoolMode, v))
+}
+
+// ImageAccountPoolModeHasPrefix applies the HasPrefix predicate on the "image_account_pool_mode" field.
+func ImageAccountPoolModeHasPrefix(v string) predicate.Group {
+	return predicate.Group(sql.FieldHasPrefix(FieldImageAccountPoolMode, v))
+}
+
+// ImageAccountPoolModeHasSuffix applies the HasSuffix predicate on the "image_account_pool_mode" field.
+func ImageAccountPoolModeHasSuffix(v string) predicate.Group {
+	return predicate.Group(sql.FieldHasSuffix(FieldImageAccountPoolMode, v))
+}
+
+// ImageAccountPoolModeEqualFold applies the EqualFold predicate on the "image_account_pool_mode" field.
+func ImageAccountPoolModeEqualFold(v string) predicate.Group {
+	return predicate.Group(sql.FieldEqualFold(FieldImageAccountPoolMode, v))
+}
+
+// ImageAccountPoolModeContainsFold applies the ContainsFold predicate on the "image_account_pool_mode" field.
+func ImageAccountPoolModeContainsFold(v string) predicate.Group {
+	return predicate.Group(sql.FieldContainsFold(FieldImageAccountPoolMode, v))
 }
 
 // ImageRateIndependentEQ applies the EQ predicate on the "image_rate_independent" field.

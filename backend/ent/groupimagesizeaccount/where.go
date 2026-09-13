@@ -60,6 +60,11 @@ func GroupID(v int64) predicate.GroupImageSizeAccount {
 	return predicate.GroupImageSizeAccount(sql.FieldEQ(FieldGroupID, v))
 }
 
+// Model applies equality check predicate on the "model" field. It's identical to ModelEQ.
+func Model(v string) predicate.GroupImageSizeAccount {
+	return predicate.GroupImageSizeAccount(sql.FieldEQ(FieldModel, v))
+}
+
 // SizeTier applies equality check predicate on the "size_tier" field. It's identical to SizeTierEQ.
 func SizeTier(v string) predicate.GroupImageSizeAccount {
 	return predicate.GroupImageSizeAccount(sql.FieldEQ(FieldSizeTier, v))
@@ -98,6 +103,71 @@ func GroupIDIn(vs ...int64) predicate.GroupImageSizeAccount {
 // GroupIDNotIn applies the NotIn predicate on the "group_id" field.
 func GroupIDNotIn(vs ...int64) predicate.GroupImageSizeAccount {
 	return predicate.GroupImageSizeAccount(sql.FieldNotIn(FieldGroupID, vs...))
+}
+
+// ModelEQ applies the EQ predicate on the "model" field.
+func ModelEQ(v string) predicate.GroupImageSizeAccount {
+	return predicate.GroupImageSizeAccount(sql.FieldEQ(FieldModel, v))
+}
+
+// ModelNEQ applies the NEQ predicate on the "model" field.
+func ModelNEQ(v string) predicate.GroupImageSizeAccount {
+	return predicate.GroupImageSizeAccount(sql.FieldNEQ(FieldModel, v))
+}
+
+// ModelIn applies the In predicate on the "model" field.
+func ModelIn(vs ...string) predicate.GroupImageSizeAccount {
+	return predicate.GroupImageSizeAccount(sql.FieldIn(FieldModel, vs...))
+}
+
+// ModelNotIn applies the NotIn predicate on the "model" field.
+func ModelNotIn(vs ...string) predicate.GroupImageSizeAccount {
+	return predicate.GroupImageSizeAccount(sql.FieldNotIn(FieldModel, vs...))
+}
+
+// ModelGT applies the GT predicate on the "model" field.
+func ModelGT(v string) predicate.GroupImageSizeAccount {
+	return predicate.GroupImageSizeAccount(sql.FieldGT(FieldModel, v))
+}
+
+// ModelGTE applies the GTE predicate on the "model" field.
+func ModelGTE(v string) predicate.GroupImageSizeAccount {
+	return predicate.GroupImageSizeAccount(sql.FieldGTE(FieldModel, v))
+}
+
+// ModelLT applies the LT predicate on the "model" field.
+func ModelLT(v string) predicate.GroupImageSizeAccount {
+	return predicate.GroupImageSizeAccount(sql.FieldLT(FieldModel, v))
+}
+
+// ModelLTE applies the LTE predicate on the "model" field.
+func ModelLTE(v string) predicate.GroupImageSizeAccount {
+	return predicate.GroupImageSizeAccount(sql.FieldLTE(FieldModel, v))
+}
+
+// ModelContains applies the Contains predicate on the "model" field.
+func ModelContains(v string) predicate.GroupImageSizeAccount {
+	return predicate.GroupImageSizeAccount(sql.FieldContains(FieldModel, v))
+}
+
+// ModelHasPrefix applies the HasPrefix predicate on the "model" field.
+func ModelHasPrefix(v string) predicate.GroupImageSizeAccount {
+	return predicate.GroupImageSizeAccount(sql.FieldHasPrefix(FieldModel, v))
+}
+
+// ModelHasSuffix applies the HasSuffix predicate on the "model" field.
+func ModelHasSuffix(v string) predicate.GroupImageSizeAccount {
+	return predicate.GroupImageSizeAccount(sql.FieldHasSuffix(FieldModel, v))
+}
+
+// ModelEqualFold applies the EqualFold predicate on the "model" field.
+func ModelEqualFold(v string) predicate.GroupImageSizeAccount {
+	return predicate.GroupImageSizeAccount(sql.FieldEqualFold(FieldModel, v))
+}
+
+// ModelContainsFold applies the ContainsFold predicate on the "model" field.
+func ModelContainsFold(v string) predicate.GroupImageSizeAccount {
+	return predicate.GroupImageSizeAccount(sql.FieldContainsFold(FieldModel, v))
 }
 
 // SizeTierEQ applies the EQ predicate on the "size_tier" field.

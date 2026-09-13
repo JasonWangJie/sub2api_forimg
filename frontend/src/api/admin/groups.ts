@@ -483,6 +483,35 @@ export type GroupImageSizeAccountBinding = {
   account_name?: string | null
 }
 
+export type GroupImageAccountPoolMode = 'resolution' | 'model' | 'model_resolution'
+
+export type GroupImageAccountPools = {
+  mode: GroupImageAccountPoolMode
+  resolution_pools: GroupImageSizeAccountBindingsView
+  model_pools: Array<{
+    model: string
+    accounts: GroupImageSizeAccountBinding[]
+  }>
+  model_resolution_pools: Array<{
+    model: string
+    resolutions: GroupImageSizeAccountBindingsView
+  }>
+  model_candidates?: string[]
+}
+
+export type GroupImageAccountPoolsPayload = {
+  mode: GroupImageAccountPoolMode
+  resolution_pools: GroupImageSizeAccountBindingsPayload
+  model_pools: Array<{
+    model: string
+    accounts: Array<{ account_id: number; priority: number }>
+  }>
+  model_resolution_pools: Array<{
+    model: string
+    resolutions: GroupImageSizeAccountBindingsPayload
+  }>
+}
+
 export type GroupImageSizeAccountBindingsView = Record<
   '1K' | '2K' | '4K',
   GroupImageSizeAccountBinding[]
@@ -520,6 +549,28 @@ export async function replaceImageSizeAccounts(
   return data
 }
 
+/** Read the active mode plus all independently persisted image account pools. */
+export async function getImageAccountPools(
+  groupId: number
+): Promise<GroupImageAccountPools> {
+  const { data } = await apiClient.get<GroupImageAccountPools>(
+    `/admin/groups/${groupId}/image-account-pools`
+  )
+  return data
+}
+
+/** Atomically replace the image pool mode and all three configuration sets. */
+export async function replaceImageAccountPools(
+  groupId: number,
+  pools: GroupImageAccountPoolsPayload
+): Promise<GroupImageAccountPools> {
+  const { data } = await apiClient.put<GroupImageAccountPools>(
+    `/admin/groups/${groupId}/image-account-pools`,
+    pools
+  )
+  return data
+}
+
 export const groupsAPI = {
   list,
   getAll,
@@ -542,6 +593,8 @@ export const groupsAPI = {
   previewCompositeRoute,
   listImageSizeAccounts,
   replaceImageSizeAccounts,
+  getImageAccountPools,
+  replaceImageAccountPools,
   getGroupRateMultipliers,
   clearGroupRateMultipliers,
   batchSetGroupRateMultipliers,

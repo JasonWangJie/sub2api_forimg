@@ -30,6 +30,7 @@ func (r *accountRepository) HasImageSizeTierConfigured(ctx context.Context, grou
 	count, err := r.client.GroupImageSizeAccount.Query().
 		Where(
 			dbgroupimagesizeaccount.GroupIDEQ(groupID),
+			dbgroupimagesizeaccount.ModelEQ(""),
 			dbgroupimagesizeaccount.SizeTierEQ(tier),
 		).
 		Count(ctx)
@@ -64,6 +65,7 @@ func (r *accountRepository) ListImageSizeAccounts(ctx context.Context, groupID i
 	rows, err := r.client.GroupImageSizeAccount.Query().
 		Where(dbgroupimagesizeaccount.GroupIDEQ(groupID)).
 		Order(
+			dbgroupimagesizeaccount.ByModel(),
 			dbgroupimagesizeaccount.BySizeTier(),
 			dbgroupimagesizeaccount.ByPriority(),
 			dbgroupimagesizeaccount.ByAccountID(),
@@ -78,6 +80,7 @@ func (r *accountRepository) ListImageSizeAccounts(ctx context.Context, groupID i
 		item := service.GroupImageSizeAccount{
 			ID:        row.ID,
 			GroupID:   row.GroupID,
+			Model:     row.Model,
 			SizeTier:  row.SizeTier,
 			AccountID: row.AccountID,
 			Priority:  row.Priority,
@@ -141,7 +144,7 @@ func (r *accountRepository) ReplaceImageSizeAccounts(ctx context.Context, groupI
 		txClient = r.client
 	}
 
-	if _, err := txClient.ExecContext(ctx, `DELETE FROM group_image_size_accounts WHERE group_id = $1`, groupID); err != nil {
+	if _, err := txClient.ExecContext(ctx, `DELETE FROM group_image_size_accounts WHERE group_id = $1 AND model = ''`, groupID); err != nil {
 		return err
 	}
 
@@ -171,6 +174,7 @@ func (r *accountRepository) ReplaceImageSizeAccounts(ctx context.Context, groupI
 		for _, entry := range normalized[tier] {
 			if _, err := txClient.GroupImageSizeAccount.Create().
 				SetGroupID(groupID).
+				SetModel("").
 				SetSizeTier(tier).
 				SetAccountID(entry.AccountID).
 				SetPriority(entry.Priority).
@@ -199,6 +203,7 @@ func (r *accountRepository) ListSchedulableByGroupImageSizeTier(ctx context.Cont
 	q := r.client.GroupImageSizeAccount.Query().
 		Where(
 			dbgroupimagesizeaccount.GroupIDEQ(groupID),
+			dbgroupimagesizeaccount.ModelEQ(""),
 			dbgroupimagesizeaccount.SizeTierEQ(tier),
 		)
 
@@ -267,6 +272,192 @@ func (r *accountRepository) ListSchedulableByGroupImageSizeTier(ctx context.Cont
 		}
 	}
 	return result, nil
+}
+
+// GetImageAccountPoolMode returns the persisted routing mode for one group.
+func (r *accountRepository) GetImageAccountPoolMode(ctx context.Context, groupID int64) (string, error) {
+	group, err := r.client.Group.Get(ctx, groupID)
+	if err != nil {
+		return "", err
+	}
+	return service.NormalizeImageAccountPoolMode(group.ImageAccountPoolMode), nil
+}
+
+// HasImageAccountPoolConfigured checks one already-normalized exact routing key.
+func (r *accountRepository) HasImageAccountPoolConfigured(ctx context.Context, groupID int64, model, sizeTier string) (bool, error) {
+	count, err := r.client.GroupImageSizeAccount.Query().Where(
+		dbgroupimagesizeaccount.GroupIDEQ(groupID),
+		dbgroupimagesizeaccount.ModelEQ(model),
+		dbgroupimagesizeaccount.SizeTierEQ(sizeTier),
+	).Count(ctx)
+	return count > 0, err
+}
+
+// ListSchedulableByGroupImageAccountPool loads schedulable accounts for one exact
+// dimensional key and overlays the binding priority on the normal scheduler model.
+func (r *accountRepository) ListSchedulableByGroupImageAccountPool(ctx context.Context, groupID int64, model, sizeTier string, platforms []string) ([]service.Account, error) {
+	q := r.client.GroupImageSizeAccount.Query().Where(
+		dbgroupimagesizeaccount.GroupIDEQ(groupID),
+		dbgroupimagesizeaccount.ModelEQ(model),
+		dbgroupimagesizeaccount.SizeTierEQ(sizeTier),
+	)
+
+	preds := []dbpredicate.Account{
+		dbaccount.DeletedAtIsNil(),
+		dbaccount.StatusEQ(service.StatusActive),
+		dbaccount.SchedulableEQ(true),
+	}
+	if len(platforms) > 0 {
+		preds = append(preds, dbaccount.PlatformIn(platforms...))
+	}
+	now := time.Now()
+	preds = append(preds,
+		tempUnschedulablePredicate(),
+		notExpiredPredicate(now),
+		dbaccount.Or(dbaccount.OverloadUntilIsNil(), dbaccount.OverloadUntilLTE(now)),
+		dbaccount.Or(dbaccount.RateLimitResetAtIsNil(), dbaccount.RateLimitResetAtLTE(now)),
+	)
+	rows, err := q.Where(dbgroupimagesizeaccount.HasAccountWith(preds...)).
+		Order(dbgroupimagesizeaccount.ByPriority(), dbgroupimagesizeaccount.ByAccountField(dbaccount.FieldPriority)).
+		WithAccount().All(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	orderedIDs := make([]int64, 0, len(rows))
+	priorityByID := make(map[int64]int, len(rows))
+	accountMap := make(map[int64]*dbent.Account, len(rows))
+	for _, row := range rows {
+		if row.Edges.Account == nil {
+			continue
+		}
+		if _, exists := accountMap[row.AccountID]; exists {
+			continue
+		}
+		accountMap[row.AccountID] = row.Edges.Account
+		priorityByID[row.AccountID] = row.Priority
+		orderedIDs = append(orderedIDs, row.AccountID)
+	}
+	accounts := make([]*dbent.Account, 0, len(orderedIDs))
+	for _, id := range orderedIDs {
+		accounts = append(accounts, accountMap[id])
+	}
+	result, err := r.accountsToService(ctx, accounts)
+	if err != nil {
+		return nil, err
+	}
+	for i := range result {
+		priority := priorityByID[result[i].ID]
+		result[i].Priority = priority
+		result[i].AccountGroups = []service.AccountGroup{{AccountID: result[i].ID, GroupID: groupID, Priority: priority}}
+		result[i].GroupIDs = []int64{groupID}
+	}
+	return result, nil
+}
+
+// ReplaceImageAccountPools atomically updates the mode and all dimensional rows.
+func (r *accountRepository) ReplaceImageAccountPools(ctx context.Context, groupID int64, pools service.GroupImageAccountPools) error {
+	mode := service.NormalizeImageAccountPoolMode(pools.Mode)
+	rows, err := normalizeImageAccountPoolRows(groupID, pools)
+	if err != nil {
+		return err
+	}
+
+	tx, err := r.client.Tx(ctx)
+	if err != nil && !errors.Is(err, dbent.ErrTxStarted) {
+		return err
+	}
+	var txClient *dbent.Client
+	if err == nil {
+		defer func() { _ = tx.Rollback() }()
+		txClient = tx.Client()
+	} else {
+		txClient = r.client
+	}
+
+	if _, err := txClient.Group.UpdateOneID(groupID).SetImageAccountPoolMode(mode).Save(ctx); err != nil {
+		return err
+	}
+	if _, err := txClient.ExecContext(ctx, `DELETE FROM group_image_size_accounts WHERE group_id = $1`, groupID); err != nil {
+		return err
+	}
+	ids := make([]int64, 0, len(rows))
+	for _, row := range rows {
+		ids = append(ids, row.AccountID)
+	}
+	uniqueIDs := uniqueImageSizeAccountIDs(ids)
+	if len(uniqueIDs) > 0 {
+		count, err := txClient.Account.Query().Where(dbaccount.IDIn(uniqueIDs...), dbaccount.DeletedAtIsNil()).Count(ctx)
+		if err != nil {
+			return err
+		}
+		if count != len(uniqueIDs) {
+			return service.ErrAccountNotFound
+		}
+	}
+	for _, row := range rows {
+		if _, err := txClient.GroupImageSizeAccount.Create().
+			SetGroupID(groupID).
+			SetModel(row.Model).
+			SetSizeTier(row.SizeTier).
+			SetAccountID(row.AccountID).
+			SetPriority(row.Priority).
+			Save(ctx); err != nil {
+			return err
+		}
+	}
+	if tx != nil {
+		return tx.Commit()
+	}
+	return nil
+}
+
+func normalizeImageAccountPoolRows(groupID int64, pools service.GroupImageAccountPools) ([]service.GroupImageSizeAccount, error) {
+	rows := make([]service.GroupImageSizeAccount, 0)
+	appendAccounts := func(model, tier string, accounts []service.GroupImageSizeAccount) error {
+		seen := make(map[int64]struct{}, len(accounts))
+		for i, account := range accounts {
+			if account.AccountID <= 0 {
+				return fmt.Errorf("invalid account_id for image account pool")
+			}
+			if _, exists := seen[account.AccountID]; exists {
+				continue
+			}
+			seen[account.AccountID] = struct{}{}
+			priority := account.Priority
+			if priority <= 0 {
+				priority = i + 1
+			}
+			rows = append(rows, service.GroupImageSizeAccount{GroupID: groupID, Model: model, SizeTier: tier, AccountID: account.AccountID, Priority: priority})
+		}
+		return nil
+	}
+	for _, tier := range service.ValidImageSizeTiers() {
+		if err := appendAccounts("", tier, pools.ResolutionPools[tier]); err != nil {
+			return nil, err
+		}
+	}
+	for _, pool := range pools.ModelPools {
+		model, err := service.NormalizeImageAccountPoolModel(pool.Model)
+		if err != nil {
+			return nil, err
+		}
+		if err := appendAccounts(model, "", pool.Accounts); err != nil {
+			return nil, err
+		}
+	}
+	for _, pool := range pools.ModelResolutionPools {
+		model, err := service.NormalizeImageAccountPoolModel(pool.Model)
+		if err != nil {
+			return nil, err
+		}
+		for _, tier := range service.ValidImageSizeTiers() {
+			if err := appendAccounts(model, tier, pool.Resolutions[tier]); err != nil {
+				return nil, err
+			}
+		}
+	}
+	return rows, nil
 }
 
 func uniqueImageSizeAccountIDs(ids []int64) []int64 {

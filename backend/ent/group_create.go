@@ -343,6 +343,20 @@ func (_c *GroupCreate) SetNillableAllowAsyncImageGeneration(v *bool) *GroupCreat
 	return _c
 }
 
+// SetImageAccountPoolMode sets the "image_account_pool_mode" field.
+func (_c *GroupCreate) SetImageAccountPoolMode(v string) *GroupCreate {
+	_c.mutation.SetImageAccountPoolMode(v)
+	return _c
+}
+
+// SetNillableImageAccountPoolMode sets the "image_account_pool_mode" field if the given value is not nil.
+func (_c *GroupCreate) SetNillableImageAccountPoolMode(v *string) *GroupCreate {
+	if v != nil {
+		_c.SetImageAccountPoolMode(*v)
+	}
+	return _c
+}
+
 // SetImageRateIndependent sets the "image_rate_independent" field.
 func (_c *GroupCreate) SetImageRateIndependent(v bool) *GroupCreate {
 	_c.mutation.SetImageRateIndependent(v)
@@ -1054,6 +1068,10 @@ func (_c *GroupCreate) defaults() error {
 		v := group.DefaultAllowAsyncImageGeneration
 		_c.mutation.SetAllowAsyncImageGeneration(v)
 	}
+	if _, ok := _c.mutation.ImageAccountPoolMode(); !ok {
+		v := group.DefaultImageAccountPoolMode
+		_c.mutation.SetImageAccountPoolMode(v)
+	}
 	if _, ok := _c.mutation.ImageRateIndependent(); !ok {
 		v := group.DefaultImageRateIndependent
 		_c.mutation.SetImageRateIndependent(v)
@@ -1245,6 +1263,14 @@ func (_c *GroupCreate) check() error {
 	}
 	if _, ok := _c.mutation.AllowAsyncImageGeneration(); !ok {
 		return &ValidationError{Name: "allow_async_image_generation", err: errors.New(`ent: missing required field "Group.allow_async_image_generation"`)}
+	}
+	if _, ok := _c.mutation.ImageAccountPoolMode(); !ok {
+		return &ValidationError{Name: "image_account_pool_mode", err: errors.New(`ent: missing required field "Group.image_account_pool_mode"`)}
+	}
+	if v, ok := _c.mutation.ImageAccountPoolMode(); ok {
+		if err := group.ImageAccountPoolModeValidator(v); err != nil {
+			return &ValidationError{Name: "image_account_pool_mode", err: fmt.Errorf(`ent: validator failed for field "Group.image_account_pool_mode": %w`, err)}
+		}
 	}
 	if _, ok := _c.mutation.ImageRateIndependent(); !ok {
 		return &ValidationError{Name: "image_rate_independent", err: errors.New(`ent: missing required field "Group.image_rate_independent"`)}
@@ -1466,6 +1492,10 @@ func (_c *GroupCreate) createSpec() (*Group, *sqlgraph.CreateSpec) {
 	if value, ok := _c.mutation.AllowAsyncImageGeneration(); ok {
 		_spec.SetField(group.FieldAllowAsyncImageGeneration, field.TypeBool, value)
 		_node.AllowAsyncImageGeneration = value
+	}
+	if value, ok := _c.mutation.ImageAccountPoolMode(); ok {
+		_spec.SetField(group.FieldImageAccountPoolMode, field.TypeString, value)
+		_node.ImageAccountPoolMode = value
 	}
 	if value, ok := _c.mutation.ImageRateIndependent(); ok {
 		_spec.SetField(group.FieldImageRateIndependent, field.TypeBool, value)
@@ -2094,6 +2124,18 @@ func (u *GroupUpsert) SetAllowAsyncImageGeneration(v bool) *GroupUpsert {
 // UpdateAllowAsyncImageGeneration sets the "allow_async_image_generation" field to the value that was provided on create.
 func (u *GroupUpsert) UpdateAllowAsyncImageGeneration() *GroupUpsert {
 	u.SetExcluded(group.FieldAllowAsyncImageGeneration)
+	return u
+}
+
+// SetImageAccountPoolMode sets the "image_account_pool_mode" field.
+func (u *GroupUpsert) SetImageAccountPoolMode(v string) *GroupUpsert {
+	u.Set(group.FieldImageAccountPoolMode, v)
+	return u
+}
+
+// UpdateImageAccountPoolMode sets the "image_account_pool_mode" field to the value that was provided on create.
+func (u *GroupUpsert) UpdateImageAccountPoolMode() *GroupUpsert {
+	u.SetExcluded(group.FieldImageAccountPoolMode)
 	return u
 }
 
@@ -3197,6 +3239,20 @@ func (u *GroupUpsertOne) SetAllowAsyncImageGeneration(v bool) *GroupUpsertOne {
 func (u *GroupUpsertOne) UpdateAllowAsyncImageGeneration() *GroupUpsertOne {
 	return u.Update(func(s *GroupUpsert) {
 		s.UpdateAllowAsyncImageGeneration()
+	})
+}
+
+// SetImageAccountPoolMode sets the "image_account_pool_mode" field.
+func (u *GroupUpsertOne) SetImageAccountPoolMode(v string) *GroupUpsertOne {
+	return u.Update(func(s *GroupUpsert) {
+		s.SetImageAccountPoolMode(v)
+	})
+}
+
+// UpdateImageAccountPoolMode sets the "image_account_pool_mode" field to the value that was provided on create.
+func (u *GroupUpsertOne) UpdateImageAccountPoolMode() *GroupUpsertOne {
+	return u.Update(func(s *GroupUpsert) {
+		s.UpdateImageAccountPoolMode()
 	})
 }
 
@@ -4580,6 +4636,20 @@ func (u *GroupUpsertBulk) SetAllowAsyncImageGeneration(v bool) *GroupUpsertBulk 
 func (u *GroupUpsertBulk) UpdateAllowAsyncImageGeneration() *GroupUpsertBulk {
 	return u.Update(func(s *GroupUpsert) {
 		s.UpdateAllowAsyncImageGeneration()
+	})
+}
+
+// SetImageAccountPoolMode sets the "image_account_pool_mode" field.
+func (u *GroupUpsertBulk) SetImageAccountPoolMode(v string) *GroupUpsertBulk {
+	return u.Update(func(s *GroupUpsert) {
+		s.SetImageAccountPoolMode(v)
+	})
+}
+
+// UpdateImageAccountPoolMode sets the "image_account_pool_mode" field to the value that was provided on create.
+func (u *GroupUpsertBulk) UpdateImageAccountPoolMode() *GroupUpsertBulk {
+	return u.Update(func(s *GroupUpsert) {
+		s.UpdateImageAccountPoolMode()
 	})
 }
 

@@ -16,6 +16,8 @@ const (
 	FieldID = "id"
 	// FieldGroupID holds the string denoting the group_id field in the database.
 	FieldGroupID = "group_id"
+	// FieldModel holds the string denoting the model field in the database.
+	FieldModel = "model"
 	// FieldSizeTier holds the string denoting the size_tier field in the database.
 	FieldSizeTier = "size_tier"
 	// FieldAccountID holds the string denoting the account_id field in the database.
@@ -50,6 +52,7 @@ const (
 var Columns = []string{
 	FieldID,
 	FieldGroupID,
+	FieldModel,
 	FieldSizeTier,
 	FieldAccountID,
 	FieldPriority,
@@ -67,6 +70,10 @@ func ValidColumn(column string) bool {
 }
 
 var (
+	// DefaultModel holds the default value on creation for the "model" field.
+	DefaultModel string
+	// ModelValidator is a validator for the "model" field. It is called by the builders before save.
+	ModelValidator func(string) error
 	// SizeTierValidator is a validator for the "size_tier" field. It is called by the builders before save.
 	SizeTierValidator func(string) error
 	// DefaultPriority holds the default value on creation for the "priority" field.
@@ -86,6 +93,11 @@ func ByID(opts ...sql.OrderTermOption) OrderOption {
 // ByGroupID orders the results by the group_id field.
 func ByGroupID(opts ...sql.OrderTermOption) OrderOption {
 	return sql.OrderByField(FieldGroupID, opts...).ToFunc()
+}
+
+// ByModel orders the results by the model field.
+func ByModel(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldModel, opts...).ToFunc()
 }
 
 // BySizeTier orders the results by the size_tier field.

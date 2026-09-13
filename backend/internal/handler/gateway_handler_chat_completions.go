@@ -162,6 +162,13 @@ func (h *GatewayHandler) ChatCompletions(c *gin.Context) {
 	if groupPlatform == service.PlatformGemini || groupPlatform == service.PlatformAntigravity {
 		geminiImageIntent = service.IsGeminiNativeImageGenerationIntent("generateContent", reqModel, body) ||
 			service.IsImageGenerationIntent("/v1/chat/completions", reqModel, body)
+		if !geminiImageIntent && channelMapping.Mapped {
+			// A channel alias may look like a text model while resolving to a
+			// Gemini image model. Detect with the mapped ID, but keep reqModel as
+			// the exact pool key so mappings never redefine pool ownership.
+			geminiImageIntent = service.IsGeminiNativeImageGenerationIntent("generateContent", channelMapping.MappedModel, body) ||
+				service.IsImageGenerationIntent("/v1/chat/completions", channelMapping.MappedModel, body)
+		}
 	}
 	if geminiImageIntent && !asyncImageGeneration {
 		c.Request = c.Request.WithContext(service.WithGeminiImageGenerationIntent(c.Request.Context()))
@@ -180,12 +187,15 @@ func (h *GatewayHandler) ChatCompletions(c *gin.Context) {
 			selectionSessionHash = routedHash
 		}
 	}
-	// Attach image size-tier pool hint for Gemini image requests only.
+	// Attach the exact client model and size-tier for Gemini-compatible image routing.
 	if groupPlatform == service.PlatformGemini || groupPlatform == service.PlatformAntigravity {
 		if geminiImageIntent {
-			if tier := service.ExtractImageSizePoolTierFromRequestBody(body); tier != "" {
-				c.Request = c.Request.WithContext(service.WithImageSizeAccountPoolTier(c.Request.Context(), tier))
+			ctx, routeErr := service.WithImageAccountPoolRoute(c.Request.Context(), reqModel, service.ExtractImageSizePoolTierFromRequestBody(body))
+			if routeErr != nil {
+				h.chatCompletionsErrorResponse(c, http.StatusBadRequest, "invalid_request_error", routeErr.Error())
+				return
 			}
+			c.Request = c.Request.WithContext(ctx)
 		}
 	}
 	// 3. Account selection + failover loop
@@ -377,7 +387,7 @@ func (h *GatewayHandler) ChatCompletions(c *gin.Context) {
 				if account.Platform == service.PlatformGemini {
 					h.geminiCompatService.ReportImageAccountResult(forwardCtx, account.ID, err == nil && result != nil, err)
 				} else {
-				 h.gatewayService.ReportImageAccountResult(forwardCtx, account.ID, err == nil && result != nil, err)
+					h.gatewayService.ReportImageAccountResult(forwardCtx, account.ID, err == nil && result != nil, err)
 				}
 			}
 		}

@@ -988,6 +988,7 @@ func groupEntityToService(g *dbent.Group) *service.Group {
 		AllowImageGeneration:            g.AllowImageGeneration,
 		AllowBatchImageGeneration:       g.AllowBatchImageGeneration,
 		AllowAsyncImageGeneration:       g.AllowAsyncImageGeneration,
+		ImageAccountPoolMode:            service.NormalizeImageAccountPoolMode(g.ImageAccountPoolMode),
 		ImageRateIndependent:            g.ImageRateIndependent,
 		ImageRateMultiplier:             g.ImageRateMultiplier,
 		ImagePrice1K:                    g.ImagePrice1k,

@@ -2113,10 +2113,11 @@ func (s *OpenAIGatewayService) SelectAccountWithSchedulerForImages(
 	}
 	if tier != "" {
 		tier = NormalizeImageSizePoolTier(tier)
+		ctx = WithImageSizeAccountPoolTier(ctx, tier)
 	}
 
-	if groupID != nil && *groupID > 0 && tier != "" {
-		poolAccounts, configured, err := ResolveImageSizeAccountPool(ctx, s.accountRepo, *groupID, tier, []string{PlatformOpenAI})
+	if groupID != nil && *groupID > 0 {
+		poolAccounts, configured, err := ResolveImageAccountPool(ctx, s.accountRepo, *groupID, []string{PlatformOpenAI})
 		if err != nil {
 			return nil, OpenAIAccountScheduleDecision{}, err
 		}

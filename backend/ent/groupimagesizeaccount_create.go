@@ -30,6 +30,20 @@ func (_c *GroupImageSizeAccountCreate) SetGroupID(v int64) *GroupImageSizeAccoun
 	return _c
 }
 
+// SetModel sets the "model" field.
+func (_c *GroupImageSizeAccountCreate) SetModel(v string) *GroupImageSizeAccountCreate {
+	_c.mutation.SetModel(v)
+	return _c
+}
+
+// SetNillableModel sets the "model" field if the given value is not nil.
+func (_c *GroupImageSizeAccountCreate) SetNillableModel(v *string) *GroupImageSizeAccountCreate {
+	if v != nil {
+		_c.SetModel(*v)
+	}
+	return _c
+}
+
 // SetSizeTier sets the "size_tier" field.
 func (_c *GroupImageSizeAccountCreate) SetSizeTier(v string) *GroupImageSizeAccountCreate {
 	_c.mutation.SetSizeTier(v)
@@ -115,6 +129,10 @@ func (_c *GroupImageSizeAccountCreate) ExecX(ctx context.Context) {
 
 // defaults sets the default values of the builder before save.
 func (_c *GroupImageSizeAccountCreate) defaults() {
+	if _, ok := _c.mutation.Model(); !ok {
+		v := groupimagesizeaccount.DefaultModel
+		_c.mutation.SetModel(v)
+	}
 	if _, ok := _c.mutation.Priority(); !ok {
 		v := groupimagesizeaccount.DefaultPriority
 		_c.mutation.SetPriority(v)
@@ -129,6 +147,14 @@ func (_c *GroupImageSizeAccountCreate) defaults() {
 func (_c *GroupImageSizeAccountCreate) check() error {
 	if _, ok := _c.mutation.GroupID(); !ok {
 		return &ValidationError{Name: "group_id", err: errors.New(`ent: missing required field "GroupImageSizeAccount.group_id"`)}
+	}
+	if _, ok := _c.mutation.Model(); !ok {
+		return &ValidationError{Name: "model", err: errors.New(`ent: missing required field "GroupImageSizeAccount.model"`)}
+	}
+	if v, ok := _c.mutation.Model(); ok {
+		if err := groupimagesizeaccount.ModelValidator(v); err != nil {
+			return &ValidationError{Name: "model", err: fmt.Errorf(`ent: validator failed for field "GroupImageSizeAccount.model": %w`, err)}
+		}
 	}
 	if _, ok := _c.mutation.SizeTier(); !ok {
 		return &ValidationError{Name: "size_tier", err: errors.New(`ent: missing required field "GroupImageSizeAccount.size_tier"`)}
@@ -180,6 +206,10 @@ func (_c *GroupImageSizeAccountCreate) createSpec() (*GroupImageSizeAccount, *sq
 		_spec = sqlgraph.NewCreateSpec(groupimagesizeaccount.Table, sqlgraph.NewFieldSpec(groupimagesizeaccount.FieldID, field.TypeInt64))
 	)
 	_spec.OnConflict = _c.conflict
+	if value, ok := _c.mutation.Model(); ok {
+		_spec.SetField(groupimagesizeaccount.FieldModel, field.TypeString, value)
+		_node.Model = value
+	}
 	if value, ok := _c.mutation.SizeTier(); ok {
 		_spec.SetField(groupimagesizeaccount.FieldSizeTier, field.TypeString, value)
 		_node.SizeTier = value
@@ -290,6 +320,18 @@ func (u *GroupImageSizeAccountUpsert) UpdateGroupID() *GroupImageSizeAccountUpse
 	return u
 }
 
+// SetModel sets the "model" field.
+func (u *GroupImageSizeAccountUpsert) SetModel(v string) *GroupImageSizeAccountUpsert {
+	u.Set(groupimagesizeaccount.FieldModel, v)
+	return u
+}
+
+// UpdateModel sets the "model" field to the value that was provided on create.
+func (u *GroupImageSizeAccountUpsert) UpdateModel() *GroupImageSizeAccountUpsert {
+	u.SetExcluded(groupimagesizeaccount.FieldModel)
+	return u
+}
+
 // SetSizeTier sets the "size_tier" field.
 func (u *GroupImageSizeAccountUpsert) SetSizeTier(v string) *GroupImageSizeAccountUpsert {
 	u.Set(groupimagesizeaccount.FieldSizeTier, v)
@@ -388,6 +430,20 @@ func (u *GroupImageSizeAccountUpsertOne) SetGroupID(v int64) *GroupImageSizeAcco
 func (u *GroupImageSizeAccountUpsertOne) UpdateGroupID() *GroupImageSizeAccountUpsertOne {
 	return u.Update(func(s *GroupImageSizeAccountUpsert) {
 		s.UpdateGroupID()
+	})
+}
+
+// SetModel sets the "model" field.
+func (u *GroupImageSizeAccountUpsertOne) SetModel(v string) *GroupImageSizeAccountUpsertOne {
+	return u.Update(func(s *GroupImageSizeAccountUpsert) {
+		s.SetModel(v)
+	})
+}
+
+// UpdateModel sets the "model" field to the value that was provided on create.
+func (u *GroupImageSizeAccountUpsertOne) UpdateModel() *GroupImageSizeAccountUpsertOne {
+	return u.Update(func(s *GroupImageSizeAccountUpsert) {
+		s.UpdateModel()
 	})
 }
 
@@ -662,6 +718,20 @@ func (u *GroupImageSizeAccountUpsertBulk) SetGroupID(v int64) *GroupImageSizeAcc
 func (u *GroupImageSizeAccountUpsertBulk) UpdateGroupID() *GroupImageSizeAccountUpsertBulk {
 	return u.Update(func(s *GroupImageSizeAccountUpsert) {
 		s.UpdateGroupID()
+	})
+}
+
+// SetModel sets the "model" field.
+func (u *GroupImageSizeAccountUpsertBulk) SetModel(v string) *GroupImageSizeAccountUpsertBulk {
+	return u.Update(func(s *GroupImageSizeAccountUpsert) {
+		s.SetModel(v)
+	})
+}
+
+// UpdateModel sets the "model" field to the value that was provided on create.
+func (u *GroupImageSizeAccountUpsertBulk) UpdateModel() *GroupImageSizeAccountUpsertBulk {
+	return u.Update(func(s *GroupImageSizeAccountUpsert) {
+		s.UpdateModel()
 	})
 }
 

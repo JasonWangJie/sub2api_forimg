@@ -377,6 +377,8 @@ func registerGroupRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
 		groups.DELETE("/:id/composite-routes/:route_id", h.Admin.Group.DeleteCompositeRoute)
 		groups.GET("/:id/image-size-accounts", h.Admin.Group.ListImageSizeAccounts)
 		groups.PUT("/:id/image-size-accounts", h.Admin.Group.ReplaceImageSizeAccounts)
+		groups.GET("/:id/image-account-pools", h.Admin.Group.GetImageAccountPools)
+		groups.PUT("/:id/image-account-pools", h.Admin.Group.ReplaceImageAccountPools)
 		groups.GET("/:id", h.Admin.Group.GetByID)
 		groups.POST("", h.Admin.Group.Create)
 		groups.POST("/:id/duplicate", h.Admin.Group.Duplicate)

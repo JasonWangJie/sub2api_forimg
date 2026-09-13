@@ -62,6 +62,8 @@ const (
 	FieldAllowBatchImageGeneration = "allow_batch_image_generation"
 	// FieldAllowAsyncImageGeneration holds the string denoting the allow_async_image_generation field in the database.
 	FieldAllowAsyncImageGeneration = "allow_async_image_generation"
+	// FieldImageAccountPoolMode holds the string denoting the image_account_pool_mode field in the database.
+	FieldImageAccountPoolMode = "image_account_pool_mode"
 	// FieldImageRateIndependent holds the string denoting the image_rate_independent field in the database.
 	FieldImageRateIndependent = "image_rate_independent"
 	// FieldImageRateMultiplier holds the string denoting the image_rate_multiplier field in the database.
@@ -238,6 +240,7 @@ var Columns = []string{
 	FieldAllowImageGeneration,
 	FieldAllowBatchImageGeneration,
 	FieldAllowAsyncImageGeneration,
+	FieldImageAccountPoolMode,
 	FieldImageRateIndependent,
 	FieldImageRateMultiplier,
 	FieldImagePrice1k,
@@ -356,6 +359,10 @@ var (
 	DefaultAllowBatchImageGeneration bool
 	// DefaultAllowAsyncImageGeneration holds the default value on creation for the "allow_async_image_generation" field.
 	DefaultAllowAsyncImageGeneration bool
+	// DefaultImageAccountPoolMode holds the default value on creation for the "image_account_pool_mode" field.
+	DefaultImageAccountPoolMode string
+	// ImageAccountPoolModeValidator is a validator for the "image_account_pool_mode" field. It is called by the builders before save.
+	ImageAccountPoolModeValidator func(string) error
 	// DefaultImageRateIndependent holds the default value on creation for the "image_rate_independent" field.
 	DefaultImageRateIndependent bool
 	// DefaultImageRateMultiplier holds the default value on creation for the "image_rate_multiplier" field.
@@ -539,6 +546,11 @@ func ByAllowBatchImageGeneration(opts ...sql.OrderTermOption) OrderOption {
 // ByAllowAsyncImageGeneration orders the results by the allow_async_image_generation field.
 func ByAllowAsyncImageGeneration(opts ...sql.OrderTermOption) OrderOption {
 	return sql.OrderByField(FieldAllowAsyncImageGeneration, opts...).ToFunc()
+}
+
+// ByImageAccountPoolMode orders the results by the image_account_pool_mode field.
+func ByImageAccountPoolMode(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldImageAccountPoolMode, opts...).ToFunc()
 }
 
 // ByImageRateIndependent orders the results by the image_rate_independent field.

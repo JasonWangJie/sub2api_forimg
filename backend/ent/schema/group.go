@@ -109,6 +109,10 @@ func (Group) Fields() []ent.Field {
 		field.Bool("allow_async_image_generation").
 			Default(false).
 			Comment("Whether this Gemini/OpenAI group allows durable asynchronous image generation"),
+		field.String("image_account_pool_mode").
+			MaxLen(32).
+			Default("resolution").
+			Comment("Image account pool routing mode: resolution, model, or model_resolution"),
 		field.Bool("image_rate_independent").
 			Default(false).
 			Comment("图片生成是否使用独立倍率；false 表示共享分组有效倍率"),
