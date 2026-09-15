@@ -90,6 +90,14 @@ func TestAsyncImageAccountAttemptMigrationAddsAuditAndReconciliationState(t *tes
 	}
 }
 
+func TestAsyncImageReferenceURLMigrationAddsAdminAuditSnapshot(t *testing.T) {
+	content, err := migrations.FS.ReadFile("226_ZJ_async_image_reference_urls.sql")
+	require.NoError(t, err)
+	sqlText := string(content)
+	require.Contains(t, sqlText, "reference_image_urls JSONB NOT NULL DEFAULT '[]'::jsonb")
+	require.Contains(t, sqlText, "administrator task-detail audit")
+}
+
 func TestAsyncImageTaskRepositoryCountsStatusesWithTheTaskFilter(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	require.NoError(t, err)
@@ -193,6 +201,28 @@ func TestAsyncImageTaskRepositoryCreateIsTransactionalWithEventAndOutbox(t *test
 	require.NoError(t, err)
 	require.False(t, reused)
 	require.Equal(t, "asyncimg_1", task.TaskID)
+	require.NoError(t, mock.ExpectationsWereMet())
+}
+
+func TestAsyncImageTaskRepositoryLoadsReferenceImageURLs(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	require.NoError(t, err)
+	defer func() { _ = db.Close() }()
+
+	now := time.Now().UTC()
+	mock.ExpectQuery("(?s)SELECT .*reference_image_urls.*FROM async_image_tasks WHERE task_id = \\$1").
+		WithArgs("asyncimg_references").
+		WillReturnRows(asyncImageTaskRowsWithReferenceURLs(now, "asyncimg_references", "hash-references", service.AsyncImageTaskStatusQueued, []byte(`[
+			"https://cdn.example/reference-1.png?token=abc",
+			"https://cdn.example/reference-2.png"
+		]`)))
+
+	task, err := NewAsyncImageTaskRepository(db).GetAsyncImageTaskByTaskID(context.Background(), "asyncimg_references")
+	require.NoError(t, err)
+	require.Equal(t, []string{
+		"https://cdn.example/reference-1.png?token=abc",
+		"https://cdn.example/reference-2.png",
+	}, task.ReferenceImageURLs)
 	require.NoError(t, mock.ExpectationsWereMet())
 }
 
@@ -522,11 +552,19 @@ func asyncImageTaskRows(now time.Time, taskID, requestHash, status string) *sqlm
 }
 
 func asyncImageTaskRowsWithPayload(now time.Time, taskID, requestHash, status string, requestPayload []byte) *sqlmock.Rows {
+	return asyncImageTaskRowsWithPayloadAndReferenceURLs(now, taskID, requestHash, status, requestPayload, []byte(`[]`))
+}
+
+func asyncImageTaskRowsWithReferenceURLs(now time.Time, taskID, requestHash, status string, referenceImageURLs []byte) *sqlmock.Rows {
+	return asyncImageTaskRowsWithPayloadAndReferenceURLs(now, taskID, requestHash, status, []byte("ciphertext"), referenceImageURLs)
+}
+
+func asyncImageTaskRowsWithPayloadAndReferenceURLs(now time.Time, taskID, requestHash, status string, requestPayload, referenceImageURLs []byte) *sqlmock.Rows {
 	columns := []string{
 		"id", "task_id", "user_id", "api_key_id", "group_id", "account_id", "account_attempts", "attempted_account_ids",
 		"protocol", "platform", "request_type", "model", "status", "billing_status", "progress",
 		"requested_image_size", "actual_image_size", "aspect_ratio", "image_count", "actual_cost", "currency",
-		"idempotency_key", "request_hash", "request_payload", "prompt_preview",
+		"idempotency_key", "request_hash", "request_payload", "prompt_preview", "reference_image_urls",
 		"upstream_request_id", "reconciliation_status", "billing_request_id", "billing_payload",
 		"retry_count", "reference_transport", "reference_retry_count", "upstream_retry_count",
 		"capacity_retry_count", "storage_retry_count", "billing_retry_count", "version",
@@ -537,7 +575,7 @@ func asyncImageTaskRowsWithPayload(now time.Time, taskID, requestHash, status st
 		int64(1), taskID, int64(1), int64(2), int64(3), nil, []byte(`[]`), []byte(`[]`),
 		service.AsyncImageProtocolBB, service.PlatformGemini, service.AsyncImageRequestTypeTextToImage,
 		"gemini-image", status, service.AsyncImageBillingStatusPending, 0,
-		nil, nil, nil, 1, nil, "USD", nil, requestHash, requestPayload, nil,
+		nil, nil, nil, 1, nil, "USD", nil, requestHash, requestPayload, nil, referenceImageURLs,
 		nil, "none", nil, nil, 0, nil, 0, 0, 0, 0, 0, int64(1), nil, nil, now, nil, nil, nil, nil, now, now,
 	}
 	return sqlmock.NewRows(columns).AddRow(values...)

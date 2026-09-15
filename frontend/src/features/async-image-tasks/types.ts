@@ -67,6 +67,7 @@ export interface AsyncImageTask {
   image_count?: number | null
   result_count?: number | null
   prompt_summary?: string | null
+  reference_image_urls?: string[]
 
   user_id?: number | null
   user_email?: string | null

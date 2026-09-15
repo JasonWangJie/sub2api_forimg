@@ -33,7 +33,7 @@ const asyncImageTaskColumns = `
 id, task_id, user_id, api_key_id, group_id, account_id, account_attempts, attempted_account_ids,
 protocol, platform, request_type, model, status, billing_status, progress,
 requested_image_size, actual_image_size, aspect_ratio, image_count, actual_cost, currency,
-idempotency_key, request_hash, request_payload, prompt_preview,
+idempotency_key, request_hash, request_payload, prompt_preview, reference_image_urls,
 upstream_request_id, reconciliation_status, billing_request_id, billing_payload,
 retry_count, reference_transport, reference_retry_count, upstream_retry_count,
 capacity_retry_count, storage_retry_count, billing_retry_count, version,
@@ -44,7 +44,7 @@ const asyncImageTaskSummaryColumns = `
 id, task_id, user_id, api_key_id, group_id, account_id, account_attempts, attempted_account_ids,
 protocol, platform, request_type, model, status, billing_status, progress,
 requested_image_size, actual_image_size, aspect_ratio, image_count, actual_cost, currency,
-idempotency_key, request_hash, NULL::bytea AS request_payload, prompt_preview,
+idempotency_key, request_hash, NULL::bytea AS request_payload, prompt_preview, NULL::jsonb AS reference_image_urls,
 upstream_request_id, reconciliation_status, billing_request_id, NULL::jsonb AS billing_payload,
 retry_count, reference_transport, reference_retry_count, upstream_retry_count,
 capacity_retry_count, storage_retry_count, billing_retry_count, version,
@@ -90,15 +90,23 @@ func (r *asyncImageTaskRepository) CreateAsyncImageTask(ctx context.Context, par
 }
 
 func insertAsyncImageTask(ctx context.Context, sqlq asyncImageSQLExecutor, params service.CreateAsyncImageTaskParams) (*service.AsyncImageTask, error) {
+	referenceURLs := params.ReferenceImageURLs
+	if referenceURLs == nil {
+		referenceURLs = []string{}
+	}
+	referenceImageURLs, err := json.Marshal(referenceURLs)
+	if err != nil {
+		return nil, err
+	}
 	query := `
 INSERT INTO async_image_tasks (
     task_id, user_id, api_key_id, group_id, protocol, platform, request_type,
     model, requested_image_size, aspect_ratio, image_count, idempotency_key,
-    request_hash, request_payload, prompt_preview, expires_at
+    request_hash, request_payload, prompt_preview, reference_image_urls, expires_at
 ) VALUES (
     $1, $2, $3, $4, $5, $6, $7,
     $8, $9, $10, $11, $12,
-    $13, $14, $15, $16
+    $13, $14, $15, $16::jsonb, $17
 )
 RETURNING ` + asyncImageTaskColumns
 	return scanAsyncImageTask(sqlq.QueryRowContext(ctx, query,
@@ -106,7 +114,7 @@ RETURNING ` + asyncImageTaskColumns
 		params.Protocol, params.Platform, params.RequestType, params.Model,
 		params.RequestedImageSize, params.AspectRatio, params.ImageCount,
 		params.IdempotencyKey, params.RequestHash, params.RequestPayload,
-		params.PromptPreview, params.ExpiresAt,
+		params.PromptPreview, referenceImageURLs, params.ExpiresAt,
 	))
 }
 
@@ -1126,7 +1134,7 @@ func scanAsyncImageTask(scanner asyncImageRowScanner) (*service.AsyncImageTask, 
 	var upstreamRequestID, billingRequestID, referenceTransport sql.NullString
 	var reconciliationStatus sql.NullString
 	var errorCode, errorMessage sql.NullString
-	var requestPayload, accountAttempts, attemptedAccountIDs, billingPayload []byte
+	var requestPayload, referenceImageURLs, accountAttempts, attemptedAccountIDs, billingPayload []byte
 	var startedAt, upstreamSucceededAt, finishedAt, expiresAt sql.NullTime
 	if err := scanner.Scan(
 		&task.ID, &task.TaskID, &task.UserID, &task.APIKeyID, &task.GroupID, &accountID,
@@ -1134,7 +1142,7 @@ func scanAsyncImageTask(scanner asyncImageRowScanner) (*service.AsyncImageTask, 
 		&task.Protocol, &task.Platform, &task.RequestType, &task.Model, &task.Status,
 		&task.BillingStatus, &task.Progress, &requestedImageSize, &actualImageSize,
 		&aspectRatio, &task.ImageCount, &actualCost, &task.Currency, &idempotencyKey,
-		&task.RequestHash, &requestPayload, &promptPreview, &upstreamRequestID,
+		&task.RequestHash, &requestPayload, &promptPreview, &referenceImageURLs, &upstreamRequestID,
 		&reconciliationStatus, &billingRequestID, &billingPayload,
 		&task.RetryCount, &referenceTransport, &task.ReferenceRetryCount, &task.UpstreamRetryCount,
 		&task.CapacityRetryCount, &task.StorageRetryCount, &task.BillingRetryCount, &task.Version,
@@ -1153,6 +1161,11 @@ func scanAsyncImageTask(scanner asyncImageRowScanner) (*service.AsyncImageTask, 
 	task.IdempotencyKey = nullableString(idempotencyKey)
 	task.RequestPayload = append([]byte(nil), requestPayload...)
 	task.PromptPreview = nullableString(promptPreview)
+	if len(referenceImageURLs) > 0 {
+		if err := json.Unmarshal(referenceImageURLs, &task.ReferenceImageURLs); err != nil {
+			return nil, err
+		}
+	}
 	task.UpstreamRequestID = nullableString(upstreamRequestID)
 	if reconciliationStatus.Valid {
 		task.ReconciliationStatus = reconciliationStatus.String

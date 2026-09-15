@@ -17,7 +17,9 @@ const (
 )
 
 // AsyncImageInputObject stores the durable identity of an SC upload. URLHash
-// is only an ownership lookup key; expiring signed URLs are never persisted.
+// is only an ownership lookup key; the object row does not persist a signed
+// URL. Submitted remote URLs may separately exist in the task's admin-only
+// reference URL audit snapshot until task retention removes the task.
 type AsyncImageInputObject struct {
 	ID               int64
 	UploadID         string

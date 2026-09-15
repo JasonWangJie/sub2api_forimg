@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -80,6 +81,7 @@ type AsyncImageTask struct {
 	RequestHash          string          `json:"-"`
 	RequestPayload       []byte          `json:"-"`
 	PromptPreview        *string         `json:"prompt_preview,omitempty"`
+	ReferenceImageURLs   []string        `json:"-"`
 	UpstreamRequestID    *string         `json:"upstream_request_id,omitempty"`
 	ReconciliationStatus string          `json:"reconciliation_status,omitempty"`
 	BillingRequestID     *string         `json:"billing_request_id,omitempty"`
@@ -119,6 +121,7 @@ type CreateAsyncImageTaskParams struct {
 	RequestHash        string
 	RequestPayload     []byte
 	PromptPreview      *string
+	ReferenceImageURLs []string
 	ExpiresAt          *time.Time
 	OutboxPayload      json.RawMessage
 	InputObjectIDs     []int64
@@ -380,6 +383,7 @@ func (s *AsyncImageTaskService) Create(ctx context.Context, params CreateAsyncIm
 	params.RequestType = strings.ToLower(strings.TrimSpace(params.RequestType))
 	params.Model = strings.TrimSpace(params.Model)
 	params.RequestHash = strings.TrimSpace(params.RequestHash)
+	params.ReferenceImageURLs = NormalizeAsyncImageReferenceURLs(params.ReferenceImageURLs)
 	if params.IdempotencyKey != nil {
 		key := strings.TrimSpace(*params.IdempotencyKey)
 		if key == "" {
@@ -392,6 +396,29 @@ func (s *AsyncImageTaskService) Create(ctx context.Context, params CreateAsyncIm
 		return nil, false, ErrAsyncImageInvalidInput
 	}
 	return s.repo.CreateAsyncImageTask(ctx, params)
+}
+
+// NormalizeAsyncImageReferenceURLs retains only remote HTTP(S) reference
+// URLs. Inline data URLs are already preserved in the encrypted request
+// payload while the task is active and must not be duplicated into the
+// administrator audit snapshot.
+func NormalizeAsyncImageReferenceURLs(values []string) []string {
+	if len(values) == 0 {
+		return nil
+	}
+	urls := make([]string, 0, len(values))
+	for _, value := range values {
+		trimmed := strings.TrimSpace(value)
+		parsed, err := url.Parse(trimmed)
+		if err != nil || parsed.Host == "" || (!strings.EqualFold(parsed.Scheme, "http") && !strings.EqualFold(parsed.Scheme, "https")) {
+			continue
+		}
+		urls = append(urls, trimmed)
+	}
+	if len(urls) == 0 {
+		return nil
+	}
+	return urls
 }
 
 func (s *AsyncImageTaskService) GetForAPIKey(ctx context.Context, apiKeyID int64, taskID string) (*AsyncImageTaskDetails, error) {

@@ -1,5 +1,21 @@
 # Sub2API Fork 二次开发总览
 
+## 2026-09-15 异步任务参考图 URL 持久化与管理员详情
+
+- 新迁移 `226_ZJ_async_image_reference_urls.sql` 为 `async_image_tasks` 增加 `reference_image_urls` JSONB 审计快照；BB/SC 新提交任务按请求顺序保存远程 HTTP(S) 参考图 URL，保留重复项，内联 `data:` 图片不重复入库，历史任务不回填。
+- 管理员 `GET /api/v1/admin/async-image-tasks/{task_id}` 的 `task.reference_image_urls` 返回 URL 列表；`/admin/async-image-tasks` 详情在提示词下显示完整 URL，点击以新窗口打开。普通用户详情、管理员/用户列表均不返回该字段。
+- URL 可能带会过期的临时签名参数，因此数据库和管理员页面按敏感运维数据保护，并随任务保留期删除；链接过期不代表任务数据丢失。
+- 验证：后端 Service/Repository/Handler 三包完整测试通过；前端异步任务 API/页面 Vitest 13/13、`pnpm typecheck`、目标 ESLint 和生产构建通过；新增仓储 URL 读回测试通过。未在真实 PostgreSQL 应用迁移，未做登录后浏览器、真实 Redis/OSS/上游、生产部署/重启或 Fork CI。
+- 当前实际基线：分支 `main`；完整 HEAD `d30dd111f2209df9c6e1fe681d86fdfe807cfd0e`；`git describe=v0.1.173.48-1-gd30dd11-dirty`；VERSION=`0.1.173.48`；工作树同时保留上一项错误码 611–613 的未提交改动。
+
+## 2026-09-15 异步生图独立错误码 611–613
+
+- 失败任务查询新增三个稳定应用层整数码：`611` 表示参考图超过上游 8 张限制，`612` 表示缺少、未检测到或无法使用所需参考图，`613` 表示提示词或输入图片无法被上游处理；BB 与 SC 查询共用同一分类。
+- 分类覆盖生产已见的 `image: at most 8 images are allowed`、中文“请上传/未检测到参考图”和 `prompt or input images could not be processed` 文案。内容政策、参考图网络拉取和既有 601–610 语义保持不变，`fail_reason` 继续保留脱敏后的上游原文。
+- 下游中文说明与简短建议已同步到 `异步生图接口文档new.md`、`docs/DURABLE_ASYNC_IMAGE_API.md` 和站内中英文异步 API 指南。
+- 验证：分类与 BB 查询响应定向测试通过；后端 Handler 全包测试通过；前端 `pnpm typecheck` 通过。未连接真实上游、Redis/PostgreSQL/OSS 做端到端验证，未部署或重启生产，Fork CI 未运行。
+- 当前实际基线：分支 `main`；完整 HEAD `d30dd111f2209df9c6e1fe681d86fdfe807cfd0e`；`git describe=v0.1.173.48-1-gd30dd11-dirty`；VERSION=`0.1.173.48`。
+
 ## 2026-09-13 生图账号池多维调度冒烟复核
 
 - 本轮按“池键 → 候选账号 → 兼容性/状态/限流/熔断/排除 → 最终账号 → 原计费链”复核并修复边界：Gemini 非方图按短边档位同时用于路由和计费；独立池不能绕过 `require_oauth_only`；Antigravity 原生生图会建立图片路由/计费上下文，并按当前池判断单账号 503 重试；渠道别名映射到 Gemini 生图模型时仍以客户端原始 ID 查池。
@@ -115,13 +131,13 @@ codegraph init
 
 ## 当前版本快照
 
-记录日期：`2026-09-13`（当前工作树含生图账号池多维调度及文档同步；未部署或重启生产）。
+记录日期：`2026-09-15`（当前工作树含异步生图 611–613 独立错误码及文档同步；未部署或重启生产）。
 
 | 项目 | 当前记录 |
 |---|---|
-| 发布版本文件 | `backend/cmd/server/VERSION`=`0.1.173.47` |
-| 文档记录时 HEAD | `38372af3ebf76fea96493f60cb49c35cbf5edd0a` |
-| HEAD 描述 | `v0.1.173.47-1-g38372af-dirty` |
+| 发布版本文件 | `backend/cmd/server/VERSION`=`0.1.173.48` |
+| 文档记录时 HEAD | `d30dd111f2209df9c6e1fe681d86fdfe807cfd0e` |
+| HEAD 描述 | `v0.1.173.48-1-gd30dd11-dirty` |
 | 当前及后续默认分支 | `main` |
 | 已合并原作者主线 | 以 `git log` / `upstream/main` 实际为准 |
 | SC 上传安全迁移 | `backend/migrations/187_ZJ_async_image_upload_reservations.sql` |

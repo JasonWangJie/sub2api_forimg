@@ -1,5 +1,22 @@
 # AI 交接文档
 
+## 2026-09-15 异步任务参考图 URL 交接
+
+- 迁移 `226_ZJ_async_image_reference_urls.sql` 为 `async_image_tasks.reference_image_urls` 增加非空 JSONB 空数组默认值；只对新版任务写入远程 HTTP(S) URL，历史任务不回填，内联 `data:` 图片不重复持久化。
+- 提交入口已把 Gemini BB/SC `normalized.Parts` 和 OpenAI `ReferencedImageURLs()` 得到的 URL 传入 `CreateAsyncImageTaskParams.ReferenceImageURLs`；Service 统一 trim/过滤并保留顺序与重复项，Repository 插入和扫描该字段。不要从终态会清除的 `request_payload` 临时解析。
+- `asyncImageTaskCenterView.reference_image_urls` 只在 `detailView(..., admin=true)` 填充。管理员/用户列表使用 summary 查询且不加载 URL，普通用户详情也不输出；不要把字段移入共享 `newAsyncImageTaskCenterView` 初始化逻辑。
+- 管理员页面在提示词下显示完整 URL，经过 `sanitizeUrl` 后才生成 HTTP(S) 外链，使用 `target=_blank` 与 `noopener noreferrer`。签名 URL 可能自然过期且可能含敏感参数，必须保持管理员专用并随任务保留期清理。
+- 已通过后端 Service/Repository/Handler 三包完整测试、Repository URL 读回定向测试、前端 API/页面 Vitest 13/13、typecheck、目标 ESLint 和生产构建。未执行真实 PostgreSQL 迁移、登录后浏览器、真实 Redis/OSS/上游、生产部署/重启或 Fork CI。
+- 当前实际基线：`main`；完整 HEAD `d30dd111f2209df9c6e1fe681d86fdfe807cfd0e`；`git describe=v0.1.173.48-1-gd30dd11-dirty`；VERSION=`0.1.173.48`；继续保留同一工作树中的错误码 611–613 改动。
+
+## 2026-09-15 异步生图独立错误码 611–613 交接
+
+- 失败查询分类器新增 `611`（`image: at most 8 images are allowed`）、`612`（缺少、未检测到或无法使用所需参考图）和 `613`（`prompt or input images could not be processed`）。内容政策 601、参考图网络拉取 602、通用输入 604 和未知兜底 610 的原有优先级保持不变。
+- BB `/v1/images/tasks_async/{task_id}` 与 SC 查询共用 `writeBBQuery`，因此三个新码同时生效；没有新增数据库字段或响应字段。`fail_reason` 必须继续返回脱敏后的上游原文，不要替换成固定中文文案。
+- 中文含义和简短建议已同步两份接口文档及站内中英文指南。后续若扩充关键词，应使用真实脱敏样本并防止“请上传”等短语抢占内容政策或网络拉取分类。
+- 已通过分类/BB 响应定向测试、Handler 全包测试和前端 typecheck；未执行真实上游、Redis/PostgreSQL/OSS、生产部署/重启或 Fork CI。
+- 当前实际基线：`main`；完整 HEAD `d30dd111f2209df9c6e1fe681d86fdfe807cfd0e`；`git describe=v0.1.173.48-1-gd30dd11-dirty`；VERSION=`0.1.173.48`。
+
 ## 2026-09-13 生图账号池多维调度冒烟复核交接
 
 - 本轮在原多维账号池实现上补了六类边界：Gemini 非方图的池档位改用与计费相同的短边规则；独立绑定在保存和运行时都不能绕过 `require_oauth_only`；强制 Antigravity 原生入口会建立图片意图/池/计费上下文；单账号 503 判断读取当前图片池；渠道别名映射到 Gemini 生图模型时仍以请求侧 ID 查池；Antigravity 分组不再接受运行时永远不可选的 Gemini 账号。

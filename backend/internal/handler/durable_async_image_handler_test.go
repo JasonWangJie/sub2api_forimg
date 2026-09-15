@@ -146,6 +146,10 @@ func TestAsyncImageFailureBusinessCodeClassifiesStoredUpstreamMessages(t *testin
 		{name: "capacity", code: "upstream_failed", message: "上游生图失败（HTTP 502）：All available accounts exhausted", want: 603},
 		{name: "rate limit", code: "upstream_failed", message: "上游生图失败（HTTP 429）：Upstream rate limit exceeded, please retry later", want: 605},
 		{name: "invalid request", code: "upstream_failed", message: "上游生图失败（HTTP 400）：Invalid request", want: 604},
+		{name: "too many images", code: "upstream_failed", message: "上游生图失败（HTTP 400）：image: at most 8 images are allowed", want: 611},
+		{name: "missing reference image", code: "upstream_failed", message: "上游生图失败（HTTP 400）：请上传图 1 和图 2，我需要参考原始图片。", want: 612},
+		{name: "reference image not detected", code: "invalid_reference_image", message: "当前对话中未检测到可编辑的图片", want: 612},
+		{name: "unprocessable prompt or images", code: "upstream_failed", message: "上游生图失败（HTTP 400）：The prompt or input images could not be processed. Adjust the request and try again.", want: 613},
 		{name: "reference pixel limit", code: "invalid_reference_image", message: "download OpenAI reference image: validate reference image: error: code=*** reason=\"IMAGE_TOO_MANY_PIXELS\" message=\"image exceeds the configured pixel limit\"", want: 604},
 		{name: "reference mime mismatch", code: "invalid_reference_image", message: "download OpenAI reference image: validate reference image: error: code=*** reason=\"IMAGE_MIME_MISMATCH\" message=\"declared image type does not match image bytes\"", want: 604},
 		{name: "temporary upstream", code: "upstream_failed", message: "上游生图失败（HTTP 503）：service temporarily unavailable", want: 606},
@@ -159,6 +163,42 @@ func TestAsyncImageFailureBusinessCodeClassifiesStoredUpstreamMessages(t *testin
 			task := &service.AsyncImageTask{ErrorCode: &code, ErrorMessage: &test.message}
 			require.Equal(t, test.want, asyncImageFailureBusinessCode(task))
 			require.Equal(t, test.message, asyncImageFailureMessage(task))
+		})
+	}
+}
+
+func TestWriteBBQueryFailedIncludesNewBusinessCodes(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	h := &DurableAsyncImageHandler{}
+	tests := []struct {
+		name    string
+		message string
+		want    int
+	}{
+		{name: "too many images", message: "上游生图失败（HTTP 400）：image: at most 8 images are allowed", want: 611},
+		{name: "missing reference", message: "上游生图失败（HTTP 400）：请上传参考图后重试", want: 612},
+		{name: "unprocessable input", message: "Upstream image generation failed (HTTP 400): prompt or input images could not be processed", want: 613},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			code := "upstream_failed"
+			details := &service.AsyncImageTaskDetails{Task: &service.AsyncImageTask{
+				TaskID: "asyncimg_failed", Status: service.AsyncImageTaskStatusFailed,
+				ErrorCode: &code, ErrorMessage: &test.message,
+			}}
+			recorder := httptest.NewRecorder()
+			ctx, _ := gin.CreateTestContext(recorder)
+
+			h.writeBBQuery(ctx, details, service.AsyncImageRuntimeConfig{})
+
+			require.Equal(t, http.StatusOK, recorder.Code)
+			var response struct {
+				ErrorCode  int    `json:"error_code"`
+				FailReason string `json:"fail_reason"`
+			}
+			require.NoError(t, json.Unmarshal(recorder.Body.Bytes(), &response))
+			require.Equal(t, test.want, response.ErrorCode)
+			require.Equal(t, test.message, response.FailReason)
 		})
 	}
 }

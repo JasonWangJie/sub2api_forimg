@@ -343,7 +343,8 @@ export function getAsyncImageApiDoc(locale: string, apiRoot: string) {
 }`,
         notes: [
           'Failed task queries still return HTTP 200. error_code is an application code, not an HTTP 6xx status.',
-          'error_code: 601 policy/similarity, 602 reference fetch, 603 account capacity, 604 invalid input, 605 rate limit, 606 upstream unavailable, 607 invalid image output, 608 timeout/unknown, 609 storage or billing post-processing, 610 unclassified upstream (fallback).',
+          'error_code: 601 policy/similarity, 602 reference fetch, 603 account capacity, 604 invalid input, 605 rate limit, 606 upstream unavailable, 607 invalid image output, 608 timeout/unknown, 609 storage or billing post-processing, 610 unclassified upstream (fallback), 611 too many reference images (maximum 8), 612 missing/undetected/unusable reference image, 613 unprocessable prompt or input images.',
+          'For 611, reduce references to 8 or fewer. For 612, upload the required valid reference image again. For 613, simplify the prompt and verify image format/content before retrying.',
           'Display fail_reason as returned. Upstream failures preserve the sanitized upstream message (subject to the existing length limit), including content-policy and reference-image errors.',
         ],
       },
@@ -703,7 +704,8 @@ export function getAsyncImageApiDoc(locale: string, apiRoot: string) {
 }`,
       notes: [
         '失败查询仍返回 HTTP 200；error_code 是应用层对照码，不是 HTTP 6xx 状态码。',
-        'error_code：601 内容安全/第三方相似性，602 参考图拉取，603 账号容量，604 请求输入，605 上游限流，606 上游不可用，607 图片输出解析，608 超时/未知，609 存储或计费后处理，610 未分类上游错误（容错码）。',
+        'error_code：601 内容安全/第三方相似性，602 参考图拉取，603 账号容量，604 请求输入，605 上游限流，606 上游不可用，607 图片输出解析，608 超时/未知，609 存储或计费后处理，610 未分类上游错误（容错码），611 参考图超过 8 张，612 缺少/未检测到/无法使用参考图，613 提示词或输入图片无法处理。',
+        '611 请减少到 8 张以内；612 请重新上传所需的有效参考图；613 请简化提示词并检查图片格式和内容后重试。',
         '请原样展示返回的 fail_reason；上游失败会在现有脱敏和长度限制内保留上游提示，包括内容政策和参考图错误。',
       ],
     },

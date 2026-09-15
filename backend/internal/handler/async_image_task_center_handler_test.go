@@ -298,7 +298,8 @@ func TestAsyncImageTaskCenterDetailRedactsAndDoesNotExposeObjectIdentity(t *test
 		Platform: service.PlatformGemini, RequestType: service.AsyncImageRequestTypeImageToImage,
 		Model: "gemini-image", Status: service.AsyncImageTaskStatusStorageFailed,
 		BillingStatus: service.AsyncImageBillingStatusPrepared, ErrorMessage: &errorMessage,
-		SubmittedAt: now, CreatedAt: now, UpdatedAt: now,
+		ReferenceImageURLs: []string{"https://private.example/reference.png?token=secret"},
+		SubmittedAt:        now, CreatedAt: now, UpdatedAt: now,
 	}
 	details := &service.AsyncImageTaskDetails{
 		Task:    task,
@@ -325,6 +326,8 @@ func TestAsyncImageTaskCenterDetailRedactsAndDoesNotExposeObjectIdentity(t *test
 	require.NotContains(t, body, "secret-bucket")
 	require.NotContains(t, body, "secret/key.png")
 	require.NotContains(t, body, "account_id")
+	require.NotContains(t, body, "private.example")
+	require.NotContains(t, body, "reference_image_urls")
 	require.Contains(t, body, "access_token=***")
 	require.NotContains(t, body, "view_url")
 	require.NotContains(t, body, "preview_url")
@@ -339,7 +342,12 @@ func TestAsyncImageTaskCenterAdminDetailIncludesRoutingNames(t *testing.T) {
 		Platform: service.PlatformOpenAI, RequestType: service.AsyncImageRequestTypeTextToImage,
 		Model: "gpt-image-2", Status: service.AsyncImageTaskStatusFailed,
 		BillingStatus: service.AsyncImageBillingStatusNotBillable,
-		SubmittedAt:   now, CreatedAt: now, UpdatedAt: now,
+		ReferenceImageURLs: []string{
+			"https://cdn.example/reference-1.png?token=abc",
+			"https://cdn.example/reference-2.png",
+			"data:image/png;base64,AAAA",
+		},
+		SubmittedAt: now, CreatedAt: now, UpdatedAt: now,
 	}
 	tasks := &asyncImageTaskCenterServiceStub{details: &service.AsyncImageTaskDetails{Task: task}}
 	h := &AsyncImageTaskCenterHandler{
@@ -368,6 +376,10 @@ func TestAsyncImageTaskCenterAdminDetailIncludesRoutingNames(t *testing.T) {
 	require.Equal(t, "workbench-key", envelope.Data.Task["api_key_name"])
 	require.Equal(t, "openai-image", envelope.Data.Task["group_name"])
 	require.Equal(t, "openai-prod-1", envelope.Data.Task["account_name"])
+	require.Equal(t, []any{
+		"https://cdn.example/reference-1.png?token=abc",
+		"https://cdn.example/reference-2.png",
+	}, envelope.Data.Task["reference_image_urls"])
 }
 
 func TestAsyncImageTaskCenterShowsUnassignedInvokingTaskAsQueued(t *testing.T) {

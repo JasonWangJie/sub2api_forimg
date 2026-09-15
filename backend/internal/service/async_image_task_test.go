@@ -83,6 +83,11 @@ func TestAsyncImageTaskServiceCreateNormalizesAndDelegates(t *testing.T) {
 		Protocol: " BB ", Platform: " GEMINI ", RequestType: " TEXT_TO_IMAGE ",
 		Model: " gemini-image ", RequestHash: "abc123", RequestPayload: []byte("ciphertext"),
 		IdempotencyKey: &idempotencyKey,
+		ReferenceImageURLs: []string{
+			" https://cdn.example/reference.png?token=abc ",
+			"data:image/png;base64,AAAA",
+			"javascript:alert(1)",
+		},
 	})
 	require.NoError(t, err)
 	require.True(t, reused)
@@ -92,7 +97,22 @@ func TestAsyncImageTaskServiceCreateNormalizesAndDelegates(t *testing.T) {
 	require.Equal(t, AsyncImageRequestTypeTextToImage, repo.createParams.RequestType)
 	require.Equal(t, "gemini-image", repo.createParams.Model)
 	require.Equal(t, "retry-1", *repo.createParams.IdempotencyKey)
+	require.Equal(t, []string{"https://cdn.example/reference.png?token=abc"}, repo.createParams.ReferenceImageURLs)
 	require.Contains(t, repo.createParams.TaskID, "asyncimg_")
+}
+
+func TestNormalizeAsyncImageReferenceURLsPreservesOrderAndDuplicates(t *testing.T) {
+	require.Equal(t, []string{
+		"https://cdn.example/a.png",
+		"http://cdn.example/b.png#preview",
+		"https://cdn.example/a.png",
+	}, NormalizeAsyncImageReferenceURLs([]string{
+		" https://cdn.example/a.png ",
+		"http://cdn.example/b.png#preview",
+		"data:image/png;base64,AAAA",
+		"/relative/image.png",
+		"https://cdn.example/a.png",
+	}))
 }
 
 func TestAsyncImageTaskServiceCreateRejectsUnsupportedPlatform(t *testing.T) {

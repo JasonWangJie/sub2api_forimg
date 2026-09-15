@@ -73,6 +73,15 @@ const ConfirmDialogStub = {
   emits: ['confirm', 'cancel'],
   template: '<div v-if="show" data-test="confirm"><button data-test="confirm-action" @click="$emit(\'confirm\')">confirm</button></div>',
 }
+const BaseDialogStub = {
+  props: ['show', 'title'],
+  emits: ['close'],
+  template: '<div v-if="show" data-test="detail-dialog"><slot /></div>',
+}
+const DataTableStub = {
+  props: ['data'],
+  template: '<div><div v-for="row in data" :key="row.id"><slot name="cell-actions" :row="row" /></div><slot v-if="!data.length" name="empty" /></div>',
+}
 
 function mountView(admin = true) {
   return mount(AsyncImageTasksView, {
@@ -82,9 +91,9 @@ function mountView(admin = true) {
         AppLayout: AppLayoutStub,
         TablePageLayout: TablePageLayoutStub,
         AutoRefreshButton: true,
-        BaseDialog: true,
+        BaseDialog: BaseDialogStub,
         ConfirmDialog: ConfirmDialogStub,
-        DataTable: true,
+        DataTable: DataTableStub,
         ImageLightbox: true,
         LoadingSpinner: true,
         Pagination: true,
@@ -120,6 +129,20 @@ describe('AsyncImageTasksView current-page termination', () => {
         { task_id: 'asyncimg_unknown', status: 'skipped' },
       ],
     })
+    mocks.get.mockResolvedValue({
+      id: 'asyncimg_queued',
+      task_id: 'asyncimg_queued',
+      platform: 'openai',
+      protocol: 'bb',
+      request_type: 'image_to_image',
+      model: 'gpt-image-1',
+      status: 'queued',
+      prompt_summary: 'Use the product reference',
+      reference_image_urls: ['https://cdn.example/reference.png?token=abc'],
+      created_at: '2026-09-09T00:00:00Z',
+      results: [],
+      events: [],
+    })
   })
 
   it('submits only terminable task IDs from the loaded admin page after confirmation', async () => {
@@ -146,5 +169,29 @@ describe('AsyncImageTasksView current-page termination', () => {
     await flushPromises()
 
     expect(wrapper.find('[data-test="batch-terminate-current-page"]').exists()).toBe(false)
+  })
+
+  it('shows persisted reference image URLs only in the admin detail and opens them in a new window', async () => {
+    const wrapper = mountView(true)
+    await flushPromises()
+
+    await wrapper.findAll('[data-test="view-task"]')[0].trigger('click')
+    await flushPromises()
+
+    const link = wrapper.get('[data-test="reference-image-link"]')
+    expect(link.text()).toContain('https://cdn.example/reference.png?token=abc')
+    expect(link.attributes('href')).toBe('https://cdn.example/reference.png?token=abc')
+    expect(link.attributes('target')).toBe('_blank')
+    expect(link.attributes('rel')).toBe('noopener noreferrer')
+  })
+
+  it('does not render reference image URLs in the user detail', async () => {
+    const wrapper = mountView(false)
+    await flushPromises()
+
+    await wrapper.findAll('[data-test="view-task"]')[0].trigger('click')
+    await flushPromises()
+
+    expect(wrapper.find('[data-test="reference-image-link"]').exists()).toBe(false)
   })
 })

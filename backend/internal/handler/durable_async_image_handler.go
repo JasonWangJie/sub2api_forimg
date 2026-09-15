@@ -273,8 +273,9 @@ func (h *DurableAsyncImageHandler) submit(c *gin.Context, protocol, expectedPlat
 		Protocol: protocol, Platform: expectedPlatform, RequestType: kind,
 		Model: model, ImageCount: imageCount, IdempotencyKey: idempotencyKeyPtr,
 		RequestHash: requestHash, RequestPayload: []byte(ciphertext), ExpiresAt: &expiresAt,
-		OutboxPayload:  json.RawMessage(`{"source":"public_submit"}`),
-		InputObjectIDs: inputObjectIDs,
+		ReferenceImageURLs: inputReferenceURLs,
+		OutboxPayload:      json.RawMessage(`{"source":"public_submit"}`),
+		InputObjectIDs:     inputObjectIDs,
 	}
 	if requestedSize != "" {
 		params.RequestedImageSize = &requestedSize
@@ -883,7 +884,10 @@ const (
 	asyncImageBusinessCodeTimeout       = 608
 	asyncImageBusinessCodePostProcess   = 609
 	// Stable escape hatch for an upstream failure outside known categories.
-	asyncImageBusinessCodeUnclassified = 610
+	asyncImageBusinessCodeUnclassified  = 610
+	asyncImageBusinessCodeTooManyImages = 611
+	asyncImageBusinessCodeMissingImage  = 612
+	asyncImageBusinessCodeUnprocessable = 613
 )
 
 // asyncImageFailureBusinessCode is a stable application-level classification.
@@ -903,6 +907,15 @@ func asyncImageFailureBusinessCode(task *service.AsyncImageTask) int {
 	case "invalid_reference_image":
 		if task.ErrorMessage != nil {
 			referenceMessage := strings.ToLower(strings.TrimSpace(*task.ErrorMessage))
+			if isAsyncImageTooManyImagesFailure(referenceMessage) {
+				return asyncImageBusinessCodeTooManyImages
+			}
+			if isAsyncImageMissingReferenceFailure(referenceMessage) {
+				return asyncImageBusinessCodeMissingImage
+			}
+			if isAsyncImageUnprocessableInputFailure(referenceMessage) {
+				return asyncImageBusinessCodeUnprocessable
+			}
 			if containsAnyAsyncImageFailure(referenceMessage,
 				"image_too_many_pixels", "too many pixels", "pixel limit", "configured size limit",
 				"image_mime_mismatch", "mime mismatch", "declared image type", "dimensions are not supported") {
@@ -942,6 +955,15 @@ func asyncImageFailureBusinessCode(task *service.AsyncImageTask) int {
 		"reference image fetch", "curl: (28)", "curl: (35)", "curl: (56)", "proxyerror", "tls", "dns", "name resolution", "connection reset", "connection closed") {
 		return asyncImageBusinessCodeReference
 	}
+	if isAsyncImageTooManyImagesFailure(message) {
+		return asyncImageBusinessCodeTooManyImages
+	}
+	if isAsyncImageMissingReferenceFailure(message) {
+		return asyncImageBusinessCodeMissingImage
+	}
+	if isAsyncImageUnprocessableInputFailure(message) {
+		return asyncImageBusinessCodeUnprocessable
+	}
 	if containsAnyAsyncImageFailure(message, "all available accounts exhausted", "capacity unavailable", "no account capacity") {
 		return asyncImageBusinessCodeCapacity
 	}
@@ -961,6 +983,23 @@ func asyncImageFailureBusinessCode(task *service.AsyncImageTask) int {
 		return asyncImageBusinessCodeUpstream
 	}
 	return asyncImageBusinessCodeUnclassified
+}
+
+func isAsyncImageTooManyImagesFailure(message string) bool {
+	return containsAnyAsyncImageFailure(message, "image: at most 8 images are allowed")
+}
+
+func isAsyncImageMissingReferenceFailure(message string) bool {
+	return containsAnyAsyncImageFailure(message,
+		"missing reference image", "reference image is missing", "no reference image",
+		"please upload the reference image", "please upload reference images", "please upload image",
+		"no editable image was detected", "could not detect an editable image", "could not detect the reference image",
+		"缺少参考图", "没有参考图", "未检测到参考图", "未检测到可编辑的图片",
+		"请上传参考图", "请上传图", "请上传需要", "没有明显可见")
+}
+
+func isAsyncImageUnprocessableInputFailure(message string) bool {
+	return containsAnyAsyncImageFailure(message, "prompt or input images could not be processed")
 }
 
 func containsAnyAsyncImageFailure(value string, terms ...string) bool {

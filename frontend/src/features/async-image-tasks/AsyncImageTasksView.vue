@@ -238,7 +238,7 @@
 
           <template #cell-actions="{ row }">
             <div class="flex items-center justify-end gap-2" @click.stop>
-              <button type="button" class="inline-flex items-center gap-1 text-sm font-medium text-primary-600 hover:text-primary-700 dark:text-primary-400" @click="openDetail(row)">
+              <button type="button" class="inline-flex items-center gap-1 text-sm font-medium text-primary-600 hover:text-primary-700 dark:text-primary-400" data-test="view-task" @click="openDetail(row)">
                 <Icon name="eye" size="sm" />
                 {{ t('common.view') }}
               </button>
@@ -318,6 +318,25 @@
                 </button>
               </div>
               <p v-if="detail.prompt_summary" class="mt-2 max-w-3xl text-sm leading-6 text-gray-500 dark:text-gray-400">{{ detail.prompt_summary }}</p>
+              <div v-if="admin && referenceImageLinks.length" class="mt-3 max-w-3xl">
+                <p class="text-xs font-medium text-gray-500 dark:text-gray-400">{{ t('asyncImageTasks.detail.referenceImages') }}</p>
+                <div class="mt-2 space-y-2">
+                  <a
+                    v-for="(reference, index) in referenceImageLinks"
+                    :key="`${reference.url}-${index}`"
+                    :href="reference.href"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    class="group flex min-w-0 items-start gap-2 rounded-md border border-gray-200 bg-gray-50 px-3 py-2 text-primary-600 transition-colors hover:border-primary-300 hover:bg-primary-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-500 dark:border-dark-700 dark:bg-dark-900/70 dark:text-primary-400 dark:hover:border-primary-700 dark:hover:bg-primary-950/20"
+                    :aria-label="t('asyncImageTasks.detail.openReferenceImage', { index: index + 1 })"
+                    data-test="reference-image-link"
+                  >
+                    <span class="shrink-0 text-xs font-medium">{{ t('asyncImageTasks.detail.referenceImage', { index: index + 1 }) }}</span>
+                    <span class="min-w-0 flex-1 break-all font-mono text-xs leading-5 text-gray-600 group-hover:text-primary-700 dark:text-gray-300 dark:group-hover:text-primary-300">{{ reference.url }}</span>
+                    <Icon name="externalLink" size="sm" class="mt-0.5 shrink-0" />
+                  </a>
+                </div>
+              </div>
             </div>
             <button
               v-if="admin && canResume(detail)"
@@ -675,6 +694,13 @@ const timelineEvents = computed<AsyncImageTaskEvent[]>(() => {
   if (detail.value.started_at && detail.value.status !== 'queued') events.push({ status: 'invoking', created_at: detail.value.started_at })
   if (detail.value.finished_at) events.push({ status: detail.value.status, created_at: detail.value.finished_at, message: detail.value.error_message })
   return events
+})
+
+const referenceImageLinks = computed(() => {
+  if (!admin.value || !detail.value?.reference_image_urls?.length) return []
+  return detail.value.reference_image_urls
+    .map((url) => ({ url, href: sanitizeUrl(url) }))
+    .filter((reference) => Boolean(reference.href))
 })
 
 const autoRefresh = useAutoRefresh({

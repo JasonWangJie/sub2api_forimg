@@ -404,6 +404,7 @@ type asyncImageTaskCenterView struct {
 	Currency             string                         `json:"currency"`
 	PromptSummary        *string                        `json:"prompt_summary,omitempty"`
 	PromptPreview        *string                        `json:"prompt_preview,omitempty"`
+	ReferenceImageURLs   []string                       `json:"reference_image_urls,omitempty"`
 	UpstreamRequestID    *string                        `json:"upstream_request_id,omitempty"`
 	AccountAttemptCount  *int                           `json:"account_attempt_count,omitempty"`
 	AttemptedAccountIDs  []int64                        `json:"attempted_account_ids,omitempty"`
@@ -526,6 +527,7 @@ func (h *AsyncImageTaskCenterHandler) detailView(ctx context.Context, details *s
 	}
 	taskView := newAsyncImageTaskCenterView(details.Task, details.Results, admin)
 	if admin {
+		taskView.ReferenceImageURLs = service.NormalizeAsyncImageReferenceURLs(details.Task.ReferenceImageURLs)
 		h.attachAsyncImageRoutingNames(ctx, &taskView, details.Task, h.newRoutingNameCache())
 	}
 	return &asyncImageTaskDetailsView{

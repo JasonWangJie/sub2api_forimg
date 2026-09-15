@@ -525,6 +525,11 @@ SC 查询与 BB 共用 `status`、`task_id`、`data[].url` 结构。私有存储
 | `608` | 生图执行超时或执行结果未知 | 不要自动重复提交，先等待对账或人工确认 |
 | `609` | 结果存储或计费后处理失败 | 稍后查询；该类重试不会重新调用上游生图 |
 | `610` | 未分类上游错误（容错码） | 原样展示 `fail_reason` 并携带任务 ID 排查；不要据此重复提交 |
+| `611` | 参考图数量超过上游限制（当前最多 8 张） | 将参考图减少到 8 张以内后重新提交 |
+| `612` | 缺少、未检测到或无法使用所需参考图 | 重新上传清晰、完整且与提示要求一致的参考图 |
+| `613` | 提示词或输入图片无法被上游处理 | 简化提示词，检查图片格式和内容后重试 |
+
+`611`、`612`、`613` 只提供更稳定的失败分类；任务查询继续在 `fail_reason` 中返回脱敏后的上游原文。
 
 内容安全 601 也包括上游以 HTTP 400 返回的真实人物露骨亲密、性化、情色/色情、裸露等拦截；此类提示应原样保留在 `fail_reason` 中并修改提示词后重试。
 
@@ -558,6 +563,8 @@ GET  /api/v1/admin/async-image-tasks
 GET  /api/v1/admin/async-image-tasks/{task_id}
 POST /api/v1/admin/async-image-tasks/{task_id}/terminate
 ```
+
+新提交的 BB/SC 图生图任务会把远程 HTTP(S) 参考图 URL 按请求顺序保存到 `async_image_tasks.reference_image_urls`。管理员详情响应的 `task.reference_image_urls` 会返回该列表，页面在提示词下方显示完整 URL，并可在新窗口打开；任务列表和普通用户详情均不返回该字段。内联 `data:` 图片不重复保存。URL 可能带有临时签名参数并会自然过期，应将任务库和管理员页面按敏感运维数据保护；历史任务不会回填。
 
 `terminate` 使用任务版本号和当前状态做原子校验，将 `queued`、`invoking`、`execution_unknown` 及后处理失败状态标记为 `failed`，写入 `error_code=admin_terminated`、`admin_task_terminated` 事件并清除加密请求载荷。已成功、已失败或已过期的任务不可重复终止；上游晚到的结果不会覆盖管理员终态。该操作不会再次调用上游生图。
 
@@ -653,7 +660,7 @@ Gemini BB 的 `image_url` 和 SC 的 `image_urls`：
 - OpenAI `image_urls` / `images[].image_url` 本身即上游 URL 透传，网关不会本机转 base64。
 - OpenAI 与 Gemini 都受 `async_image.max_reference_images` 全局参考图保护；已知 Gemini Flash Image 模型单任务最多 3 张参考图，Pro Image 模型最多 14 张，提交阶段取模型能力上限与全局上限中的较小值。未知 Gemini 模型继续使用全局上限，避免误拒绝自定义模型。
 
-规范化请求体加密写入 PostgreSQL，任务终态会清除完整请求载荷，只保留请求哈希和截断后的提示摘要。提示摘要仍可能包含业务敏感文本，应按敏感数据保护任务库和管理员页面。数据库不保存原始 API Key，Worker 只按 API Key ID 重新加载上下文；对外错误会经过日志脱敏规则处理，不透出上游凭证或内部地址。
+规范化请求体加密写入 PostgreSQL，任务终态会清除完整请求载荷，只保留请求哈希、截断后的提示摘要，以及新任务的管理员专用远程参考图 URL 审计列表。参考图 URL 可能包含临时签名查询参数，提示摘要也可能包含业务敏感文本，应按敏感数据保护任务库和管理员页面；普通用户响应和任务列表不会返回 URL 列表。数据库不保存原始 API Key，Worker 只按 API Key ID 重新加载上下文；对外错误会经过日志脱敏规则处理，不透出上游凭证或内部地址。
 
 ## 12. 错误响应
 

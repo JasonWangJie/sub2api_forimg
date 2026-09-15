@@ -45,6 +45,7 @@ describe('async image task API', () => {
           requested_image_size: '2K',
           actual_image_size: '2048x2048',
           prompt_preview: 'A product photo',
+          reference_image_urls: ['https://cdn.example/reference.png?token=abc'],
           created_at: '2026-07-20T00:00:00Z',
         },
         results: [{ image_index: 1, byte_size: 1024, provider: 'qiniu' }],
@@ -58,6 +59,7 @@ describe('async image task API', () => {
       requested_size: '2K',
       actual_size: '2048x2048',
       prompt_summary: 'A product photo',
+      reference_image_urls: ['https://cdn.example/reference.png?token=abc'],
     })
     expect(task.results?.[0]).toMatchObject({ id: 'imgtask_abc:1', index: 1, size_bytes: 1024 })
     expect(task.events?.[0]).toMatchObject({ status: 'succeeded' })
