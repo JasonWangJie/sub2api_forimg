@@ -251,6 +251,10 @@ func (s *GeminiMessagesCompatService) forwardClaudeBodyAsChatCompletions(
 		if s.shouldFailoverGeminiUpstreamError(resp.StatusCode) &&
 			!(asyncImageGeneration && IsAsyncImageReferenceFetchFailureMessage(upstreamMessage)) {
 			upstreamMsg := sanitizeUpstreamErrorMessage(upstreamMessage)
+			providerCode := ""
+			if asyncImageGeneration {
+				upstreamMsg, providerCode, requestID = geminiAsyncUpstreamDiagnostics(evBody, requestID)
+			}
 			appendOpsUpstreamError(c, OpsUpstreamErrorEvent{
 				Platform:           account.Platform,
 				AccountID:          account.ID,
@@ -264,11 +268,14 @@ func (s *GeminiMessagesCompatService) forwardClaudeBodyAsChatCompletions(
 				StatusCode:             resp.StatusCode,
 				ResponseBody:           evBody,
 				ResponseHeaders:        resp.Header.Clone(),
+				ProviderErrorCode:      providerCode,
+				ProviderErrorMessage:   upstreamMsg,
+				UpstreamRequestID:      requestID,
 				RetryableOnSameAccount: !asyncImageGeneration && account.IsPoolMode() && account.IsPoolModeRetryableStatus(resp.StatusCode),
 			}
 		}
 
-		return nil, s.writeGeminiChatCompletionsMappedError(c, account, resp.StatusCode, requestID, evBody)
+		return nil, s.writeGeminiChatCompletionsMappedError(c, account, resp.StatusCode, requestID, evBody, asyncImageGeneration)
 	}
 
 	var usage *ClaudeUsage
@@ -860,8 +867,13 @@ func (s *GeminiMessagesCompatService) writeGeminiChatCompletionsMappedError(
 	upstreamStatus int,
 	upstreamRequestID string,
 	body []byte,
+	asyncImageGeneration bool,
 ) error {
 	upstreamMsg := sanitizeUpstreamErrorMessage(strings.TrimSpace(extractUpstreamErrorMessage(body)))
+	providerCode := ""
+	if asyncImageGeneration {
+		upstreamMsg, providerCode, upstreamRequestID = geminiAsyncUpstreamDiagnostics(body, upstreamRequestID)
+	}
 	setOpsUpstreamError(c, upstreamStatus, upstreamMsg, "")
 	if account != nil {
 		appendOpsUpstreamError(c, OpsUpstreamErrorEvent{
@@ -873,6 +885,30 @@ func (s *GeminiMessagesCompatService) writeGeminiChatCompletionsMappedError(
 			Kind:               "http_error",
 			Message:            upstreamMsg,
 		})
+	}
+
+	if asyncImageGeneration && upstreamMsg != "" {
+		statusCode := upstreamStatus
+		if statusCode < http.StatusBadRequest || statusCode > 599 {
+			statusCode = http.StatusBadGateway
+		}
+		errType := "upstream_error"
+		if mapped := mapGeminiErrorBodyToClaudeError(body); mapped != nil && mapped.Type != "" {
+			errType = mapped.Type
+		} else if upstreamStatus == http.StatusBadRequest {
+			errType = "invalid_request_error"
+		}
+		errorBody := gin.H{"type": errType, "message": upstreamMsg}
+		if providerCode != "" {
+			errorBody["code"] = providerCode
+		}
+		c.JSON(statusCode, gin.H{"error": errorBody})
+		return &GeminiAsyncImageUpstreamError{
+			StatusCode:           upstreamStatus,
+			ProviderErrorCode:    providerCode,
+			ProviderErrorMessage: upstreamMsg,
+			UpstreamRequestID:    upstreamRequestID,
+		}
 	}
 
 	if status, errType, errMsg, matched := applyErrorPassthroughRule(

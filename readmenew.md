@@ -1,5 +1,39 @@
 # Sub2API Fork 二次开发总览
 
+## 2026-09-20 异步 Gemini 上游错误诊断持久化与 611–613 打通
+
+- 内部异步 Gemini 生图路径不再把可解析的上游 `error.message` 覆盖为固定 `Invalid request`：现在仅在 Worker 私有上下文中保留经敏感键脱敏、空白归一化和长度限制后的原始 message；同步 Chat Completions 仍沿用通用错误文案，避免扩大对外信息暴露。
+- Gemini 上游诊断同时提取 provider code（优先 `error.status`，回退 `error.code`）和 `x-request-id` / `x-goog-request-id` / `request-id`。失败账号尝试的 `account_attempts` JSONB 新增 `provider_error_code`，request ID 继续同步到任务顶层 `upstream_request_id`；使用既有 JSONB/列，无数据库迁移。
+- 普通 400 及账号切换耗尽两条链路都会把安全 message 写回内部 Worker 响应，因此任务 `error_message` 能收到 `image: at most 8 images are allowed`、缺少参考图、`prompt or input images could not be processed` 等原文，既有业务分类器可分别返回 611、612、613。管理员尝试历史新增“上游错误码”列；普通用户接口仍不返回账号尝试审计。
+- 验证：本次定向 Service/Handler 测试通过；`go test ./internal/handler -count=1` 通过；`go test ./internal/service -skip 'TestEstimateOpenAIInputTokens_CompareWithOpenAIAPI' -count=1` 通过；完整 Service 回归仅既有的外部 OpenAI token 对照测试三个子用例失败，其余通过；前端 `pnpm typecheck`、`git diff --check` 和三份记录的 Markdown 本地链接检查通过。未做真实 Gemini 请求、生产部署、重启或历史任务回填。
+- 当前实际快照：`main`；HEAD=`defccfacba610450ac5f9fd06e0f54c2f25fbb7a`；describe=`v0.1.173.49-1-gdefccfa-dirty`；VERSION=`0.1.173.49`。工作树含本轮代码/测试/前端/三份记录修改，并保留用户原有两份 `wiki-new/` 修改和四份未跟踪迁移文档；未提交/tag。
+
+## 2026-09-20 生产 Gemini 异步 400 只读诊断
+
+- 按用户明确授权只读登录 `40.160.139.185` 检查生产异步生图日志与 PostgreSQL 任务；`sub2api` 保持 `active`，运行版本 `0.1.173.49`、commit `52b0cf537f2e091506d52d72692195f6720088d6`。本轮未修改生产文件、配置、数据库或服务，未部署、重启或重放任务。
+- 近 24 小时滚动快照中，Gemini 有 `4739` 个成功任务；查询期间失败从 `485` 增至 `486`。最初 `485` 个失败均落为内部 `error_code=upstream_failed`、`HTTP 400：Invalid request`，最近任务的 `upstream_request_id` 为空，账号尝试也只保存通用文案。
+- 主要运行时异常是参考图能力不匹配：生产 `max_reference_images=16`，代码对 `gemini-3-pro-image-preview` 的模型上限为 14，因此 9–14 张请求会被接收；但参考图大于 8 张的快照为成功 `64`、失败 `336`，失败率 `84.0%`。账号 1/25 的大于 8 张任务分别失败 `125/186` 且无成功，账号 33 成功 `64`、失败 `25`，说明不同上游账号实际能力不一致，当前调度未按账号参考图上限隔离。
+- “没有更多信息”不能据现存任务断言。Gemini 兼容层先提取原始 `error.message`，但通用错误映射有意不采用该 message；HTTP 400 随后写成 `Invalid request`，Worker 又把未命中容量/重试等规则的非 2xx 统一落为 `upstream_failed`。生产没有启用原始上游错误体日志，失败终态已清除 `request_payload`，内部异步调用也没有生成 `ops_error_logs`，因此历史 Gemini 400 的精确原文现在无法恢复。
+- 后续修复建议中的错误诊断持久化已在本地完成（见上节），尚未部署；账号参考图上限能力仍未实现。若临时把全局上限收紧为所有账号都支持的 8 张，会牺牲账号 33 已证实存在的 9–12 张成功能力，需另行决策和授权。
+- 当前本地快照：`main`；HEAD=`defccfacba610450ac5f9fd06e0f54c2f25fbb7a`；describe=`v0.1.173.49-1-gdefccfa-dirty`；VERSION=`0.1.173.49`。工作树原有三份记录修改与四份迁移文档未跟踪，本轮只继续增补三份记录并保留全部既有内容。
+- 文档验证：`git diff --check` 通过，三份记录的 Markdown 本地链接检查通过；本轮未运行代码测试、真实上游重放或 CI。
+
+## 2026-09-16 PostgreSQL 远程连接只读排查
+
+- 按用户明确授权只读连接 `40.160.139.185`，核对宝塔 PostgreSQL 18.0 的运行配置、访问规则、防火墙和本机 TCP 连通性；未修改服务器配置、数据库数据，未部署或重启服务，登录口令不写入仓库。
+- 根因：实际监听为 `127.0.0.1:25432`；`/www/server/pgsql/data/postgresql.conf` 已写 `listen_addresses='*'`，但 `pg_settings` 显示运行值仍为 `localhost`、`pending_restart=true`，文件配置显示该项未应用。UFW 已放行 TCP 5432/25432，HBA 有远程密码认证规则且无解析错误；本机连接两端口均被拒绝，尚未进入账号认证。
+- 待处理：用户明确要求重启 PostgreSQL 后让监听配置生效，再从本机验证 `40.160.139.185:25432` 与原数据库账号。此服务器为宝塔原生安装，不能套用默认 5432、系统 `postgresql.service` 或 Docker 重启命令；详见 [开发台账.md](开发台账.md) 与 [agent.md](agent.md)。
+- 当前快照：`main`；HEAD=`defccfacba610450ac5f9fd06e0f54c2f25fbb7a`；status 为 `## main...origin/main` 加三份记录既有修改/四份既有迁移文档未跟踪；describe=`v0.1.173.49-1-gdefccfa-dirty`；VERSION=`0.1.173.49`。本轮仅增补三份记录，保留全部既有改动。
+- 文档验证：`git diff --check` 与三份记录本轮新增本地链接检查通过；远端日志也明确要求重启后应用监听地址。公网恢复、数据库密码登录及应用重连尚未验证。
+
+## 2026-09-16 new-api 图片功能迁移开发包
+
+- 已按当前源码提取六项能力：站内异步生图 API 文档、用户异步任务、管理员生图任务中心、图片工作台、本机个人图库、图片广场及投稿/审核/举报/存储/清理依赖。四份文档均生成到项目根目录，可以一起复制到目标 new-api 项目，不依赖原生产站点或数据库。
+- 开发入口：[newapi图片功能Codex开发任务书.md](newapi图片功能Codex开发任务书.md)；配套：[迁移开发总纲](newapi图片功能迁移开发总纲.md)、[异步 API 兼容规范](newapi异步生图API兼容规范.md)、[页面与图库广场规格](newapi图片页面与图库广场功能规格.md)。包含目标 Token/字符串分组/渠道适配、三数据库模型、持久账务幂等、可靠 Worker 和分阶段验收。
+- 以代码纠正历史描述：SC/BB 共用查询/错误格式；私有签名默认 3600 秒；个人图库只收本机实时图；异步默认不自动归档；未知执行禁止重放。目标 `F:/Code/Git/new-api` 仅做结构只读核对，本轮未在该项目开发或改配置。
+- 当前实际快照：`main`；完整 HEAD `defccfacba610450ac5f9fd06e0f54c2f25fbb7a`；`git status --short --branch` 为 `## main...origin/main` 加三份记录修改和四份新文档；`git describe=v0.1.173.49-1-gdefccfa-dirty`；VERSION=`0.1.173.49`。提取前工作树干净，当前差异仅本轮文档。
+- 验证：四份文档的 16 个 JSON 示例均可解析，65 个源码/专题索引路径均存在；开发包 12 个配套链接及三份记录 12 个新增链接通过，开发包全部可点击链接仅引用四份文件，可独立复制；代码围栏/尾随空格/末尾换行检查及 `git diff --check` 通过。未执行代码测试、真实数据库/Redis/OSS/上游、浏览器验收、生产连接/部署/重启或 CI；没有提交或发版。
+
 ## 2026-09-15 异步任务参考图 URL 持久化与管理员详情
 
 - 新迁移 `226_ZJ_async_image_reference_urls.sql` 为 `async_image_tasks` 增加 `reference_image_urls` JSONB 审计快照；BB/SC 新提交任务按请求顺序保存远程 HTTP(S) 参考图 URL，保留重复项，内联 `data:` 图片不重复入库，历史任务不回填。

@@ -93,6 +93,7 @@ export default {
       attemptedAt: 'Attempted at',
       attemptStatus: 'Attempt status',
       httpStatus: 'HTTP status',
+      providerErrorCode: 'Provider error code',
       failureReason: 'Failure reason',
       error: 'Task error',
       results: 'Generated images',

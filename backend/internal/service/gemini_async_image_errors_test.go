@@ -30,12 +30,25 @@ func TestGeminiAsyncAccountFailover400ClassifiesWrappedAndPlainResponses(t *test
 }
 
 func TestNewGeminiAsyncAccountFailover400PreservesResponseContext(t *testing.T) {
-	body := []byte(`Invalid request`)
+	body := []byte(`{"error":{"code":400,"message":"Invalid request","status":"INVALID_ARGUMENT"}}`)
 	headers := http.Header{"X-Goog-Request-Id": []string{"req-1"}}
 	err := newGeminiAsyncAccountFailover400(body, headers)
 	require.Equal(t, http.StatusBadRequest, err.StatusCode)
 	require.Equal(t, body, err.ResponseBody)
 	require.Equal(t, "req-1", err.ResponseHeaders.Get("X-Goog-Request-Id"))
+	require.Equal(t, "INVALID_ARGUMENT", err.ProviderErrorCode)
+	require.Equal(t, "Invalid request", err.ProviderErrorMessage)
+	require.Equal(t, "req-1", err.UpstreamRequestID)
 	require.Equal(t, NextAccountRetry, err.NextAccountAction)
 	require.Equal(t, GatewayFailureReason("async_image_invalid_request"), err.Reason)
+}
+
+func TestGeminiAsyncUpstreamDiagnosticsRedactsAndBoundsValues(t *testing.T) {
+	body := []byte(`{"error":{"code":400,"message":"prompt or input images could not be processed; api_key=secret-value","status":"INVALID_ARGUMENT"}}`)
+	message, providerCode, requestID := geminiAsyncUpstreamDiagnostics(body, "req-1")
+
+	require.Equal(t, "prompt or input images could not be processed; api_key=***", message)
+	require.Equal(t, "INVALID_ARGUMENT", providerCode)
+	require.Equal(t, "req-1", requestID)
+	require.NotContains(t, message, "secret-value")
 }

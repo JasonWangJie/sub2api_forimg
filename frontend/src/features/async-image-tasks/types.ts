@@ -46,6 +46,7 @@ export interface AsyncImageAccountAttempt {
   account_name?: string | null
   status: string
   status_code?: number | null
+  provider_error_code?: string | null
   upstream_request_id?: string | null
   error?: string | null
   attempted_at: string

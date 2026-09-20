@@ -182,8 +182,58 @@ func TestGeminiForwardAsChatCompletionsAsyncInvalidRequestDoesNotCommitResponse(
 	require.ErrorAs(t, err, &failoverErr)
 	require.Equal(t, http.StatusBadRequest, failoverErr.StatusCode)
 	require.Equal(t, "req-invalid", failoverErr.ResponseHeaders.Get("X-Goog-Request-Id"))
+	require.Equal(t, "Invalid request", failoverErr.ProviderErrorMessage)
 	require.False(t, recorder.Flushed)
 	require.Equal(t, 0, recorder.Body.Len(), "async failover must not write the final client error before account switching")
+}
+
+func TestGeminiForwardAsChatCompletionsAsyncPreservesSafeProviderError(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	httpStub := &geminiCompatHTTPUpstreamStub{response: &http.Response{
+		StatusCode: http.StatusBadRequest,
+		Header:     http.Header{"Content-Type": []string{"application/json"}, "X-Goog-Request-Id": []string{"req-image-limit"}},
+		Body:       io.NopCloser(strings.NewReader(`{"error":{"code":400,"message":"image: at most 8 images are allowed","status":"INVALID_ARGUMENT"}}`)),
+	}}
+	svc := &GeminiMessagesCompatService{httpUpstream: httpStub, cfg: &config.Config{}}
+	account := &Account{ID: 104, Platform: PlatformGemini, Type: AccountTypeAPIKey, Concurrency: 1, Credentials: map[string]any{"api_key": "gemini-api-key"}}
+	body := []byte(`{"model":"gemini-3-pro-image-preview","messages":[{"role":"user","content":"draw a skyline"}]}`)
+	asyncCtx := WithGeminiAsyncImageGeneration(context.Background())
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", bytes.NewReader(body)).WithContext(asyncCtx)
+
+	_, err := svc.ForwardAsChatCompletions(asyncCtx, c, account, body)
+
+	var upstreamErr *GeminiAsyncImageUpstreamError
+	require.ErrorAs(t, err, &upstreamErr)
+	require.Equal(t, http.StatusBadRequest, upstreamErr.StatusCode)
+	require.Equal(t, "INVALID_ARGUMENT", upstreamErr.ProviderErrorCode)
+	require.Equal(t, "image: at most 8 images are allowed", upstreamErr.ProviderErrorMessage)
+	require.Equal(t, "req-image-limit", upstreamErr.UpstreamRequestID)
+	require.Equal(t, http.StatusBadRequest, recorder.Code)
+	require.JSONEq(t, `{"error":{"code":"INVALID_ARGUMENT","message":"image: at most 8 images are allowed","type":"invalid_request_error"}}`, recorder.Body.String())
+}
+
+func TestGeminiForwardAsChatCompletionsSyncKeepsGenericProviderError(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	httpStub := &geminiCompatHTTPUpstreamStub{response: &http.Response{
+		StatusCode: http.StatusBadRequest,
+		Header:     http.Header{"Content-Type": []string{"application/json"}},
+		Body:       io.NopCloser(strings.NewReader(`{"error":{"code":400,"message":"image: at most 8 images are allowed","status":"INVALID_ARGUMENT"}}`)),
+	}}
+	svc := &GeminiMessagesCompatService{httpUpstream: httpStub, cfg: &config.Config{}}
+	account := &Account{ID: 105, Platform: PlatformGemini, Type: AccountTypeAPIKey, Concurrency: 1, Credentials: map[string]any{"api_key": "gemini-api-key"}}
+	body := []byte(`{"model":"gemini-3-pro-image-preview","messages":[{"role":"user","content":"draw a skyline"}]}`)
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", bytes.NewReader(body))
+
+	_, err := svc.ForwardAsChatCompletions(context.Background(), c, account, body)
+
+	require.EqualError(t, err, "Invalid request")
+	require.Equal(t, http.StatusBadRequest, recorder.Code)
+	require.Contains(t, recorder.Body.String(), `"message":"Invalid request"`)
+	require.NotContains(t, recorder.Body.String(), "at most 8 images")
 }
 
 func TestGeminiForwardAsChatCompletions_StreamsOpenAIChunksFromGeminiSSE(t *testing.T) {

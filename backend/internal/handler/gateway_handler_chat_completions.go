@@ -400,10 +400,7 @@ func (h *GatewayHandler) ChatCompletions(c *gin.Context) {
 			var failoverErr *service.UpstreamFailoverError
 			if errors.As(err, &failoverErr) {
 				if asyncImageGeneration {
-					service.RecordAsyncImageAccountAttempt(c.Request.Context(), service.AsyncImageAccountAttempt{
-						AccountID: account.ID, AccountName: account.Name, Status: service.AsyncImageAccountAttemptFailed,
-						StatusCode: failoverErr.StatusCode, UpstreamRequestID: upstreamRequestIDFromFailover(failoverErr), Error: failoverErr.Error(),
-					})
+					service.RecordAsyncImageAccountAttempt(c.Request.Context(), asyncImageFailedAccountAttempt(account, failoverErr))
 				}
 				if c.Writer.Size() != writerSizeBeforeForward {
 					h.handleCCFailoverExhausted(c, failoverErr, true)
@@ -422,9 +419,7 @@ func (h *GatewayHandler) ChatCompletions(c *gin.Context) {
 				}
 			}
 			if asyncImageGeneration {
-				service.RecordAsyncImageAccountAttempt(c.Request.Context(), service.AsyncImageAccountAttempt{
-					AccountID: account.ID, AccountName: account.Name, Status: service.AsyncImageAccountAttemptFailed, Error: err.Error(),
-				})
+				service.RecordAsyncImageAccountAttempt(c.Request.Context(), asyncImageFailedAccountAttempt(account, err))
 			}
 			upstreamErrorAlreadyCommunicated := gatewayForwardErrorAlreadyCommunicated(c, writerSizeBeforeForward, err)
 			wroteFallback := false
@@ -523,6 +518,14 @@ func (h *GatewayHandler) handleCCFailoverExhausted(c *gin.Context, lastErr *serv
 		h.chatCompletionsErrorResponse(c, http.StatusBadGateway, "upstream_error", service.OpenAISilentRefusalClientMessage())
 		return
 	}
+	if lastErr != nil && lastErr.ProviderErrorMessage != "" && c != nil && c.Request != nil && service.IsGeminiAsyncImageGeneration(c.Request.Context()) {
+		errorBody := gin.H{"type": "upstream_error", "message": lastErr.ProviderErrorMessage}
+		if lastErr.ProviderErrorCode != "" {
+			errorBody["code"] = lastErr.ProviderErrorCode
+		}
+		c.JSON(statusCode, gin.H{"error": errorBody})
+		return
+	}
 	message := asyncImageExhaustedMessage(c)
 	h.chatCompletionsErrorResponse(c, statusCode, "server_error", message)
 }
@@ -545,7 +548,13 @@ func asyncImageExhaustedMessage(c *gin.Context) string {
 }
 
 func upstreamRequestIDFromFailover(err *service.UpstreamFailoverError) string {
-	if err == nil || err.ResponseHeaders == nil {
+	if err == nil {
+		return ""
+	}
+	if value := strings.TrimSpace(err.UpstreamRequestID); value != "" {
+		return value
+	}
+	if err.ResponseHeaders == nil {
 		return ""
 	}
 	for _, key := range []string{"x-request-id", "x-goog-request-id", "request-id"} {
@@ -554,4 +563,36 @@ func upstreamRequestIDFromFailover(err *service.UpstreamFailoverError) string {
 		}
 	}
 	return ""
+}
+
+func asyncImageFailedAccountAttempt(account *service.Account, err error) service.AsyncImageAccountAttempt {
+	attempt := service.AsyncImageAccountAttempt{Status: service.AsyncImageAccountAttemptFailed}
+	if account != nil {
+		attempt.AccountID = account.ID
+		attempt.AccountName = account.Name
+	}
+	if err == nil {
+		return attempt
+	}
+	attempt.Error = err.Error()
+	var failoverErr *service.UpstreamFailoverError
+	if errors.As(err, &failoverErr) {
+		attempt.StatusCode = failoverErr.StatusCode
+		attempt.ProviderErrorCode = failoverErr.ProviderErrorCode
+		attempt.UpstreamRequestID = upstreamRequestIDFromFailover(failoverErr)
+		if failoverErr.ProviderErrorMessage != "" {
+			attempt.Error = failoverErr.ProviderErrorMessage
+		}
+		return attempt
+	}
+	var upstreamErr *service.GeminiAsyncImageUpstreamError
+	if errors.As(err, &upstreamErr) {
+		attempt.StatusCode = upstreamErr.StatusCode
+		attempt.ProviderErrorCode = upstreamErr.ProviderErrorCode
+		attempt.UpstreamRequestID = upstreamErr.UpstreamRequestID
+		if upstreamErr.ProviderErrorMessage != "" {
+			attempt.Error = upstreamErr.ProviderErrorMessage
+		}
+	}
+	return attempt
 }
