@@ -1,5 +1,43 @@
 # AI 交接文档
 
+## 2026-09-20 异步 Gemini 错误诊断持久化交接
+
+- 已完成本地代码：异步 Gemini Worker 私有路径会保留经 `logredact` 脱敏、空白归一化和限长后的上游 `error.message`，并提取 provider code（优先 `error.status`）与 request ID；同步 Chat Completions 的客户端错误仍保持通用文案。
+- 普通映射错误通过 `GeminiAsyncImageUpstreamError` 携带诊断；账号切换错误通过 `UpstreamFailoverError.ProviderErrorCode`、`ProviderErrorMessage`、`UpstreamRequestID` 携带。换号耗尽时仅异步上下文把安全 message/code 写回内部 recorder，避免再次退化为 `All available accounts exhausted`。
+- `AsyncImageAccountAttempt` 的既有 JSONB 新增 `provider_error_code`，无需迁移；失败尝试保存 message/code/request ID，仓储现有逻辑会将 request ID 提升到任务顶层。Worker 最终错误文案因此可命中 611（超过 8 图）、612（缺少/未检测到参考图）、613（输入无法处理）。管理员详情和前端尝试历史可查看 provider code，用户接口继续隐藏整个尝试审计。
+- 验证结果：本次定向 Service/Handler 用例通过；完整 Handler 包通过；Service 包排除既有外部 OpenAI token 对照测试后通过，未排除时仅该测试的三个外部 API 子用例失败；前端 `pnpm typecheck`、`git diff --check` 和三份记录的 Markdown 本地链接检查通过。未做真实 Gemini、数据库、浏览器、生产部署或重启。
+- 当前快照：`main@defccfacba610450ac5f9fd06e0f54c2f25fbb7a`，describe `v0.1.173.49-1-gdefccfa-dirty`，VERSION `0.1.173.49`。保留用户原有两份 `wiki-new/` 修改及四份未跟踪迁移文档；不要误删、覆盖或写成本轮产物。
+- 下一步仍是账号级参考图上限与候选路由过滤；生产上线须另行明确授权。部署后应新建 611/612/613 三类真实失败样本，核对任务 `error_message`、`upstream_request_id`、`account_attempts.provider_error_code` 和公共查询整数码，历史任务不会自动回填。
+
+## 2026-09-20 Gemini 异步 400 生产诊断交接
+
+- 用户明确授权只读登录 `40.160.139.185` 查看异步生图日志。生产 `sub2api` 在会话结束时仍为 `active`，二进制 `0.1.173.49`、commit `52b0cf537f2e091506d52d72692195f6720088d6`；本轮未改服务器文件、配置、数据库或服务，未部署、重启或重放任务，登录口令不得写入仓库。
+- 过去 24 小时的滚动快照先得到 Gemini `succeeded=4739`、`failed=485`、`execution_unknown=4`、`invoking=2`；485 个失败均为内部 `upstream_failed` 和 `上游生图失败（HTTP 400）：Invalid request`。查询继续运行时失败增至 486，故数字只能作为 `2026-09-20 19:37–19:43`（Asia/Shanghai）的动态快照。
+- 参考图数是当前最强的根因信号：`<=8` 参考图成功 4675/失败 150，`>8` 成功 64/失败 336（失败率 84.0%）。账号 1/25 的 `>8` 样本全部失败（125/186），账号 33 成功 64、失败 25。生产 `max_reference_images=16`，而本地模型表允许 `gemini-3-pro-image-preview` 14 张；当前路由没有账号级参考图能力，导致 9–14 张请求会落到实际只支持更低上限的账号。
+- 不要把 `Invalid request` 当作已确认的上游原文。部署版本在 `writeGeminiChatCompletionsMappedError` 前能提取 `upstreamMsg`，但 `mapGeminiErrorBodyToClaudeError` 故意不给 mapped message 赋原始值，400 再回退为固定 `Invalid request`；Worker 最终以 `upstream_failed` 兜底。原始 body 日志未启用、内部异步请求没有 `ops_error_logs` 行、失败终态已清空 `request_payload`，历史具体原文不能补查。
+- 修复方向分两层：第一层的异步 message/provider code/request ID 持久化已在本地完成（见上节），尚未部署；第二层账号参考图上限仍待实现。若要止血可把全局上限降到 8，但会牺牲账号 33 已证实存在的 9–12 张成功能力，必须由用户明确选择并授权修改。
+- 本地实际基线仍为 `main@defccfacba610450ac5f9fd06e0f54c2f25fbb7a`，describe `v0.1.173.49-1-gdefccfa-dirty`，VERSION `0.1.173.49`；工作树保留此前三份记录修改和四份未跟踪迁移文档，本轮只继续修改 `readmenew.md`、`开发台账.md`、`agent.md`。详见 [开发台账.md](开发台账.md)。
+- 完成前 `git diff --check` 与三份记录的 Markdown 本地链接检查均通过；未运行代码测试、CI 或真实上游重放。
+
+## 2026-09-16 PostgreSQL 远程连接排查交接
+
+- 用户明确授权只读登录 `40.160.139.185` 诊断；本轮未改生产配置/权限/数据，未部署或重启。不要记录登录口令，也不要把该服务器与历史 `108.186.246.14` 的授权或运行状态混用。
+- 当前证据：宝塔 PostgreSQL 18.0，进程 `/www/server/pgsql/bin/postgres -D /www/server/pgsql/data`，实际仅监听 `127.0.0.1:25432`。文件 `postgresql.conf` 第 60 行 `listen_addresses='*'`，第 896 行 `port=25432`；`pg_settings.listen_addresses=localhost` 且 `pending_restart=true`，`pg_file_settings` 显示 `*` 未应用。配置于 2026-09-16 12:56 UTC 修改，服务自 2026-09-07 06:14 UTC 启动，reload 不能让监听地址生效。
+- UFW 已放行 TCP 5432/25432，HBA 有 IPv4 远程密码认证规则且无解析错误；本机 22 可达，5432/25432 均连接被拒绝。默认 5432 不适用；SSH root 账号不是数据库登录角色，现有可登录角色为 postgres/sub2api/newapi，应使用用户原数据库账号。
+- 重启方案已核对：宝塔 `/etc/init.d/pgsql` 管理该实例；若用户明确要求，可用 `runuser -u postgres -- /www/server/pgsql/bin/pg_ctl -D /www/server/pgsql/data -m fast -w restart`，使现有监听配置生效，不改端口、HBA、密码或业务数据。会短暂断开数据库连接；随后核对 `ss`、`pg_settings.pending_restart`、本机 PostgreSQL 协议和用户账号登录、应用重连。该命令本轮未执行，不能宣称公网数据库已恢复。
+- 当前实际本地快照：`main`；完整 HEAD=`defccfacba610450ac5f9fd06e0f54c2f25fbb7a`；status=`## main...origin/main`加三份记录修改/四份既有迁移文档未跟踪；describe=`v0.1.173.49-1-gdefccfa-dirty`；VERSION=`0.1.173.49`。本轮仅增补三份记录，保留既有文档；[开发台账.md](开发台账.md) 记录命令、授权及未完成项。
+- 日志再次确认监听参数必须重启；本地 `git diff --check` 和本轮新增文档链接检查通过。SSH 会话已退出，未保留数据库隧道；生产恢复仍待重启及后续实测，不能把只读诊断写成修复完成。
+
+## 2026-09-16 new-api 图片迁移开发包交接
+
+- 用户本轮要求提取本项目图片相关功能说明/方案，交给 Codex 在 new-api 网关重新开发；范围为文档生成到来源项目根目录。本轮已生成四份自包含开发文档，未在目标仓库开发，不能把文档交付写成 new-api 功能已实现。
+- 入口：[newapi图片功能Codex开发任务书.md](newapi图片功能Codex开发任务书.md)，配套：[总纲](newapi图片功能迁移开发总纲.md)、[API兼容规范](newapi异步生图API兼容规范.md)、[页面/图库/广场规格](newapi图片页面与图库广场功能规格.md)。一起复制到目标根目录即可使用；可选源码索引不是目标必需依赖。
+- 提取依据当前源码和迁移，已纠正旧 SC pending/completed/code-data 包装、固定 24 小时签名、本机/服务端图库混淆、默认自动归档、存储切换阻断等过时描述。管理员参考图 URL 保持仅详情；个人图库仅本机实时 Blob，异步结果默认只在任务系统；unknown 不自动重新生成。
+- 目标 `F:/Code/Git/new-api` 只读 SHA=`69a50029819a26c53e6babd276d49cfe2f8880ad`、干净；实际使用 Token、字符串分组、Channel、GORM 三数据库、React/Rsbuild/Bun。最大迁移点是具体产物存储和跨重启持久账务，不能只复用内存 BillingSession 或直接拷贝 PostgreSQL SQL/Vue。
+- 当前实际基线：`main`；完整 HEAD=`defccfacba610450ac5f9fd06e0f54c2f25fbb7a`；status为`## main...origin/main`加三份记录修改/四份新增文档；describe=`v0.1.173.49-1-gdefccfa-dirty`；VERSION=`0.1.173.49`。提取前工作树干净，本轮未提交、未改代码。
+- 已检查：4份文档/16个合法JSON示例/65个源码与专题路径、开发包12个内部配套链接和三记录12个新增链接均通过；开发包可独立转交，无可点击文件链接越出四份文档。代码围栏/尾随空格/末尾换行与`git diff --check`通过。未做代码测试、真实三数据库/Redis/OSS/上游/浏览器/CI，未连接、修改、部署或重启生产。
+- 下一步如用户要求在 new-api 开发，先转到用户指定目标checkout、读取其适用 AGENTS.md和实际Git状态，再按任务书实施。源仓库与目标仓库的状态/验证/生产授权独立记录，不能把本轮只读核对当目标代码验收。
+
 ## 2026-09-15 异步任务参考图 URL 交接
 
 - 迁移 `226_ZJ_async_image_reference_urls.sql` 为 `async_image_tasks.reference_image_urls` 增加非空 JSONB 空数组默认值；只对新版任务写入远程 HTTP(S) URL，历史任务不回填，内联 `data:` 图片不重复持久化。

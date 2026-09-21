@@ -93,6 +93,7 @@ export default {
       attemptedAt: '尝试时间',
       attemptStatus: '尝试状态',
       httpStatus: 'HTTP 状态码',
+      providerErrorCode: '上游错误码',
       failureReason: '失败原因',
       error: '任务错误',
       results: '生成图片',

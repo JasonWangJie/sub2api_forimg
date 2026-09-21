@@ -420,6 +420,7 @@
                     <th class="whitespace-nowrap px-4 py-2 font-medium">{{ t('asyncImageTasks.detail.attemptedAt') }}</th>
                     <th class="whitespace-nowrap px-4 py-2 font-medium">{{ t('asyncImageTasks.detail.attemptStatus') }}</th>
                     <th class="whitespace-nowrap px-4 py-2 font-medium">{{ t('asyncImageTasks.detail.httpStatus') }}</th>
+                    <th class="whitespace-nowrap px-4 py-2 font-medium">{{ t('asyncImageTasks.detail.providerErrorCode') }}</th>
                     <th class="whitespace-nowrap px-4 py-2 font-medium">{{ t('asyncImageTasks.detail.account') }}</th>
                     <th class="whitespace-nowrap px-4 py-2 font-medium">{{ t('asyncImageTasks.detail.upstreamRequestId') }}</th>
                     <th class="min-w-[220px] px-4 py-2 font-medium">{{ t('asyncImageTasks.detail.failureReason') }}</th>
@@ -432,6 +433,7 @@
                       <span :class="statusBadgeClass(attempt.status)">{{ attemptStatusLabel(attempt.status) }}</span>
                     </td>
                     <td class="whitespace-nowrap px-4 py-3 font-mono text-gray-600 dark:text-gray-300">{{ attempt.status_code ?? '-' }}</td>
+                    <td class="max-w-[180px] break-all px-4 py-3 font-mono text-[11px] text-gray-600 dark:text-gray-300">{{ attempt.provider_error_code || '-' }}</td>
                     <td class="max-w-[180px] px-4 py-3 text-gray-700 dark:text-gray-200">
                       <div class="truncate" :title="attempt.account_name || idFallback(attempt.account_id)">{{ attempt.account_name || idFallback(attempt.account_id) }}</div>
                       <div class="mt-0.5 font-mono text-[11px] text-gray-400">#{{ attempt.account_id }}</div>

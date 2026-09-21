@@ -428,7 +428,7 @@ func TestAsyncImageTaskCenterAccountAuditIsAdminOnlyAndRedacted(t *testing.T) {
 		UpstreamRequestID:    stringPointerForAsyncImageTaskTest("upstream-task-full"),
 		ReconciliationStatus: "confirmed_failure",
 		AccountAttempts: json.RawMessage(`[
-			{"account_id":8,"account_name":"prod-account","status":"failed","status_code":429,"upstream_request_id":"upstream-attempt-1","error":"{\"authorization\":\"Bearer secret-token\",\"api-key\":\"raw-api-key\"}","attempted_at":"2026-08-25T00:00:00Z"},
+			{"account_id":8,"account_name":"prod-account","status":"failed","status_code":429,"provider_error_code":"RESOURCE_EXHAUSTED","upstream_request_id":"upstream-attempt-1","error":"{\"authorization\":\"Bearer secret-token\",\"api-key\":\"raw-api-key\"}","attempted_at":"2026-08-25T00:00:00Z"},
 			{"account_id":9,"account_name":"backup-account","status":"succeeded","status_code":200,"upstream_request_id":"upstream-attempt-2","attempted_at":"2026-08-25T00:00:01Z"}
 		]`),
 		AttemptedAccountIDs: json.RawMessage(`[9,8,8]`),
@@ -457,6 +457,7 @@ func TestAsyncImageTaskCenterAccountAuditIsAdminOnlyAndRedacted(t *testing.T) {
 	require.NotContains(t, adminRecorder.Body.String(), "secret-token")
 	require.NotContains(t, adminRecorder.Body.String(), "raw-api-key")
 	require.Contains(t, adminRecorder.Body.String(), "prod-account")
+	require.Contains(t, adminRecorder.Body.String(), "RESOURCE_EXHAUSTED")
 	require.Contains(t, adminRecorder.Body.String(), "upstream-attempt-1")
 
 	userRouter := gin.New()
@@ -476,6 +477,7 @@ func TestAsyncImageTaskCenterAccountAuditIsAdminOnlyAndRedacted(t *testing.T) {
 	require.NotContains(t, userBody, "last_failure_reason")
 	require.NotContains(t, userBody, "upstream-task-full")
 	require.NotContains(t, userBody, "prod-account")
+	require.NotContains(t, userBody, "RESOURCE_EXHAUSTED")
 }
 
 func TestAsyncImageTaskCenterAdminResumeRejectsNonPostProcessingState(t *testing.T) {

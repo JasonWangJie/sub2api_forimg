@@ -23,6 +23,22 @@ func TestMergeAsyncImageAccountAttemptsKeepsHistoryAndDistinctIDs(t *testing.T) 
 	require.Equal(t, []int64{2, 7}, attemptedIDs)
 }
 
+func TestAsyncImageAccountAttemptJSONPreservesProviderDiagnostics(t *testing.T) {
+	attempt := AsyncImageAccountAttempt{
+		AccountID: 7, Status: AsyncImageAccountAttemptFailed, StatusCode: 400,
+		ProviderErrorCode: "INVALID_ARGUMENT", UpstreamRequestID: "req-1",
+		Error: "image: at most 8 images are allowed", AttemptedAt: time.Now().UTC(),
+	}
+	encoded, err := json.Marshal(attempt)
+	require.NoError(t, err)
+
+	var decoded AsyncImageAccountAttempt
+	require.NoError(t, json.Unmarshal(encoded, &decoded))
+	require.Equal(t, attempt.ProviderErrorCode, decoded.ProviderErrorCode)
+	require.Equal(t, attempt.UpstreamRequestID, decoded.UpstreamRequestID)
+	require.Equal(t, attempt.Error, decoded.Error)
+}
+
 func TestAsyncImageAttemptContextCopiesExcludedAccounts(t *testing.T) {
 	ctx := WithAsyncImageExcludedAccountIDs(context.Background(), map[int64]struct{}{7: {}})
 	ids := AsyncImageExcludedAccountIDs(ctx)

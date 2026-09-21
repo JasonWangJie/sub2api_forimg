@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/service"
+	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
 )
 
@@ -180,6 +181,66 @@ func TestFormatAsyncImageUpstreamFailureUsesChinesePrefix(t *testing.T) {
 
 	empty := formatAsyncImageUpstreamFailure(0, nil)
 	require.Equal(t, "上游生图失败：网关无有效响应（no upstream error body）", empty)
+
+	classificationTests := []struct {
+		message string
+		want    int
+	}{
+		{message: "image: at most 8 images are allowed", want: 611},
+		{message: "please upload the reference image", want: 612},
+		{message: "prompt or input images could not be processed", want: 613},
+	}
+	for _, test := range classificationTests {
+		classified := formatAsyncImageUpstreamFailure(http.StatusBadRequest, []byte(`{"error":{"code":"INVALID_ARGUMENT","message":"`+test.message+`"}}`))
+		code := "upstream_failed"
+		require.Equal(t, test.want, asyncImageFailureBusinessCode(&service.AsyncImageTask{ErrorCode: &code, ErrorMessage: &classified}))
+	}
+}
+
+func TestHandleCCFailoverExhaustedAsyncGeminiPreservesProviderDiagnostics(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	ctx := service.WithGeminiAsyncImageGeneration(context.Background())
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil).WithContext(ctx)
+
+	(&GatewayHandler{}).handleCCFailoverExhausted(c, &service.UpstreamFailoverError{
+		StatusCode:           http.StatusBadRequest,
+		ProviderErrorCode:    "INVALID_ARGUMENT",
+		ProviderErrorMessage: "prompt or input images could not be processed",
+	}, false)
+
+	require.Equal(t, http.StatusBadRequest, recorder.Code)
+	require.JSONEq(t, `{"error":{"code":"INVALID_ARGUMENT","message":"prompt or input images could not be processed","type":"upstream_error"}}`, recorder.Body.String())
+	message := formatAsyncImageUpstreamFailure(recorder.Code, recorder.Body.Bytes())
+	code := "upstream_failed"
+	require.Equal(t, 613, asyncImageFailureBusinessCode(&service.AsyncImageTask{ErrorCode: &code, ErrorMessage: &message}))
+}
+
+func TestAsyncImageFailedAccountAttemptPreservesProviderDiagnostics(t *testing.T) {
+	account := &service.Account{ID: 23, Name: "gemini-image"}
+	attempt := asyncImageFailedAccountAttempt(account, &service.GeminiAsyncImageUpstreamError{
+		StatusCode:           http.StatusBadRequest,
+		ProviderErrorCode:    "INVALID_ARGUMENT",
+		ProviderErrorMessage: "image: at most 8 images are allowed",
+		UpstreamRequestID:    "req-23",
+	})
+
+	require.Equal(t, int64(23), attempt.AccountID)
+	require.Equal(t, http.StatusBadRequest, attempt.StatusCode)
+	require.Equal(t, "INVALID_ARGUMENT", attempt.ProviderErrorCode)
+	require.Equal(t, "image: at most 8 images are allowed", attempt.Error)
+	require.Equal(t, "req-23", attempt.UpstreamRequestID)
+
+	failoverAttempt := asyncImageFailedAccountAttempt(account, &service.UpstreamFailoverError{
+		StatusCode:           http.StatusBadRequest,
+		ProviderErrorCode:    "INVALID_ARGUMENT",
+		ProviderErrorMessage: "Invalid request",
+		UpstreamRequestID:    "req-failover",
+	})
+	require.Equal(t, "INVALID_ARGUMENT", failoverAttempt.ProviderErrorCode)
+	require.Equal(t, "Invalid request", failoverAttempt.Error)
+	require.Equal(t, "req-failover", failoverAttempt.UpstreamRequestID)
 }
 
 func TestShouldFallbackHybridReferenceTransportToLocal(t *testing.T) {

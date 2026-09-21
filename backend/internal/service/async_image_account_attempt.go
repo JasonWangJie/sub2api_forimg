@@ -15,6 +15,7 @@ type AsyncImageAccountAttempt struct {
 	AccountName       string    `json:"account_name,omitempty"`
 	Status            string    `json:"status"`
 	StatusCode        int       `json:"status_code,omitempty"`
+	ProviderErrorCode string    `json:"provider_error_code,omitempty"`
 	UpstreamRequestID string    `json:"upstream_request_id,omitempty"`
 	Error             string    `json:"error,omitempty"`
 	AttemptedAt       time.Time `json:"attempted_at"`
