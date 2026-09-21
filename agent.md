@@ -358,3 +358,21 @@ Get-Content backend\cmd\server\VERSION
 - 本次只改布局，不改 `editImageSizePoolDraft`、`parseImageSizePoolInput`、`toImageSizePoolPayload` 或后端账号池接口；保存后的账号 ID/priority 行为保持不变。
 - 验证已通过：分组图片账号池/图片定价/异步生图测试 `14/14`、`pnpm typecheck`、`pnpm eslint src/views/admin/GroupsView.vue`、`git diff --check`。
 - 当前基线：HEAD `0ea8f5195ff64e6acecb3d131d68eac8553f203b`，`git describe --tags --always --dirty`=`v0.1.173.40-dirty`，VERSION=`0.1.173.38`；分支 `main`，相对 `origin/main` 落后 1 个提交；未部署或重启生产。
+
+## 2026-09-16 当前交接：OVH TCP 代理兜底
+
+- 生产主机 `40.160.139.185` 已新增 `sing-box-reality.service`：sing-box `1.14.1`、VLESS + REALITY、TCP `8443`；配置 `/etc/sing-box/reality.json`。不要覆盖既有未启用的 `/etc/sing-box/config.json`，它是另一份 Shadowsocks `8080` 配置。
+- 原 Hysteria2 UDP `36712` 与 Salamander UDP `8443` 服务仍为 active；Nginx TCP/UDP `443` 未改。订阅 `http://40.160.139.185:9900/hy2.yaml` 把 `美西-TCP-Reality` 放在 `PROXY` 第一位。
+- 生产备份和部署前快照在 `/root/hysteria-backups/20260916-ovh-tcp-reality/`。如回退，只处理新增的 `sing-box-reality.service`、`/etc/sing-box/reality.json`、UFW `8443/tcp`，并恢复该目录内的 `hy2.yaml.before-tcp`；不要停原 Hysteria2 或改 Nginx。
+- BBR 已启用；本轮把运行中的 `ens3` 根队列从 `pfifo_fast` 切到 `fq`，系统默认值原本已是 `fq`，没有重启。服务器已有待重启内核提示，本轮没有为此重启生产。
+- 实际链路验证：当前国内网络经本机 Mihomo 成功连接 TCP Reality，出口为 `40.160.139.185`；连续 5 次 HTTPS 成功，4 路并发约 `0.70 MB/s`。TCP 解决的是 UDP/QUIC 易被 OVH 边缘策略或跨境链路干扰的问题，不会把普通 OVH 直连线路变成机场的优化回国线路。
+- 下一步先让用户刷新订阅并明确选择 `美西-TCP-Reality`，再用手机 5G 测稳定性；若仍要求多 MB/s，优先评估带 CN2/GIA/CMIN2/9929 等优化路由的落地或中转，而不是继续提高 Hysteria 带宽参数。OVH 控制台需人工确认 Network Security Dashboard 的 `Mitigation: Automatic/Forced`。
+- 仓库基线：`git status --short --branch` 为 `## main...origin/main` 加三份交接文档修改；HEAD `52b0cf537f2e091506d52d72692195f6720088d6`，`git describe --tags --always --dirty`=`v0.1.173.49-dirty`，VERSION `0.1.173.48`；未改业务代码、未运行项目测试、未发布 sub2api。
+
+### 2026-09-16 TCP 小幅调优后续交接
+
+- 新增生产 `/etc/sysctl.d/99-zz-proxy-tcp-tuning.conf` 并已生效：core 收发上限 32 MiB、TCP 自动发送上限 32 MiB，MTU probing=1，slow_start_after_idle=0；BBR/fq 不变。仅提高缓冲上限，主机级生效；没有节点/订阅变更或服务重启。
+- 调整前后一个 10 MB 样本从 60 秒超时约 156337 B/s 到完整 35.73 秒约 279873 B/s；5 次 HTTPS 成功，但随后下载出现一次 Reality 握手超时，重试下载仍偏慢。必须保留这条运行边界：配置生效不等于持续提速已验收；不要承诺用户手机 4 MB/s 会翻倍。
+- 客户端接收窗口限制和跨境重传仍存在；不要盲目提高初始拥塞窗口、关闭安全重试或安装 TCP Brutal 内核模块。优先让用户断开重连 TCP 节点，在同一手机/下载源复测。
+- 回退目录 `/root/hysteria-backups/20260916-tcp-buffer-tune/`。如手机表现变差，经用户指示将新增 sysctl 文件移至该备份目录禁用，再 `sysctl -p /root/hysteria-backups/20260916-tcp-buffer-tune/sysctl.before.conf`；不用重启代理。
+- 仓库仍为上述完整 SHA `52b0cf537f2e091506d52d72692195f6720088d6`、`v0.1.173.49-dirty`、VERSION `0.1.173.48`，`main...origin/main` 加三份交接文档修改；未运行项目测试、未提交/发布业务代码。

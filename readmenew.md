@@ -545,3 +545,21 @@ pnpm run dev
 - 分组生图编辑区域的 1K、2K、4K 账号池改为单列纵向排列，每个清晰度独占一行，避免在宽屏下挤在同一排。
 - 仅调整 `GroupsView.vue` 的展示类名，账号池输入格式、优先级解析、保存接口和其他图片定价字段保持不变。
 - 已通过分组图片账号池/图片定价/异步生图相关前端测试 `14/14`、`pnpm typecheck`、`GroupsView.vue` ESLint 和 `git diff --check`；未执行生产部署或重启。
+
+## 2026-09-16 OVH 代理链路 TCP 兜底与队列优化
+
+- 已按用户明确授权修改生产主机 `40.160.139.185`：保留 Hysteria2 UDP `36712` 和 UDP `8443`，新增 sing-box `1.14.1` 的 VLESS + REALITY TCP `8443`；TCP/UDP 可在同一端口号并存，未占用或修改 Nginx TCP/UDP `443`。
+- 订阅 `http://40.160.139.185:9900/hy2.yaml` 已新增并优先选择 `美西-TCP-Reality`，原两个 Hysteria2 节点仍作为回退；服务配置为 `/etc/sing-box/reality.json`，独立单元为 `sing-box-reality.service`，现为 enabled/active。
+- OVH 官方资料显示其 Edge Network Firewall 会在网络边缘丢弃 QUIC，VAC/缓解也会自动介入且不能完全关闭；这与 Hysteria2（QUIC/UDP）短时连通后无流量断线的现象一致，但当前是否处于 `Mitigation: Forced` 仍须在 OVH Network Security Dashboard 确认。
+- 服务器已启用 BBR 和默认 `fq`，但运行中的 `ens3` 仍是 `pfifo_fast`；本轮已实时切换为 `fq`，没有重启服务器。订阅备份和部署前快照位于 `/root/hysteria-backups/20260916-ovh-tcp-reality/`。
+- 验证范围：sing-box 配置检查、systemd 单元检查、TCP `8443` 外部连通、UFW TCP/UDP `8443`、订阅 SHA-256 与 Mihomo 配置解析均通过；从当前国内网络使用 Mihomo 完成真实代理转发，出口为该 OVH IP，连续 5 次 HTTPS 请求成功。10 MB 单连接约 `263295 B/s`，4 路并发 20 MB 在切换 `fq` 后约 `695299 B/s`，说明 TCP 稳定性可用但直连中美路由仍限制吞吐。
+- 本轮未重启服务器、未修改网站/Nginx、未在用户手机 5G 上实测，也未确认 OVH 控制台实时清洗状态；要达到机场多 MB/s，通常仍需更好的回国线路或中转节点，单靠协议参数无法补齐路由质量差距。
+- 仓库实际基线：`git status --short --branch` 为 `## main...origin/main` 加 `agent.md`、`readmenew.md`、`开发台账.md` 三份文档修改；HEAD `52b0cf537f2e091506d52d72692195f6720088d6`，`git describe --tags --always --dirty`=`v0.1.173.49-dirty`，VERSION `0.1.173.48`；没有修改业务代码。
+
+### 2026-09-16 TCP 缓冲与 MTU 容错优化
+
+- 按用户再次授权，仅调整 `40.160.139.185` 的系统网络配置：`tcp_wmem` 自动发送缓冲上限从 4 MiB 提至 32 MiB，core 收发缓冲上限从 16 MiB 提至 32 MiB；min/default 保持不变，按需分配；`tcp_mtu_probing=1`（仅检测到黑洞时探测），`tcp_slow_start_after_idle=0`。这些为主机级参数，不限于代理进程。
+- 已写入 `/etc/sysctl.d/99-zz-proxy-tcp-tuning.conf` 并定向加载，BBR/fq 保持不变；没有修改订阅、Reality 配置、网站或防火墙，没有重启服务器或代理服务。
+- 下载采样显示跨境链路存在重传和客户端接收窗口限制，fq 队列无丢包；提高发送缓冲上限是给更高速长 RTT 连接留余量，不是已证实的当前瓶颈修复。
+- 同源单连接基线 60 秒超时（接收 9381120 字节，约 156337 B/s）；调整后一次完整 10 MB 下载为 279873 B/s / 35.73 秒。随后 5 次 HTTPS 成功，但另一下载出现握手超时，5 MB 重试也在 45 秒超时；不能将一次较快样本宣称为稳定提升，用户手机反馈的约 4 MB/s 尚待重新连接后复测。
+- 回退快照为 `/root/hysteria-backups/20260916-tcp-buffer-tune/sysctl.before.conf`；禁用本轮新增 sysctl 文件后定向加载该快照即可恢复。三份交接文档已同步，Git SHA/describe/VERSION 与上述基线一致；未改业务代码、未运行项目测试、未提交或发布 sub2api。
