@@ -171,7 +171,13 @@ describe('AsyncImageTasksView current-page termination', () => {
     expect(wrapper.find('[data-test="batch-terminate-current-page"]').exists()).toBe(false)
   })
 
-  it('shows persisted reference image URLs only in the admin detail and opens them in a new window', async () => {
+  it('shows persisted reference image URLs only in the admin detail, copies on link click, and opens via the icon', async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined)
+    Object.defineProperty(navigator, 'clipboard', {
+      configurable: true,
+      value: { writeText },
+    })
+
     const wrapper = mountView(true)
     await flushPromises()
 
@@ -180,9 +186,57 @@ describe('AsyncImageTasksView current-page termination', () => {
 
     const link = wrapper.get('[data-test="reference-image-link"]')
     expect(link.text()).toContain('https://cdn.example/reference.png?token=abc')
-    expect(link.attributes('href')).toBe('https://cdn.example/reference.png?token=abc')
-    expect(link.attributes('target')).toBe('_blank')
-    expect(link.attributes('rel')).toBe('noopener noreferrer')
+    expect(link.element.tagName).toBe('BUTTON')
+
+    await link.trigger('click')
+    await flushPromises()
+    expect(writeText).toHaveBeenCalledWith('https://cdn.example/reference.png?token=abc')
+    expect(mocks.showSuccess).toHaveBeenCalledWith('common.copied')
+
+    await wrapper.get('[data-test="copy-all-reference-images"]').trigger('click')
+    await flushPromises()
+    expect(writeText).toHaveBeenCalledWith('https://cdn.example/reference.png?token=abc')
+
+    const openLink = wrapper.get('[data-test="open-reference-image"]')
+    expect(openLink.attributes('href')).toBe('https://cdn.example/reference.png?token=abc')
+    expect(openLink.attributes('target')).toBe('_blank')
+    expect(openLink.attributes('rel')).toBe('noopener noreferrer')
+  })
+
+  it('copies all reference image URLs one per line', async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined)
+    Object.defineProperty(navigator, 'clipboard', {
+      configurable: true,
+      value: { writeText },
+    })
+    mocks.get.mockResolvedValue({
+      id: 'asyncimg_queued',
+      task_id: 'asyncimg_queued',
+      platform: 'openai',
+      request_type: 'image_to_image',
+      model: 'gpt-image-1',
+      status: 'queued',
+      created_at: '2026-09-09T00:00:00Z',
+      reference_image_urls: [
+        'https://cdn.example/a.png?token=1',
+        'https://cdn.example/b.png?token=2',
+      ],
+      results: [],
+      events: [],
+    })
+
+    const wrapper = mountView(true)
+    await flushPromises()
+    await wrapper.findAll('[data-test="view-task"]')[0].trigger('click')
+    await flushPromises()
+
+    await wrapper.get('[data-test="copy-all-reference-images"]').trigger('click')
+    await flushPromises()
+
+    expect(writeText).toHaveBeenCalledWith(
+      'https://cdn.example/a.png?token=1\nhttps://cdn.example/b.png?token=2',
+    )
+    expect(mocks.showSuccess).toHaveBeenCalledWith('common.copied')
   })
 
   it('does not render reference image URLs in the user detail', async () => {
@@ -193,5 +247,6 @@ describe('AsyncImageTasksView current-page termination', () => {
     await flushPromises()
 
     expect(wrapper.find('[data-test="reference-image-link"]').exists()).toBe(false)
+    expect(wrapper.find('[data-test="copy-all-reference-images"]').exists()).toBe(false)
   })
 })

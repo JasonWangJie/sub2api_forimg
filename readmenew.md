@@ -1,5 +1,12 @@
 # Sub2API Fork 二次开发总览
 
+## 2026-09-21 异步任务详情参考图一键复制
+
+- 管理端异步生图任务详情（`/admin/async-image-tasks` 与共用组件的 `/async-image-tasks`）参考图区块新增「一键复制所有」：按行复制全部参考图 URL。
+- 点击参考图链接文本改为复制该条 URL；右侧外链图标负责在新窗口打开。用户详情仍不展示参考图 URL（后端也不返回）。
+- 验证：`pnpm exec vitest run src/features/async-image-tasks/__tests__/AsyncImageTasksView.spec.ts` 5 通过；`git diff --check` 通过。未做浏览器手测、未部署生产。
+- 当前实际快照：`main`；HEAD=`5229bc189f1d5b999b18e52dc952c0a13103764c`（工作树 dirty）；`git describe`=`v0.1.173.50-5-g5229bc1-dirty`；VERSION=`0.1.173.50`。
+
 ## 2026-09-21 本地交接文档提交并合并 origin/main
 
 - 已提交此前未入库的 OVH TCP 兜底与 sysctl 调优交接记录（`agent.md`、`readmenew.md`、`开发台账.md`）。

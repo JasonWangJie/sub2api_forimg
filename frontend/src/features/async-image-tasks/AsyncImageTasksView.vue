@@ -319,22 +319,50 @@
               </div>
               <p v-if="detail.prompt_summary" class="mt-2 max-w-3xl text-sm leading-6 text-gray-500 dark:text-gray-400">{{ detail.prompt_summary }}</p>
               <div v-if="admin && referenceImageLinks.length" class="mt-3 max-w-3xl">
-                <p class="text-xs font-medium text-gray-500 dark:text-gray-400">{{ t('asyncImageTasks.detail.referenceImages') }}</p>
+                <div class="flex flex-wrap items-center justify-between gap-2">
+                  <p class="text-xs font-medium text-gray-500 dark:text-gray-400">{{ t('asyncImageTasks.detail.referenceImages') }}</p>
+                  <button
+                    type="button"
+                    class="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium text-primary-600 transition-colors hover:bg-primary-50 hover:text-primary-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-500 dark:text-primary-400 dark:hover:bg-primary-950/30 dark:hover:text-primary-300"
+                    data-test="copy-all-reference-images"
+                    :title="t('asyncImageTasks.detail.copyAllReferenceImages')"
+                    :aria-label="t('asyncImageTasks.detail.copyAllReferenceImages')"
+                    @click="copyAllReferenceImages"
+                  >
+                    <Icon name="copy" size="sm" />
+                    {{ t('asyncImageTasks.detail.copyAllReferenceImages') }}
+                  </button>
+                </div>
                 <div class="mt-2 space-y-2">
-                  <a
+                  <div
                     v-for="(reference, index) in referenceImageLinks"
                     :key="`${reference.url}-${index}`"
-                    :href="reference.href"
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    class="group flex min-w-0 items-start gap-2 rounded-md border border-gray-200 bg-gray-50 px-3 py-2 text-primary-600 transition-colors hover:border-primary-300 hover:bg-primary-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-500 dark:border-dark-700 dark:bg-dark-900/70 dark:text-primary-400 dark:hover:border-primary-700 dark:hover:bg-primary-950/20"
-                    :aria-label="t('asyncImageTasks.detail.openReferenceImage', { index: index + 1 })"
-                    data-test="reference-image-link"
+                    class="flex min-w-0 items-start gap-2 rounded-md border border-gray-200 bg-gray-50 px-3 py-2 dark:border-dark-700 dark:bg-dark-900/70"
+                    data-test="reference-image-row"
                   >
-                    <span class="shrink-0 text-xs font-medium">{{ t('asyncImageTasks.detail.referenceImage', { index: index + 1 }) }}</span>
-                    <span class="min-w-0 flex-1 break-all font-mono text-xs leading-5 text-gray-600 group-hover:text-primary-700 dark:text-gray-300 dark:group-hover:text-primary-300">{{ reference.url }}</span>
-                    <Icon name="externalLink" size="sm" class="mt-0.5 shrink-0" />
-                  </a>
+                    <span class="shrink-0 pt-0.5 text-xs font-medium text-gray-500 dark:text-gray-400">{{ t('asyncImageTasks.detail.referenceImage', { index: index + 1 }) }}</span>
+                    <button
+                      type="button"
+                      class="min-w-0 flex-1 break-all text-left font-mono text-xs leading-5 text-primary-600 transition-colors hover:text-primary-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-500 dark:text-primary-400 dark:hover:text-primary-300"
+                      data-test="reference-image-link"
+                      :title="t('asyncImageTasks.detail.copyReferenceImage', { index: index + 1 })"
+                      :aria-label="t('asyncImageTasks.detail.copyReferenceImage', { index: index + 1 })"
+                      @click="copyReferenceImage(reference.url)"
+                    >
+                      {{ reference.url }}
+                    </button>
+                    <a
+                      :href="reference.href"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      class="mt-0.5 shrink-0 rounded p-1 text-gray-400 transition-colors hover:bg-gray-100 hover:text-primary-600 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-500 dark:hover:bg-dark-700 dark:hover:text-primary-400"
+                      data-test="open-reference-image"
+                      :title="t('asyncImageTasks.detail.openReferenceImage', { index: index + 1 })"
+                      :aria-label="t('asyncImageTasks.detail.openReferenceImage', { index: index + 1 })"
+                    >
+                      <Icon name="externalLink" size="sm" />
+                    </a>
+                  </div>
                 </div>
               </div>
             </div>
@@ -1010,13 +1038,27 @@ function sort(key: string, order: 'asc' | 'desc'): void {
   void loadTasks()
 }
 
-async function copyTaskId(task: AsyncImageTask): Promise<void> {
+async function copyText(text: string): Promise<void> {
   try {
-    await navigator.clipboard.writeText(String(taskKey(task)))
+    await navigator.clipboard.writeText(text)
     appStore.showSuccess(t('common.copied'))
   } catch {
     appStore.showError(t('common.copyFailed'))
   }
+}
+
+async function copyTaskId(task: AsyncImageTask): Promise<void> {
+  await copyText(String(taskKey(task)))
+}
+
+async function copyReferenceImage(url: string): Promise<void> {
+  await copyText(url)
+}
+
+async function copyAllReferenceImages(): Promise<void> {
+  const urls = referenceImageLinks.value.map((reference) => reference.url).filter(Boolean)
+  if (!urls.length) return
+  await copyText(urls.join('\n'))
 }
 
 function askResume(task: AsyncImageTask): void {

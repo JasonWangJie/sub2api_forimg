@@ -71,6 +71,8 @@ export default {
       retryCount: '重试次数',
       referenceImages: '参考图 URL',
       referenceImage: '参考图 {index}',
+      copyAllReferenceImages: '一键复制所有',
+      copyReferenceImage: '复制参考图 {index} 链接',
       openReferenceImage: '在新窗口打开参考图 {index}',
       request: '请求与计费',
       protocol: '下游协议',

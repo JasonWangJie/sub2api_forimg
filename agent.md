@@ -1,6 +1,14 @@
 # AI 交接文档
 
-## 2026-09-21 当前交接：本地文档提交并合并 origin/main
+## 2026-09-21 当前交接：异步任务详情参考图复制
+
+- 已在共用组件 `frontend/src/features/async-image-tasks/AsyncImageTasksView.vue` 完成管理端详情参考图交互：标题旁「一键复制所有」（全部 URL 一行一个）；点击链接复制该条；右侧外链图标新窗口打开。用户详情仍不展示参考图（API 也不返回）。
+- 文案：`zh/en` 的 `asyncImageTasks.detail.copyAllReferenceImages` / `copyReferenceImage`；测试覆盖单条复制、多 URL 换行复制、用户端不渲染。
+- 验证：`pnpm exec vitest run src/features/async-image-tasks/__tests__/AsyncImageTasksView.spec.ts` 5 通过；`git diff --check` 通过。未浏览器手测、未部署。
+- 实际快照：`main@5229bc189f1d5b999b18e52dc952c0a13103764c`，describe `v0.1.173.50-5-g5229bc1-dirty`，VERSION `0.1.173.50`；工作树含本轮前端/i18n/测试与三份记录更新，未 commit。
+- 下一步：用户若要求再 commit；生产部署与账号级参考图上限仍须另行授权。此前 OVH/merge 领先提交仍未 push。
+
+## 2026-09-21 本地文档提交并合并 origin/main
 
 - 用户要求合并远程并提交本地变更：已提交 OVH TCP 兜底与 sysctl 调优交接（`3d18116`），再 `git pull origin main` 合并远程 3 个提交（含 tag `v0.1.173.50` 的 Gemini 错误诊断功能）；`agent.md` / `readmenew.md` / `开发台账.md` 自动合并成功，无冲突。
 - 合并后基线：交接同步提交 `6f601faa67a7b55b92eede9901d0891c2c6e8876`，合并点 `d48b1324588fcc87c104b528cfca71b5b723a9e2`，`git describe` 约 `v0.1.173.50-4-g6f601fa`，VERSION=`0.1.173.50`；本地相对 `origin/main` 领先（OVH docs + merge + 交接同步），尚未 push。完整 tip 以 `git rev-parse HEAD` 为准。

@@ -71,6 +71,8 @@ export default {
       retryCount: 'Retries',
       referenceImages: 'Reference image URLs',
       referenceImage: 'Reference {index}',
+      copyAllReferenceImages: 'Copy all',
+      copyReferenceImage: 'Copy reference image {index} URL',
       openReferenceImage: 'Open reference image {index} in a new window',
       request: 'Request and billing',
       protocol: 'Downstream protocol',
