@@ -1,5 +1,12 @@
 # Sub2API Fork 二次开发总览
 
+## 2026-09-21 本地交接文档提交并合并 origin/main
+
+- 已提交此前未入库的 OVH TCP 兜底与 sysctl 调优交接记录（`agent.md`、`readmenew.md`、`开发台账.md`）。
+- 已将本地 `main` 与 `origin/main` 合并：远程含 `v0.1.173.50` 异步 Gemini 错误诊断持久化及相关文档；三份交接文档自动合并无冲突。
+- 验证：`git pull origin main` 成功；`git diff --check` 通过；本轮未运行业务测试、未部署或重启生产。
+- 当前实际快照：分支 `main`；完整 HEAD=`d48b1324588fcc87c104b528cfca71b5b723a9e2`；`git status --short --branch`=`## main...origin/main [ahead 2]`（本轮交接同步提交后将再领先）；`git describe --tags --always --dirty`=`v0.1.173.50-3-gd48b132`；VERSION=`0.1.173.50`。本地领先提交尚未 push。
+
 ## 2026-09-20 异步 Gemini 上游错误诊断持久化与 611–613 打通
 
 - 内部异步 Gemini 生图路径不再把可解析的上游 `error.message` 覆盖为固定 `Invalid request`：现在仅在 Worker 私有上下文中保留经敏感键脱敏、空白归一化和长度限制后的原始 message；同步 Chat Completions 仍沿用通用错误文案，避免扩大对外信息暴露。
