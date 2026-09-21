@@ -3,7 +3,7 @@
 ## 2026-09-21 当前交接：本地文档提交并合并 origin/main
 
 - 用户要求合并远程并提交本地变更：已提交 OVH TCP 兜底与 sysctl 调优交接（`3d18116`），再 `git pull origin main` 合并远程 3 个提交（含 tag `v0.1.173.50` 的 Gemini 错误诊断功能）；`agent.md` / `readmenew.md` / `开发台账.md` 自动合并成功，无冲突。
-- 合并后工作树干净基线：完整 HEAD `d48b1324588fcc87c104b528cfca71b5b723a9e2`，`git describe --tags --always --dirty`=`v0.1.173.50-3-gd48b132`，VERSION=`0.1.173.50`，分支 `main...origin/main [ahead 2]`（docs 提交 + merge）。本轮交接同步提交后会再领先 1 个提交；尚未 push。
+- 合并后基线：交接同步提交 `6f601faa67a7b55b92eede9901d0891c2c6e8876`，合并点 `d48b1324588fcc87c104b528cfca71b5b723a9e2`，`git describe` 约 `v0.1.173.50-4-g6f601fa`，VERSION=`0.1.173.50`；本地相对 `origin/main` 领先（OVH docs + merge + 交接同步），尚未 push。完整 tip 以 `git rev-parse HEAD` 为准。
 - OVH 代理运行边界仍以 2026-09-16 交接为准：主机 `40.160.139.185`、TCP Reality `8443`、sysctl 缓冲调优与回退目录不变；本轮未连接或改动生产。
 - 下一步：若需远端同步，由用户明确要求后再 `git push origin main`；业务侧仍待授权部署 `v0.1.173.50` 的 Gemini 诊断改动，以及账号级参考图上限。
 

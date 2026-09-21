@@ -5,7 +5,7 @@
 - 已提交此前未入库的 OVH TCP 兜底与 sysctl 调优交接记录（`agent.md`、`readmenew.md`、`开发台账.md`）。
 - 已将本地 `main` 与 `origin/main` 合并：远程含 `v0.1.173.50` 异步 Gemini 错误诊断持久化及相关文档；三份交接文档自动合并无冲突。
 - 验证：`git pull origin main` 成功；`git diff --check` 通过；本轮未运行业务测试、未部署或重启生产。
-- 当前实际快照：分支 `main`；完整 HEAD=`d48b1324588fcc87c104b528cfca71b5b723a9e2`；`git status --short --branch`=`## main...origin/main [ahead 2]`（本轮交接同步提交后将再领先）；`git describe --tags --always --dirty`=`v0.1.173.50-3-gd48b132`；VERSION=`0.1.173.50`。本地领先提交尚未 push。
+- 当前实际快照：分支 `main`；交接基线同步提交=`6f601faa67a7b55b92eede9901d0891c2c6e8876`（其上若有表述校正提交以 `git rev-parse HEAD` 为准）；合并点=`d48b1324588fcc87c104b528cfca71b5b723a9e2`；`git describe` 约=`v0.1.173.50-4-g6f601fa`；VERSION=`0.1.173.50`；本地相对 `origin/main` 领先且尚未 push。
 
 ## 2026-09-20 异步 Gemini 上游错误诊断持久化与 611–613 打通
 
