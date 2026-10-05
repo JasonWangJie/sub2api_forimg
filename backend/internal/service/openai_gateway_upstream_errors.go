@@ -255,7 +255,10 @@ func isOpenAIAsyncAccountFailover400(message string) bool {
 			return true
 		}
 	}
-	return false
+	// Some image gateways return a failed generation as an HTTP 400 text
+	// reply. Match the full known message so an appended refusal or explicit
+	// instruction not to regenerate remains a terminal error.
+	return strings.TrimRight(strings.TrimSpace(message), "。.") == "由于我这边发生了错误，我未能生成图片"
 }
 
 // OpenAIRequestBodyTooLargeClientMessage is the fixed downstream message used

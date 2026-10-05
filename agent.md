@@ -1,5 +1,24 @@
 # AI 交接文档
 
+## 2026-10-05 当前交接：中文生成失败异步换号规则
+
+- 用户已明确要求将「由于我这边发生了错误，我未能生成图片」加入可重试分类。本地 `isOpenAIAsyncAccountFailover400` 已增加完整文案匹配，兼容首尾空白与末尾中文/英文句号；HTTP 400 的内部 OpenAI 异步图片路径立即换号，API Key 和 OAuth 共用规则。即使池模式自定义了同账号重试 400，既有异步分支也保持 RetryableOnSameAccount=false。
+- 本次精确新增规则不放开任意「未能生成图片」片段、追加禁止再生成/安全拒绝或参考图拉取错误；同步请求仍按原来的终止错误返回。Worker 重排队与账号池/排除/切换上限沿用既有实现；普通 400 熔断和中文限流分类尚未修改。
+- 新增转发回归覆盖 API Key/OAuth 共 16 个子用例，保留上游 request ID、Retry-After 和完整错误体，以确保 Handler 可以执行换号。定向 Service 回归通过（0.213s）；`gofmt -l` 无输出、`git diff --check`、21 个新增本地文档链接及新专题格式检查通过，未跑全量后端或前端。实际命令见 [开发台账.md](开发台账.md)。
+- 本地实际快照 `main@4eadbf28e62361e255efe40645910bb4436ad8b9`，describe=`v0.1.173.51-1-g4eadbf2-dirty`，VERSION=`0.1.173.51`；status=`## main...origin/main` 加三份记录、两份 Service 代码/测试修改和未跟踪诊断专题，保留上一轮全部内容。未提交、推送、部署或重启，本轮未再连接生产；历史统计仍是上一轮只读快照。
+- 优化建议与规则入口见 [图片渠道错误与换号重试诊断](wiki-new/图片渠道错误与换号重试诊断.md)：优先处理明确限流的 400、对指定账号级生成失败补健康计数、补 OpenAI 终止/换号尝试的 provider diagnostics，以及区分 Worker 重排队和请求内换号。不要直接将全部 400 纳入重试或熔断。
+
+## 2026-10-05 当前交接：yottsuno 错误与换号只读诊断
+
+- 用户明确授权只读登录 `40.160.139.185` 排查近两天 yottsuno 简称渠道。生产 `sub2api=active`，版本 `0.1.173.51`、commit `58f96017d2f63de3512147c34b31ad12c859a3a7`；仅读取日志、配置非敏感项和本机 PostgreSQL，psql 强制 default_transaction_read_only=on。本轮未改生产、部署、重启或重放；不要保存登录口令和上游凭据。
+- 固定统计窗口为北京时间 `2026-10-03 10:45:52` 至 `2026-10-05 10:45:52`。账号 2/3 最终失败 248/33；其中 177 个为 HTTP 400「由于我这边发生了错误，我未能生成图片」，37 个为返回 400 的限流文字。日志 type/code 是 `invalid_request_error / upstream_text_reply`，但 `isOpenAIAsyncAccountFailover400` 只读 message、仅匹配特定英文；Handler 返回终止 typed error，Worker 普通瞬时重试和图片熔断也排除这些 400。不能通过单纯提高重试上限解决。
+- 生效 runtime 来自管理端保存的 `image_storage_config.async_image`，不是 YAML 覆盖：上游重试 3、容量重试 3、总重试 16；熔断开启，阈值 5、冷却 600 秒。账号 2/3 开启池模式，同账号重试 3、默认状态码 401/403/429。相关精确模型/清晰度池有其他候选，本次主因是错误分类未进入换号。
+- 账号 2/3 有 16 次真实换号日志。样本 `asyncimg_ae3bee340f73484e19e9883fd9d91b2c` 在一次调用内按 35→24→26→2 切换，前三个 502、最后 400 终止，而 retry_count=0。该字段只表示 Worker 重排队，尝试顺序看 account_attempts.attempted_at；attempted_account_ids 是排序后的去重汇总。
+- 50 个失败明确要求 `Do not automatically regenerate`，不能当作普通可重试服务器错误。中文通用生成失败是否已产生上游成本尚无法确认；后续优先为明确限流/过载补有限换号及健康分类，并向上游确认通用无图文案的语义。保留内容拒绝、缺参考图、明确禁止重放和 execution_unknown 边界。
+- 香蕉账号 12 属另一情况：窗口内有 860 次 Gemini 换号，后于北京时间 `2026-10-04 17:41:40` 因上游预扣余额不足 403 被停用。账号 3/34 当前已关闭调度，不要据此反推它们在整个历史窗口均不可用。
+- 完整证据、样本和源码入口见 [图片渠道错误与换号重试诊断](wiki-new/图片渠道错误与换号重试诊断.md)。本轮仅增加该专题并同步三份记录；未运行代码测试或 CI，未实施代码修复/生产策略修改/历史回填。后续如需修复，应覆盖错误语义、终止错误的 status/provider code 审计，以及 UI 重排队次数与请求内切换的区别。
+- 本地实际快照：`main@4eadbf28e62361e255efe40645910bb4436ad8b9`，VERSION=`0.1.173.51`；开始时 status=`## main...origin/main`、describe=`v0.1.173.51-1-g4eadbf2`，工作树干净；完成时同一分支加三份记录修改和本专题未跟踪、describe=`v0.1.173.51-1-g4eadbf2-dirty`，未提交/推送。`git diff --check`、14 个新增本地链接及新文档格式检查通过；详情见 [开发台账.md](开发台账.md)。生产 commit 与本地 HEAD 仅 VERSION 不同，相关分类代码一致。
+
 ## 2026-09-21 当前交接：异步任务详情参考图复制
 
 - 已在共用组件 `frontend/src/features/async-image-tasks/AsyncImageTasksView.vue` 完成管理端详情参考图交互：标题旁「一键复制所有」（全部 URL 一行一个）；点击链接复制该条；右侧外链图标新窗口打开。用户详情仍不展示参考图（API 也不返回）。

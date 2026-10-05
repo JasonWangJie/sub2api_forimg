@@ -1120,6 +1120,87 @@ func TestOpenAIAsyncAccountFailover400LeavesReferenceTransportErrorsForWorker(t 
 	require.False(t, isOpenAIAsyncAccountFailover400("image_url fetch failed: curl: (28) Connection timed out"))
 }
 
+func TestOpenAIGatewayServiceForwardImages_GenerationFailure400RetryPolicy(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	const generationFailure = "由于我这边发生了错误，我未能生成图片"
+	tests := []struct {
+		name         string
+		message      string
+		async        bool
+		wantFailover bool
+	}{
+		{name: "async known failure", message: generationFailure, async: true, wantFailover: true},
+		{name: "async failure with punctuation and whitespace", message: " \n" + generationFailure + "。 \n", async: true, wantFailover: true},
+		{name: "async failure with ASCII period", message: generationFailure + ".", async: true, wantFailover: true},
+		{name: "sync known failure stays terminal", message: generationFailure + "。"},
+		{name: "async explicit no regeneration", message: generationFailure + "。 Do not automatically regenerate; check usage or contact support.", async: true},
+		{name: "async content policy", message: generationFailure + "。 The request was rejected by the upstream safety policy.", async: true},
+		{name: "async incomplete phrase", message: "未能生成图片", async: true},
+		{name: "async reference fetch", message: "image_url fetch failed: " + generationFailure, async: true},
+	}
+	for _, accountType := range []string{AccountTypeAPIKey, AccountTypeOAuth} {
+		t.Run(accountType, func(t *testing.T) {
+			for _, tt := range tests {
+				t.Run(tt.name, func(t *testing.T) {
+					body := []byte(`{"model":"gpt-image-2.5-flare","prompt":"draw a cat","response_format":"b64_json"}`)
+					ctx := context.Background()
+					if tt.async {
+						ctx = WithAsyncImageAccountAttemptCapture(ctx, &AsyncImageAccountAttemptCapture{})
+					}
+					req := httptest.NewRequest(http.MethodPost, "/v1/images/generations", bytes.NewReader(body)).WithContext(ctx)
+					req.Header.Set("Content-Type", "application/json")
+					rec := httptest.NewRecorder()
+					c, _ := gin.CreateTestContext(rec)
+					c.Request = req
+					errorBody := fmt.Sprintf(`{"error":{"type":"invalid_request_error","code":"upstream_text_reply","message":%q}}`, tt.message)
+					svc := &OpenAIGatewayService{
+						cfg: &config.Config{},
+						httpUpstream: &httpUpstreamRecorder{resp: &http.Response{
+							StatusCode: http.StatusBadRequest,
+							Header: http.Header{
+								"Content-Type": []string{"application/json"},
+								"X-Request-Id": []string{"rid-generation-failure"},
+								"Retry-After":  []string{"15"},
+							},
+							Body: io.NopCloser(strings.NewReader(errorBody)),
+						}},
+					}
+					parsed, err := svc.ParseOpenAIImagesRequest(c, body)
+					require.NoError(t, err)
+					account := &Account{
+						ID: 101, Name: "image-account", Platform: PlatformOpenAI, Type: accountType,
+						Credentials: map[string]any{
+							"api_key": "test-api-key", "access_token": "test-access-token",
+							"base_url":  "https://image-upstream.example/v1",
+							"pool_mode": true, "pool_mode_retry_count": 3,
+							"pool_mode_retry_status_codes": []int{400},
+						},
+					}
+
+					result, err := svc.ForwardImages(ctx, c, account, body, parsed, "")
+					require.Nil(t, result)
+					if tt.wantFailover {
+						var failoverErr *UpstreamFailoverError
+						require.ErrorAs(t, err, &failoverErr)
+						require.Equal(t, http.StatusBadRequest, failoverErr.StatusCode)
+						require.Equal(t, errorBody, string(failoverErr.ResponseBody))
+						require.Equal(t, "rid-generation-failure", failoverErr.ResponseHeaders.Get("x-request-id"))
+						require.Equal(t, "15", failoverErr.ResponseHeaders.Get("Retry-After"))
+						require.False(t, failoverErr.RetryableOnSameAccount, "async generation failure must switch accounts even when the pool retries HTTP 400")
+						require.Empty(t, rec.Body.Bytes(), "the failure must remain available to the handler's account switch loop")
+					} else {
+						var upstreamErr *OpenAIImagesUpstreamError
+						require.ErrorAs(t, err, &upstreamErr)
+						require.Equal(t, http.StatusBadRequest, rec.Code)
+						require.Equal(t, "upstream_text_reply", gjson.Get(rec.Body.String(), "error.code").String())
+						require.NotEmpty(t, gjson.Get(rec.Body.String(), "error.message").String())
+					}
+				})
+			}
+		})
+	}
+}
+
 func TestOpenAIGatewayServiceForwardImages_OAuthNonStreamModerationBlockedReturnsClientError(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	body := []byte(`{"model":"gpt-image-2","prompt":"draw blocked image","response_format":"b64_json"}`)
