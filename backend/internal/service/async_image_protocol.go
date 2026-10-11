@@ -644,6 +644,44 @@ func (d AsyncImageReferenceDownloader) ValidatePassthroughURL(rawURL string) err
 }
 
 func (d AsyncImageReferenceDownloader) Download(ctx context.Context, rawURL string) (*AsyncImageReference, error) {
+	return d.download(ctx, rawURL, false)
+}
+
+// DownloadGenerated reuses reference-download transport protections, but uses
+// the fully decoded format as the MIME of an upstream-generated image. Input
+// caches, ownership loaders and reference budgets must never affect outputs.
+func (d AsyncImageReferenceDownloader) DownloadGenerated(ctx context.Context, rawURL string) (*AsyncImageReference, error) {
+	d.BoundLoader = nil
+	d.Budget = nil
+	d.Cache = nil
+	ref, err := d.download(ctx, rawURL, true)
+	if err != nil {
+		return nil, &generatedImageDownloadError{cause: err}
+	}
+	return ref, nil
+}
+
+// Keep signed URLs out of persisted errors while retaining the original
+// cause for cancellation and transport-error classification.
+type generatedImageDownloadError struct{ cause error }
+
+func (e *generatedImageDownloadError) Error() string {
+	var downloadErr *AsyncImageReferenceDownloadError
+	if errors.As(e.cause, &downloadErr) {
+		if downloadErr.Phase == "validate" {
+			return fmt.Sprintf("invalid generated image: %v", downloadErr.Err)
+		}
+		if downloadErr.StatusCode > 0 {
+			return fmt.Sprintf("download generated image: HTTP status %d", downloadErr.StatusCode)
+		}
+		return "download generated image: " + downloadErr.Phase + " failed"
+	}
+	return "invalid generated image: invalid image data URI"
+}
+
+func (e *generatedImageDownloadError) Unwrap() error { return e.cause }
+
+func (d AsyncImageReferenceDownloader) download(ctx context.Context, rawURL string, generated bool) (*AsyncImageReference, error) {
 	rawURL = strings.TrimSpace(rawURL)
 	if d.BoundLoader != nil {
 		reference, handled, err := d.BoundLoader(ctx, rawURL)
@@ -655,7 +693,7 @@ func (d AsyncImageReferenceDownloader) Download(ctx context.Context, rawURL stri
 		}
 	}
 	if strings.HasPrefix(strings.ToLower(rawURL), "data:") {
-		reference, err := d.decodeDataURI(rawURL)
+		reference, err := d.decodeDataURIWithMIME(rawURL, generated)
 		if err != nil {
 			return nil, err
 		}
@@ -667,6 +705,9 @@ func (d AsyncImageReferenceDownloader) Download(ctx context.Context, rawURL stri
 	parsed, err := url.Parse(rawURL)
 	if err != nil {
 		return nil, &AsyncImageReferenceDownloadError{Phase: "validate", Err: errors.New("reference image URL must be an absolute HTTPS URL or an image data URI")}
+	}
+	if generated && parsed.User != nil {
+		return nil, &AsyncImageReferenceDownloadError{Phase: "validate", Err: errors.New("generated image URL must not contain credentials")}
 	}
 	if cached := d.Cache.get(parsed.String(), time.Now()); cached != nil {
 		return d.accept(cached)
@@ -688,21 +729,38 @@ func (d AsyncImageReferenceDownloader) Download(ctx context.Context, rawURL stri
 		return nil, &AsyncImageReferenceDownloadError{Phase: "setup", Err: errors.New("reference image downloader requires an HTTP transport")}
 	}
 	transport := baseTransport.Clone()
+	defer transport.CloseIdleConnections()
 	transport.Proxy = nil
 	transport.DialContext = d.safeDialContext
 	client := &http.Client{
-		Transport: transport,
-		Timeout:   d.timeout(),
-		CheckRedirect: func(req *http.Request, via []*http.Request) error {
-			if len(via) >= d.maxRedirects() {
-				return errors.New("reference image redirect limit exceeded")
-			}
-			if req.URL == nil || !strings.EqualFold(req.URL.Scheme, "https") {
-				return errors.New("reference image redirects must use HTTPS")
-			}
-			return validateAsyncImagePublicHost(req.Context(), d.resolver(), req.URL.Hostname())
-		},
+		Transport:     transport,
+		Timeout:       d.timeout(),
+		CheckRedirect: d.checkRedirect,
 	}
+	if generated {
+		client.CheckRedirect = d.checkGeneratedRedirect
+	}
+	return d.fetchRemoteImage(ctx, parsed, client, generated)
+}
+
+func (d AsyncImageReferenceDownloader) checkGeneratedRedirect(req *http.Request, via []*http.Request) error {
+	if req.URL != nil && req.URL.User != nil {
+		return errors.New("generated image redirect must not contain credentials")
+	}
+	return d.checkRedirect(req, via)
+}
+
+func (d AsyncImageReferenceDownloader) checkRedirect(req *http.Request, via []*http.Request) error {
+	if len(via) >= d.maxRedirects() {
+		return errors.New("reference image redirect limit exceeded")
+	}
+	if req.URL == nil || !strings.EqualFold(req.URL.Scheme, "https") {
+		return errors.New("reference image redirects must use HTTPS")
+	}
+	return validateAsyncImagePublicHost(req.Context(), d.resolver(), req.URL.Hostname())
+}
+
+func (d AsyncImageReferenceDownloader) fetchRemoteImage(ctx context.Context, parsed *url.URL, client *http.Client, generated bool) (*AsyncImageReference, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, parsed.String(), nil)
 	if err != nil {
 		return nil, &AsyncImageReferenceDownloadError{Phase: "request", Err: err}
@@ -729,7 +787,12 @@ func (d AsyncImageReferenceDownloader) Download(ctx context.Context, rawURL stri
 	if int64(len(data)) > d.maxBytes() {
 		return nil, &AsyncImageReferenceDownloadError{Phase: "validate", Err: errors.New("reference image exceeds the configured size limit")}
 	}
-	reference, err := d.validateDownloadedImage(data, resp.Header.Get("Content-Type"))
+	var reference *AsyncImageReference
+	if generated {
+		reference, err = d.validateImage(data, "")
+	} else {
+		reference, err = d.validateDownloadedImage(data, resp.Header.Get("Content-Type"))
+	}
 	if err != nil {
 		return nil, &AsyncImageReferenceDownloadError{Phase: "validate", Err: err}
 	}
@@ -748,6 +811,10 @@ func (d AsyncImageReferenceDownloader) accept(reference *AsyncImageReference) (*
 }
 
 func (d AsyncImageReferenceDownloader) decodeDataURI(raw string) (*AsyncImageReference, error) {
+	return d.decodeDataURIWithMIME(raw, false)
+}
+
+func (d AsyncImageReferenceDownloader) decodeDataURIWithMIME(raw string, generated bool) (*AsyncImageReference, error) {
 	comma := strings.IndexByte(raw, ',')
 	if comma <= len("data:") {
 		return nil, errors.New("invalid image data URI")
@@ -757,6 +824,16 @@ func (d AsyncImageReferenceDownloader) decodeDataURI(raw string) (*AsyncImageRef
 		return nil, errors.New("image data URI must use base64 encoding")
 	}
 	contentType := strings.TrimSpace(meta[:len(meta)-len(";base64")])
+	if generated {
+		// Bound actual decoded bytes rather than the padded Base64 estimate;
+		// a valid image exactly at the byte limit must still be accepted.
+		decoder := base64.NewDecoder(base64.StdEncoding.Strict(), strings.NewReader(raw[comma+1:]))
+		data, err := io.ReadAll(io.LimitReader(decoder, d.maxBytes()+1))
+		if err != nil {
+			return nil, errors.New("invalid base64 image data URI")
+		}
+		return d.validateImage(data, "")
+	}
 	decodedLen := base64.StdEncoding.DecodedLen(len(raw) - comma - 1)
 	if int64(decodedLen) > d.maxBytes() {
 		return nil, errors.New("reference image exceeds the configured size limit")

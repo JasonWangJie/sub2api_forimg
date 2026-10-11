@@ -1,5 +1,17 @@
 # AI 交接文档
 
+## 2026-10-11 当前交接：异步生图结果 URL 转存
+
+- 本轮按用户已确认方案完成本地实现：GeminiGeneratedImage 增加仅内部使用的 SourceURL；结构化 inlineData / fileData（含下划线形式）优先，兼容 URL / Base64 编码 URL 及无结构化图片时的 URL envelope、纯 URL 和单个 Markdown 图片链接。同步 Chat Completions 不使用此私有捕获路径。
+- Gemini 兼容层只提取来源与错误，已完成的无图 / 解析错误不再生成可重试 502；Worker 在 forward 结束后下载结果，复用 HTTPS、公网 DNS、实际连接地址、重定向、超时与下载限制。生成结果不走 BoundLoader、参考图缓存或累计预算，不携带上游凭据；结果 URL 的内嵌账号密码也被拒绝。
+- 仅生成结果以完整解码后的 PNG / JPEG / WebP 类型为准，继续检查容器、签名、字节和像素；参考图和用户上传声明 MIME 校验不变。失败获取结果不进入重新生图 / 参考图重试；明确无图及格式错误落 upstream_invalid_output，下载超时 / 过期等沿用 execution_unknown 禁止重放边界。具体行为见 [异步生图结果转存与格式兼容](wiki-new/异步生图结果转存与格式兼容.md)。
+- 复用原有图片暂存、ObjectIntent、确定性文件名、对象引用和 PreparedUsageBilling。测试覆盖混合结果真实 MIME / 尺寸 / SHA、`.png` / `.jpg` 本地落盘、BB / SC 本站 URL、上游仅调用一次，以及存储失败后原对象覆盖和扣费后日志失败时同一固定账单命令重试。扩大 unit 回归时补齐两处既有测试夹具：Gemini 错误策略调用的 headers 参数和 Retry-After 用例的 gin Request；没有借此修改生产错误策略。
+- 实际验证：Service 全包 `unit` 回归通过（164.125s，明确跳过 TestEstimateOpenAIInputTokens_CompareWithOpenAIAPI）；Handler 全包 `unit` 回归通过（37.010s），本轮新用例和此前非 unit 定向回归也通过。全部变更 Go 文件格式检查、`git diff --check`、13 个新增本地 Markdown 链接及新 wiki 格式检查通过；未运行前端或 CI。完整命令见 [开发台账](开发台账.md)。
+- 用户明确授权的生产操作范围仅为只读核对及一次账号 12 直连生图。此次 HTTP 200 / 41.677 秒，返回 8,426,780 字节 JPEG（Base64），没有 URL、没有复现历史 IMAGE_MIME_MISMATCH。未在生产执行完整图片解码 / 尺寸测量，也没有创建本站异步任务；来源 URL 分支由本地测试覆盖。生产仍运行 `0.1.173.51 / 58f96017d2f63de3512147c34b31ad12c859a3a7`。
+- 单次请求前后读取账号均为 active / schedulable=true；计划阶段曾读到关闭，属于不同时间快照，本轮没有修改调度状态。当前存储 local / `/opt/sub2api/data/image_storage` / `https://file.aiimg.lol`、结果保留 2 天，已有图片 HTTP 200 且 checksum 一致；本轮没有改生产配置、数据库、文件、服务或调度，没有部署 / 重启 / 重放。凭据和原始图片 Base64 不得写入仓库。
+- 实际 Git 基线：`main@a9ab4cd98b61dd4c35351734d0ea9c8e2f6eca9e`，VERSION=`0.1.173.52`；开始时 `## main...origin/main` 且干净，describe=`v0.1.173.52-1-ga9ab4cd`；本轮代码 / 测试 / 文档未提交，当前 describe=`v0.1.173.52-1-ga9ab4cd-dirty`。最终 status 和实际验证记录见 [开发台账](开发台账.md)。
+- 下一步：按用户后续安排提交 / 发版 / 部署，再用新版真实异步任务检查本站 JPEG / PNG 地址、结果 manifest、实际尺寸与计费。生产部署、重启和任何渠道调度策略调整均未实施；调度状态须操作前重新读取。没有新增 API、迁移或存储配置项，也不自动回填历史失败任务。
+
 ## 2026-10-05 当前交接：中文生成失败异步换号规则
 
 - 用户已明确要求将「由于我这边发生了错误，我未能生成图片」加入可重试分类。本地 `isOpenAIAsyncAccountFailover400` 已增加完整文案匹配，兼容首尾空白与末尾中文/英文句号；HTTP 400 的内部 OpenAI 异步图片路径立即换号，API Key 和 OAuth 共用规则。即使池模式自定义了同账号重试 400，既有异步分支也保持 RetryableOnSameAccount=false。

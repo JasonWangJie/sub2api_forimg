@@ -665,11 +665,24 @@ func (h *DurableAsyncImageHandler) invokeAsyncImageTask(parent context.Context, 
 		return asyncImageWorkerDisposition{}
 	}
 
+	return h.completeAsyncImageInvocation(parent, ginContext.Request.Context(), task, recorder.Body.Bytes(), usageCapture, geminiCapture, cfg)
+}
+
+// Result resolution happens after the upstream invocation. Failures here may
+// terminate or reconcile the task, but must never re-enter generation retries.
+func (h *DurableAsyncImageHandler) completeAsyncImageInvocation(
+	parent, invocationCtx context.Context,
+	task *service.AsyncImageTask,
+	responseBody []byte,
+	usageCapture *AsyncImageUsageCapture,
+	geminiCapture *service.GeminiImageResponseCapture,
+	cfg service.AsyncImageRuntimeConfig,
+) asyncImageWorkerDisposition {
 	// Must use the gin request context: it carries ClientRequestID=async-image:<task_id>
 	// so PrepareRecordUsage builds client:async-image:<task_id>. executionCtx alone
 	// only has the timeout and would fall back to the upstream UUID, failing
 	// ValidatePreparedUsageBilling with "prepared usage request id mismatch".
-	outputs, prepared, accountID, upstreamRequestID, actualSize, err := h.captureAsyncImageInvocation(ginContext.Request.Context(), task, recorder.Body.Bytes(), usageCapture, geminiCapture, cfg)
+	outputs, prepared, accountID, upstreamRequestID, actualSize, err := h.captureAsyncImageInvocation(invocationCtx, task, responseBody, usageCapture, geminiCapture, cfg)
 	if err != nil {
 		if isAsyncImageInvalidOutputError(err) {
 			h.failAsyncImageTask(parent, task, "upstream_invalid_output", asyncImageSafeError(err), false)
@@ -1485,13 +1498,9 @@ func (h *DurableAsyncImageHandler) captureAsyncImageInvocation(
 		err               error
 	)
 	if task.Platform == service.PlatformGemini {
-		images := geminiCapture.Images()
-		for _, generated := range images {
-			output, validateErr := validateGeneratedAsyncImage(generated.Data, generated.MIMEType, cfg)
-			if validateErr != nil {
-				return nil, nil, 0, nil, nil, validateErr
-			}
-			outputs = append(outputs, output)
+		outputs, err = extractGeminiAsyncImageOutputs(ctx, geminiCapture, cfg)
+		if err != nil {
+			return nil, nil, 0, nil, nil, err
 		}
 		usage := usageCapture.Gemini()
 		if usage == nil || usage.Account == nil || usage.Result == nil {
@@ -1591,8 +1600,10 @@ func applyCapturedOpenAIImageDimensions(result *service.OpenAIForwardResult, out
 	service.ApplyOpenAIImageBillingResolution(result)
 }
 
-func validateGeneratedAsyncImage(data []byte, contentType string, cfg service.AsyncImageRuntimeConfig) (asyncImageCapturedOutput, error) {
-	validated, err := (service.AsyncImageReferenceDownloader{MaxBytes: cfg.DownloadMaxBytes}).ValidateBytes(data, contentType)
+// Upstream MIME metadata can be inaccurate. Use the decoded format while
+// retaining full container, signature, byte and pixel validation for outputs.
+func validateGeneratedAsyncImage(data []byte, _ string, cfg service.AsyncImageRuntimeConfig) (asyncImageCapturedOutput, error) {
+	validated, err := (service.AsyncImageReferenceDownloader{MaxBytes: cfg.DownloadMaxBytes, MaxPixels: cfg.DownloadMaxPixels}).ValidateBytes(data, "")
 	if err != nil {
 		return asyncImageCapturedOutput{}, fmt.Errorf("invalid generated image: %w", err)
 	}
@@ -1600,6 +1611,50 @@ func validateGeneratedAsyncImage(data []byte, contentType string, cfg service.As
 		Data: validated.Data, ContentType: validated.MIMEType, Checksum: validated.SHA256,
 		Width: validated.Width, Height: validated.Height,
 	}, nil
+}
+
+func generatedAsyncImageDownloader(cfg service.AsyncImageRuntimeConfig) service.AsyncImageReferenceDownloader {
+	return service.AsyncImageReferenceDownloader{
+		MaxBytes: cfg.DownloadMaxBytes, MaxPixels: cfg.DownloadMaxPixels,
+		Timeout:      time.Duration(cfg.DownloadTimeoutSeconds) * time.Second,
+		MaxRedirects: cfg.DownloadMaxRedirects,
+	}
+}
+
+func downloadGeneratedAsyncImage(ctx context.Context, rawURL string, cfg service.AsyncImageRuntimeConfig) (asyncImageCapturedOutput, error) {
+	reference, err := generatedAsyncImageDownloader(cfg).DownloadGenerated(ctx, rawURL)
+	if err != nil {
+		return asyncImageCapturedOutput{}, err
+	}
+	return asyncImageCapturedOutput{
+		Data: reference.Data, ContentType: reference.MIMEType, Checksum: reference.SHA256,
+		Width: reference.Width, Height: reference.Height,
+	}, nil
+}
+
+func extractGeminiAsyncImageOutputs(ctx context.Context, capture *service.GeminiImageResponseCapture, cfg service.AsyncImageRuntimeConfig) ([]asyncImageCapturedOutput, error) {
+	if err := capture.Error(); err != nil {
+		return nil, fmt.Errorf("invalid generated image: %w", err)
+	}
+	images := capture.Images()
+	if len(images) == 0 {
+		return nil, errors.New("Gemini response did not contain an image")
+	}
+	outputs := make([]asyncImageCapturedOutput, 0, len(images))
+	for _, generated := range images {
+		var output asyncImageCapturedOutput
+		var err error
+		if generated.SourceURL != "" {
+			output, err = downloadGeneratedAsyncImage(ctx, generated.SourceURL, cfg)
+		} else {
+			output, err = validateGeneratedAsyncImage(generated.Data, generated.MIMEType, cfg)
+		}
+		if err != nil {
+			return nil, err
+		}
+		outputs = append(outputs, output)
+	}
+	return outputs, nil
 }
 
 // isAsyncImageInvalidOutputError distinguishes a complete upstream response
@@ -1632,11 +1687,6 @@ func extractOpenAIAsyncImageOutputs(ctx context.Context, body []byte, cfg servic
 	if err := json.Unmarshal(bytes.TrimSpace(body), &envelope); err != nil {
 		return nil, errors.New("OpenAI returned an invalid image response")
 	}
-	downloader := service.AsyncImageReferenceDownloader{
-		MaxBytes:     cfg.DownloadMaxBytes,
-		Timeout:      time.Duration(cfg.DownloadTimeoutSeconds) * time.Second,
-		MaxRedirects: cfg.DownloadMaxRedirects,
-	}
 	outputs := make([]asyncImageCapturedOutput, 0, len(envelope.Data))
 	for _, item := range envelope.Data {
 		if encoded := strings.TrimSpace(item.B64JSON); encoded != "" {
@@ -1652,14 +1702,11 @@ func extractOpenAIAsyncImageOutputs(ctx context.Context, body []byte, cfg servic
 			continue
 		}
 		if rawURL := strings.TrimSpace(item.URL); rawURL != "" {
-			reference, err := downloader.Download(ctx, rawURL)
+			output, err := downloadGeneratedAsyncImage(ctx, rawURL, cfg)
 			if err != nil {
-				return nil, fmt.Errorf("download OpenAI generated image: %w", err)
+				return nil, err
 			}
-			outputs = append(outputs, asyncImageCapturedOutput{
-				Data: reference.Data, ContentType: reference.MIMEType, Checksum: reference.SHA256,
-				Width: reference.Width, Height: reference.Height,
-			})
+			outputs = append(outputs, output)
 		}
 	}
 	if len(outputs) == 0 {

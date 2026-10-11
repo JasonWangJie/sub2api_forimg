@@ -296,9 +296,10 @@ func (s *GeminiMessagesCompatService) forwardClaudeBodyAsChatCompletions(
 		if capture := GeminiImageResponseCaptureFromContext(c.Request.Context()); capture != nil {
 			images, captureErr := ExtractGeminiGeneratedImages(collected)
 			if captureErr != nil {
-				return nil, s.writeChatCompletionsError(c, http.StatusBadGateway, "upstream_error", captureErr.Error())
+				capture.SetError(captureErr, collectedBytes)
+			} else {
+				capture.Set(images, collectedBytes)
 			}
-			capture.Set(images, collectedBytes)
 			c.JSON(http.StatusOK, geminiCapturedImageResponse(images))
 			usage = usageObj
 		} else {
@@ -505,16 +506,13 @@ func (s *GeminiMessagesCompatService) handleChatCompletionsNonStreamingResponseF
 		}
 	}
 
-	var geminiResp map[string]any
-	if err := json.Unmarshal(respBody, &geminiResp); err != nil {
-		return nil, s.writeChatCompletionsError(c, http.StatusBadGateway, "upstream_error", "Failed to parse upstream response")
-	}
 	if capture := GeminiImageResponseCaptureFromContext(c.Request.Context()); capture != nil {
-		images, captureErr := ExtractGeminiGeneratedImages(geminiResp)
+		images, captureErr := extractGeminiAsyncImageResponse(respBody)
 		if captureErr != nil {
-			return nil, s.writeChatCompletionsError(c, http.StatusBadGateway, "upstream_error", captureErr.Error())
+			capture.SetError(captureErr, respBody)
+		} else {
+			capture.Set(images, respBody)
 		}
-		capture.Set(images, respBody)
 		responseheaders.WriteFilteredHeaders(c.Writer.Header(), resp.Header, s.responseHeaderFilter)
 		c.JSON(http.StatusOK, geminiCapturedImageResponse(images))
 		usage := extractGeminiUsage(respBody)
@@ -522,6 +520,10 @@ func (s *GeminiMessagesCompatService) handleChatCompletionsNonStreamingResponseF
 			usage = &ClaudeUsage{}
 		}
 		return usage, nil
+	}
+	var geminiResp map[string]any
+	if err := json.Unmarshal(respBody, &geminiResp); err != nil {
+		return nil, s.writeChatCompletionsError(c, http.StatusBadGateway, "upstream_error", "Failed to parse upstream response")
 	}
 
 	chatResp, usage, err := geminiResponseToChatCompletions(geminiResp, originalModel, respBody, nil)

@@ -22,9 +22,10 @@ import (
 
 type geminiAliasGateUpstream struct {
 	service.HTTPUpstream
-	calls    atomic.Int64
-	lastPath string
-	onDo     func()
+	calls        atomic.Int64
+	lastPath     string
+	onDo         func()
+	responseBody string
 }
 
 func (u *geminiAliasGateUpstream) Do(req *http.Request, _ string, _ int64, _ int) (*http.Response, error) {
@@ -33,13 +34,15 @@ func (u *geminiAliasGateUpstream) Do(req *http.Request, _ string, _ int64, _ int
 	if u.onDo != nil {
 		u.onDo()
 	}
+	responseBody := u.responseBody
+	if responseBody == "" {
+		responseBody = `{"candidates":[{"content":{"parts":[{"text":"ok"}]}}],"usageMetadata":{"promptTokenCount":1,"candidatesTokenCount":1}}`
+	}
 	return &http.Response{
 		StatusCode: http.StatusOK,
 		Header:     http.Header{"Content-Type": []string{"application/json"}},
-		Body: io.NopCloser(strings.NewReader(
-			`{"candidates":[{"content":{"parts":[{"text":"ok"}]}}],"usageMetadata":{"promptTokenCount":1,"candidatesTokenCount":1}}`,
-		)),
-		Request: req,
+		Body:       io.NopCloser(strings.NewReader(responseBody)),
+		Request:    req,
 	}, nil
 }
 

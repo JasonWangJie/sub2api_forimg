@@ -1,5 +1,13 @@
 # Sub2API Fork 二次开发总览
 
+## 2026-10-11 异步生图 URL 转存与格式兼容
+
+- Gemini 私有异步路径支持 `fileData.fileUri` / 下划线字段、inlineData 中的直接 URL / Base64 编码 URL；没有结构化图片时兼容 `data[].url`、顶层 `url`、纯 URL 文本和单个 Markdown 图片链接。结构化图片优先，多图按原顺序处理。
+- Worker 下载或解码后按实际字节完整校验 PNG / JPEG / WebP，保存真实 MIME、扩展名、宽高、字节数和 checksum，再复用已有暂存、上传意图、对象引用和计费链路。参考图与用户上传继续严格校验声明 MIME；OpenAI `data[].url` 共用生成结果下载路径。
+- 已完成响应的解析错误与结果下载失败均在结果处理阶段结束，不触发参考图重试、换号或重新生图。回归覆盖不安全地址、超时、过期链接、伪图片、超限、多图和错误 MIME，以及存储重试对象键稳定、扣费后日志失败时幂等重试和本站查询地址。Service unit 回归通过（跳过外部 OpenAI token API 对照），Handler unit 回归通过；`gofmt -l` 无输出、`git diff --check` 和 13 个新增本地链接检查通过。验证详情见 [开发台账](开发台账.md)。
+- 按用户明确授权用账号 12 直连上游请求一次 `gemini-3-pro-image-preview`、4K、单张、无参考图：HTTP 200，返回声明 `image/jpeg` 的 Base64 图片，实际 JPEG 魔数，未返回 URL，也未复现历史 MIME mismatch。单次请求前后账号均为 `active / schedulable=true`，本轮没有操作调度开关。继续使用 `/opt/sub2api/data/image_storage`、`https://file.aiimg.lol` 和结果保留 2 天配置；未部署或重启生产。
+- 当前实际源码快照：`main@a9ab4cd98b61dd4c35351734d0ea9c8e2f6eca9e`，describe=`v0.1.173.52-1-ga9ab4cd-dirty`，VERSION=`0.1.173.52`；任务开始时工作树干净，完成状态和验证命令见 [开发台账](开发台账.md)。本地未提交、推送或升版。流程、脱敏实测及边界见 [异步生图结果转存与格式兼容](wiki-new/异步生图结果转存与格式兼容.md)，下一步上下文见 [agent.md](agent.md)。
+
 ## 2026-10-05 指定中文生成失败文案加入异步换号
 
 - 按用户要求，OpenAI 异步生图收到 HTTP 400 且完整 message 为「由于我这边发生了错误，我未能生成图片」时进入既有换号循环；兼容首尾空白、末尾中文或英文句号。API Key 与 OAuth 两条图片转发路径共用该分类，命中后立即切换账号，沿用现有切换上限和候选池。
