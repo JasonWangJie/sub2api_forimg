@@ -1,10 +1,11 @@
 # AI 交接文档
 
-## 2026-10-20 当前交接：v0.1.173.54 发布准备
+## 2026-10-20 当前交接：v0.1.173.54 提交与发布
 
-- 用户已授权本次 422 修复及全部配套文档提交/推送 main，之后 checkout/pull、创建并推送 annotated tag `v0.1.173.54` 触发完整 Release。VERSION 已同步 `.54`，发行手册保留原有 `.54` 标签选择并替换为此次修复说明；不改 Fork 发布流程。
-- 准备快照：`main@8024e14afd8a2115f2ab4d76ed5580424d4d5004`，describe=`v0.1.173.53-1-g8024e14-dirty`，VERSION=`0.1.173.54`，改动含业务/测试/三份记录/wiki/版本及发行手册；远端 main 初查与本地一致，目标 tag 尚不存在。已通过测试沿用下节实际结果，本轮未重复跑业务测试。
-- 提交标题 `fix: 异步生图尺寸能力不兼容时自动换号重试`。待执行提交、推送和 tag 后补记真实 SHA、Actions 与产物结果；此处为发布准备，不把计划写成成功。生产升级、重启及历史任务重放未实施。
+- 已按用户授权提交并推送 422 修复、全部配套记录、VERSION `.54` 及发行手册；执行 checkout/pull main 后已创建并推送 annotated tag `v0.1.173.54`。发布提交为 `c623015c229be42ada6a9a5fdf076d42cf55fc99`，标题 `fix: 异步生图尺寸能力不兼容时自动换号重试`；tag 注释含完整正文，远端解引用同 SHA。
+- 发布校验快照：HEAD=`c623015c229be42ada6a9a5fdf076d42cf55fc99`，status=`## main...origin/main`（干净），describe=`v0.1.173.54`，VERSION=`0.1.173.54`。本条是后续文档补记，允许另提文档提交，不移动已经推送的发布标签。此前准备基线为 `8024e14afd8a2115f2ab4d76ed5580424d4d5004`；已通过测试沿用下节实际结果，本轮未重复跑业务测试。
+- [Release run 39286803079](https://github.com/JasonWangJie/sub2api_forimg/actions/runs/39286803079)已触发，本轮核对 run 仍 queued；前端构建/上传步骤 success，两个前置 job 已有 Complete job 步骤但状态仍 in_progress，release job queued，目标 Release API 404。尚未确认完整构建/产物，不能写成成功或失败。[GitHub 官方事件公告](https://stspg.io/nrv2k8s68bwn)报告 Actions 状态更新延迟，缓解后仍在观察，与本次状态滞后表现一致；不要因 queued 再次触发或覆盖标签。
+- 下一步由后续检查确认 run 最终结论、完整五平台压缩包及 checksums.txt。本轮不创建定时监控；生产升级、重启及历史任务重放未实施。三份发布记录另行提交/推送，不修改发布源码和标签。
 
 ## 2026-10-20 当前交接：尺寸能力 422 异步换号
 

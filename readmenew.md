@@ -1,10 +1,10 @@
 # Sub2API Fork 二次开发总览
 
-## 2026-10-20 v0.1.173.54 发布准备
+## 2026-10-20 v0.1.173.54 提交与发布
 
-- 用户已明确授权提交并推送 `main`、创建和推送 annotated tag `v0.1.173.54`，通过现有 Actions 完整打包。VERSION 已同步为 `0.1.173.54`，发行手册保留用户指定标签并更新本次发布说明；Fork 身份、安装路径、发行脚本和工作流未改。
-- 本条准备记录基于真实 HEAD=`8024e14afd8a2115f2ab4d76ed5580424d4d5004`，分支 `main`，describe=`v0.1.173.53-1-g8024e14-dirty`，工作树包含已验证的 422 修复、测试、文档、VERSION 和发行手册修改。源代码、测试结果及诊断见下节；提交 SHA、推送和 Actions 最终状态在发布后补记，当前不预记成功。
-- 提交标题：`fix: 异步生图尺寸能力不兼容时自动换号重试`。本次授权包含仓库提交/推送和 Release 打包，生产服务器部署、重启及历史任务重放未执行。
+- 按用户明确要求，已提交并推送 `main`，执行 `git checkout main` / `git pull origin main` 后创建并推送 annotated tag `v0.1.173.54`。发布提交为 `c623015c229be42ada6a9a5fdf076d42cf55fc99`，标题 `fix: 异步生图尺寸能力不兼容时自动换号重试`，源码 VERSION=`0.1.173.54`。发行手册已更新本次发布正文，Fork 身份、安装路径、发行脚本和工作流未改。
+- 发布校验时真实 HEAD=`c623015c229be42ada6a9a5fdf076d42cf55fc99`，status=`## main...origin/main`（干净），describe=`v0.1.173.54`；远端 tag 已核对解引用到该 SHA。本条为发布后文档补记，后续文档提交不移动已推送标签。业务变更与已通过测试见下节及 [开发台账](开发台账.md)。
+- [Release 流水线](https://github.com/JasonWangJie/sub2api_forimg/actions/runs/39286803079)已由 tag push 触发；本轮核对时仍显示 queued，前端构建/上传步骤均 success，完整打包与产物尚未确认。[GitHub 官方事件公告](https://stspg.io/nrv2k8s68bwn)报告 Actions 状态更新、Pages 和 Webhooks 延迟，缓解后正在观察；因此不把滞后的排队状态当作打包失败，也不预记成功。生产服务器部署、重启及历史任务重放未执行。
 
 ## 2026-10-20 异步生图尺寸能力 422 换号
 
