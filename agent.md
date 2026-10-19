@@ -4,8 +4,10 @@
 
 - 已按用户授权提交并推送 422 修复、全部配套记录、VERSION `.54` 及发行手册；执行 checkout/pull main 后已创建并推送 annotated tag `v0.1.173.54`。发布提交为 `c623015c229be42ada6a9a5fdf076d42cf55fc99`，标题 `fix: 异步生图尺寸能力不兼容时自动换号重试`；tag 注释含完整正文，远端解引用同 SHA。
 - 发布校验快照：HEAD=`c623015c229be42ada6a9a5fdf076d42cf55fc99`，status=`## main...origin/main`（干净），describe=`v0.1.173.54`，VERSION=`0.1.173.54`。本条是后续文档补记，允许另提文档提交，不移动已经推送的发布标签。此前准备基线为 `8024e14afd8a2115f2ab4d76ed5580424d4d5004`；已通过测试沿用下节实际结果，本轮未重复跑业务测试。
-- [Release run 39286803079](https://github.com/JasonWangJie/sub2api_forimg/actions/runs/39286803079)已触发，本轮核对 run 仍 queued；前端构建/上传步骤 success，两个前置 job 已有 Complete job 步骤但状态仍 in_progress，release job queued，目标 Release API 404。尚未确认完整构建/产物，不能写成成功或失败。[GitHub 官方事件公告](https://stspg.io/nrv2k8s68bwn)报告 Actions 状态更新延迟，缓解后仍在观察，与本次状态滞后表现一致；不要因 queued 再次触发或覆盖标签。
-- 下一步由后续检查确认 run 最终结论、完整五平台压缩包及 checksums.txt。本轮不创建定时监控；生产升级、重启及历史任务重放未实施。三份发布记录另行提交/推送，不修改发布源码和标签。
+- [v0.1.173.54 Release](https://github.com/JasonWangJie/sub2api_forimg/releases/tag/v0.1.173.54)已于北京时间 `2026-10-20 00:46:22` 公开发布（draft=false/prerelease=false），五平台压缩包与 checksums.txt 都 uploaded 且非空。仅读 521 字节校验文件，五项 SHA-256/文件名与各 GitHub asset digest 一致；未下载压缩包或本地重算二进制哈希，字节数见台账。
+- [Release run 39286803079](https://github.com/JasonWangJie/sub2api_forimg/actions/runs/39286803079)于北京时间 `2026-10-20 00:49:26` 核实 completed/success，四个 job 均成功，包括 GoReleaser、安装产物检查和版本同步；此前 [GitHub 官方事件公告](https://stspg.io/nrv2k8s68bwn)中的状态更新延迟未影响最终发布确认，无需再次触发或覆盖标签。校验清单自身重算 SHA-256 也与 GitHub digest 一致，完整值见台账。
+- 首次发布状态记录已提交/推送 `2a88113246a9eb3a32e62c76f82a6e33dcc3b285`；本次产物核对后记录基线 HEAD 为该 SHA，status=`## main...origin/main`（干净），describe=`v0.1.173.54-1-g2a88113`，VERSION=`0.1.173.54`，远端 main 相同。本次补齐的三份记录继续单独提交/推送，发布源码与标签不变。
+- 发布目标已完成，下一步由用户另行安排生产升级/真实新版任务验收。本轮未创建定时监控，生产升级、重启及历史任务重放未实施。
 
 ## 2026-10-20 当前交接：尺寸能力 422 异步换号
 

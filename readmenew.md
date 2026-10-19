@@ -4,7 +4,8 @@
 
 - 按用户明确要求，已提交并推送 `main`，执行 `git checkout main` / `git pull origin main` 后创建并推送 annotated tag `v0.1.173.54`。发布提交为 `c623015c229be42ada6a9a5fdf076d42cf55fc99`，标题 `fix: 异步生图尺寸能力不兼容时自动换号重试`，源码 VERSION=`0.1.173.54`。发行手册已更新本次发布正文，Fork 身份、安装路径、发行脚本和工作流未改。
 - 发布校验时真实 HEAD=`c623015c229be42ada6a9a5fdf076d42cf55fc99`，status=`## main...origin/main`（干净），describe=`v0.1.173.54`；远端 tag 已核对解引用到该 SHA。本条为发布后文档补记，后续文档提交不移动已推送标签。业务变更与已通过测试见下节及 [开发台账](开发台账.md)。
-- [Release 流水线](https://github.com/JasonWangJie/sub2api_forimg/actions/runs/39286803079)已由 tag push 触发；本轮核对时仍显示 queued，前端构建/上传步骤均 success，完整打包与产物尚未确认。[GitHub 官方事件公告](https://stspg.io/nrv2k8s68bwn)报告 Actions 状态更新、Pages 和 Webhooks 延迟，缓解后正在观察；因此不把滞后的排队状态当作打包失败，也不预记成功。生产服务器部署、重启及历史任务重放未执行。
+- [v0.1.173.54 Release](https://github.com/JasonWangJie/sub2api_forimg/releases/tag/v0.1.173.54)已于北京时间 `2026-10-20 00:46:22` 公开发布，五个平台压缩包及 `checksums.txt` 均 uploaded 且非空；清单五项 SHA-256 与 GitHub 各压缩包 asset digest 一致，未下载压缩包或本地重算二进制哈希。
+- [Release 流水线](https://github.com/JasonWangJie/sub2api_forimg/actions/runs/39286803079)已于北京时间 `2026-10-20 00:49:26` 核实 completed/success，四个 job 全部成功，包含 GoReleaser、安装产物检查和版本同步。过程中 [GitHub 官方事件公告](https://stspg.io/nrv2k8s68bwn)报告的状态更新延迟已不再影响本次最终结论。发布后记录基线为 `2a88113246a9eb3a32e62c76f82a6e33dcc3b285`（main 与 origin/main 同步、干净，describe=`v0.1.173.54-1-g2a88113`，VERSION=`0.1.173.54`）；本条补记只改文档，不移动标签。生产部署、重启及历史任务重放未执行。
 
 ## 2026-10-20 异步生图尺寸能力 422 换号
 
