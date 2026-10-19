@@ -1,5 +1,20 @@
 # AI 交接文档
 
+## 2026-10-20 当前交接：v0.1.173.54 发布准备
+
+- 用户已授权本次 422 修复及全部配套文档提交/推送 main，之后 checkout/pull、创建并推送 annotated tag `v0.1.173.54` 触发完整 Release。VERSION 已同步 `.54`，发行手册保留原有 `.54` 标签选择并替换为此次修复说明；不改 Fork 发布流程。
+- 准备快照：`main@8024e14afd8a2115f2ab4d76ed5580424d4d5004`，describe=`v0.1.173.53-1-g8024e14-dirty`，VERSION=`0.1.173.54`，改动含业务/测试/三份记录/wiki/版本及发行手册；远端 main 初查与本地一致，目标 tag 尚不存在。已通过测试沿用下节实际结果，本轮未重复跑业务测试。
+- 提交标题 `fix: 异步生图尺寸能力不兼容时自动换号重试`。待执行提交、推送和 tag 后补记真实 SHA、Actions 与产物结果；此处为发布准备，不把计划写成成功。生产升级、重启及历史任务重放未实施。
+
+## 2026-10-20 当前交接：尺寸能力 422 异步换号
+
+- 本轮用户要求只读上服务器检查指定 `HTTP 422`，并加入异步自动换号。本地真实基线 `main@8024e14afd8a2115f2ab4d76ed5580424d4d5004`，VERSION=`0.1.173.53`，describe=`v0.1.173.53-1-g8024e14-dirty`。开始时只有用户的 `发行版发布与安装操作手册.md` 未提交变更（示例 tag 改为 `.54`）；必须保留，不把该示例当作源码已升版。
+- 生产只读确认 `0.1.173.53 / 5c71780282ec1edb8a61b68882306f07d2756fd7`、服务 active；北京时间 `2026-10-20 00:17:29` 近 48 小时有 133 个完整文案命中失败，全部账号 26、只尝试一个账号、retry_count=0。结构化错误是 `image_size_not_supported / fixed_capability_mismatch / param=size`；422 直接走终止 user_error，未进入换号。完整证据及样本见 [图片渠道错误与换号重试诊断](wiki-new/图片渠道错误与换号重试诊断.md)。
+- 组 11 为 model_resolution，相关池有其他候选；账号 26 查询时 active / schedulable=false，本轮没有调整调度，也不推断是谁在何时关闭。Worker 预算与池配置保持现状。新增 `async_image_size_capability.go` 共用分类仅匹配 HTTP 422 和完整已知 message；OpenAI API Key/OAuth、Gemini 私有异步路径直接换号，保持请求规格，禁止原号重复。耗尽保留 422/type/code/安全 message，Worker 不重排；OpenAI 尝试审计补齐新错误 provider code/message。管理员透传优先，同步及普通 422 不变。实现与实际测试结果见 [开发台账](开发台账.md)。
+- 最终定向 Service unit 46 个子用例通过（0.231s），Handler unit 的 6 个 Images 场景及 Gemini 耗尽通过（0.115s）；验证覆盖 A→B 成功、候选/预算耗尽、显式同账号重试 422、管理员透传和停止边界。OpenAI 原有管理员临时规则仍按模型生效，无规则时不新增默认冷却。完整 unit 回归 Service 163.395s / Handler 36.575s 通过，Service 明确跳过既有外部 OpenAI token API 对照测试。11 份 Go 文件格式检查、`git diff --check`、16 个新增本地 Markdown 链接及文档格式检查通过；未跑前端或 CI。完整命令见 [开发台账](开发台账.md)。
+- 生产授权范围只读：SSH 状态/日志/版本与只读 PostgreSQL SELECT，强制 default_transaction_read_only 和语句/锁超时；未改生产文件、配置、数据库、服务或账号开关，未部署、重启、真实生图或重放任务。账号口令、API Key、签名 URL 及原始请求不得写入仓库。
+- 本地实现与验证已完成，尚未提交；下一步由用户安排提交/发版/部署。生产新版本需检查同一任务 A→B 的尝试顺序、422 能力错误和切换耗尽后的终态，以及既有计费/结果处理边界。生产仍在旧二进制，本轮不自动回填或重放历史失败任务。
+
 ## 2026-10-11 当前交接：异步生图结果 URL 转存
 
 - 本轮按用户已确认方案完成本地实现：GeminiGeneratedImage 增加仅内部使用的 SourceURL；结构化 inlineData / fileData（含下划线形式）优先，兼容 URL / Base64 编码 URL 及无结构化图片时的 URL envelope、纯 URL 和单个 Markdown 图片链接。同步 Chat Completions 不使用此私有捕获路径。

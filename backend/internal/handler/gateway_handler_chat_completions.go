@@ -518,6 +518,14 @@ func (h *GatewayHandler) handleCCFailoverExhausted(c *gin.Context, lastErr *serv
 		h.chatCompletionsErrorResponse(c, http.StatusBadGateway, "upstream_error", service.OpenAISilentRefusalClientMessage())
 		return
 	}
+	if errType, code, message, ok := asyncImageSizeCapabilityErrorDetails(c, lastErr); ok {
+		errorBody := gin.H{"type": errType, "message": message}
+		if code != "" {
+			errorBody["code"] = code
+		}
+		c.JSON(http.StatusUnprocessableEntity, gin.H{"error": errorBody})
+		return
+	}
 	if lastErr != nil && lastErr.ProviderErrorMessage != "" && c != nil && c.Request != nil && service.IsGeminiAsyncImageGeneration(c.Request.Context()) {
 		errorBody := gin.H{"type": "upstream_error", "message": lastErr.ProviderErrorMessage}
 		if lastErr.ProviderErrorCode != "" {

@@ -331,10 +331,14 @@ func (h *OpenAIGatewayHandler) Images(c *gin.Context) {
 				var failoverErr *service.UpstreamFailoverError
 				if errors.As(err, &failoverErr) {
 					if asyncImageGeneration {
-						service.RecordAsyncImageAccountAttempt(c.Request.Context(), service.AsyncImageAccountAttempt{
+						attempt := service.AsyncImageAccountAttempt{
 							AccountID: account.ID, AccountName: account.Name, Status: service.AsyncImageAccountAttemptFailed,
 							StatusCode: failoverErr.StatusCode, UpstreamRequestID: upstreamRequestIDFromFailover(failoverErr), Error: failoverErr.Error(),
-						})
+						}
+						if failoverErr.IsAsyncImageSizeCapabilityMismatch() {
+							attempt = asyncImageFailedAccountAttempt(account, failoverErr)
+						}
+						service.RecordAsyncImageAccountAttempt(c.Request.Context(), attempt)
 					}
 					h.gatewayService.ReportOpenAIAccountScheduleResult(account.ID, openAIAccountScheduleModel(requestCtx, account, requestModel, result), false, nil)
 					if service.OpenAIImagesJSONKeepaliveAdjustedWrittenSize(c) != writerSizeBeforeForward {

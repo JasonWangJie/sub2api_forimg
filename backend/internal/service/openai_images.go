@@ -817,11 +817,17 @@ func (s *OpenAIGatewayService) forwardOpenAIImagesAPIKey(
 		resp.Body = io.NopCloser(bytes.NewReader(respBody))
 		upstreamMsg := strings.TrimSpace(extractUpstreamErrorMessage(respBody))
 		upstreamMsg = sanitizeUpstreamErrorMessage(upstreamMsg)
+		asyncSizeMismatch := AsyncImageAccountAttemptCaptureFromContext(ctx) != nil && isAsyncImageSizeCapabilityMismatch(resp.StatusCode, respBody)
+		if asyncSizeMismatch {
+			if rules := getBoundErrorPassthroughService(c); rules != nil && rules.MatchRule(account.Platform, resp.StatusCode, respBody) != nil {
+				return s.handleOpenAIImagesErrorResponse(upstreamCtx, resp, c, account, upstreamModel)
+			}
+		}
 		shouldFailover := s.shouldFailoverOpenAIUpstreamResponse(resp.StatusCode, upstreamMsg, respBody)
 		if !shouldFailover && resp.StatusCode == http.StatusBadRequest && AsyncImageAccountAttemptCaptureFromContext(ctx) != nil {
 			shouldFailover = isOpenAIAsyncAccountFailover400(upstreamMsg)
 		}
-		if shouldFailover {
+		if shouldFailover || asyncSizeMismatch {
 			appendOpsUpstreamError(c, OpsUpstreamErrorEvent{
 				Platform:           account.Platform,
 				AccountID:          account.ID,
@@ -832,6 +838,13 @@ func (s *OpenAIGatewayService) forwardOpenAIImagesAPIKey(
 				Kind:               "failover",
 				Message:            upstreamMsg,
 			})
+			if asyncSizeMismatch {
+				// A fixed size capability cannot improve on the same account and
+				// does not imply that the account is unusable for other sizes.
+				// Preserve any explicit administrator error/temporary rules.
+				s.handleOpenAIAccountUpstreamError(upstreamCtx, account, resp.StatusCode, resp.Header, respBody, upstreamModel)
+				return nil, newAsyncImageSizeCapabilityFailoverError(respBody, resp.Header)
+			}
 			shouldDisable := s.handleFailoverSideEffects(upstreamCtx, resp, account, respBody, upstreamModel)
 			retrySameAccount := !shouldDisable && account.IsPoolMode() && account.IsPoolModeRetryableStatus(resp.StatusCode)
 			if AsyncImageAccountAttemptCaptureFromContext(ctx) != nil && resp.StatusCode == http.StatusBadRequest {

@@ -1741,6 +1741,12 @@ func (s *OpenAIGatewayService) forwardOpenAIImagesOAuth(
 		resp.Body = io.NopCloser(bytes.NewReader(respBody))
 		upstreamMsg := strings.TrimSpace(extractUpstreamErrorMessage(respBody))
 		upstreamMsg = sanitizeUpstreamErrorMessage(upstreamMsg)
+		asyncSizeMismatch := AsyncImageAccountAttemptCaptureFromContext(ctx) != nil && isAsyncImageSizeCapabilityMismatch(resp.StatusCode, respBody)
+		if asyncSizeMismatch {
+			if rules := getBoundErrorPassthroughService(c); rules != nil && rules.MatchRule(account.Platform, resp.StatusCode, respBody) != nil {
+				return s.handleOpenAIImagesErrorResponse(upstreamCtx, resp, c, account, requestModel)
+			}
+		}
 		shouldFailover := s.shouldFailoverOpenAIUpstreamResponse(resp.StatusCode, upstreamMsg, respBody)
 		// Async image requests must treat provider-side 400 "Invalid request"
 		// responses as account-scoped failures. Different configured gateway
@@ -1750,7 +1756,7 @@ func (s *OpenAIGatewayService) forwardOpenAIImagesOAuth(
 		if !shouldFailover && resp.StatusCode == http.StatusBadRequest && AsyncImageAccountAttemptCaptureFromContext(ctx) != nil {
 			shouldFailover = isOpenAIAsyncAccountFailover400(upstreamMsg)
 		}
-		if shouldFailover {
+		if shouldFailover || asyncSizeMismatch {
 			appendOpsUpstreamError(c, OpsUpstreamErrorEvent{
 				Platform:           account.Platform,
 				AccountID:          account.ID,
@@ -1761,6 +1767,10 @@ func (s *OpenAIGatewayService) forwardOpenAIImagesOAuth(
 				Kind:               "failover",
 				Message:            upstreamMsg,
 			})
+			if asyncSizeMismatch {
+				s.handleOpenAIAccountUpstreamError(upstreamCtx, account, resp.StatusCode, resp.Header, respBody, requestModel)
+				return nil, newAsyncImageSizeCapabilityFailoverError(respBody, resp.Header)
+			}
 			shouldDisable := s.handleFailoverSideEffects(upstreamCtx, resp, account, respBody, requestModel)
 			retrySameAccount := !shouldDisable && account.IsPoolMode() && account.IsPoolModeRetryableStatus(resp.StatusCode)
 			// Durable async image requests must move to another configured

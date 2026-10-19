@@ -231,6 +231,7 @@ func (s *GeminiMessagesCompatService) forwardClaudeBodyAsChatCompletions(
 
 	if resp.StatusCode >= 400 {
 		respBody := s.readUpstreamErrorBody(resp)
+		evBody := unwrapIfNeeded(account.Type == AccountTypeOAuth, respBody)
 		policy := ErrorPolicyNone
 		if s.rateLimitService != nil {
 			policy = s.rateLimitService.CheckErrorPolicy(ctx, account, resp.StatusCode, respBody, mappedModel)
@@ -240,7 +241,13 @@ func (s *GeminiMessagesCompatService) forwardClaudeBodyAsChatCompletions(
 		if policy == ErrorPolicyNone || policy == ErrorPolicyMatched {
 			s.handleGeminiUpstreamError(ctx, account, resp.StatusCode, resp.Header, respBody)
 		}
-		evBody := unwrapIfNeeded(account.Type == AccountTypeOAuth, respBody)
+		if asyncImageGeneration && isAsyncImageSizeCapabilityMismatch(resp.StatusCode, evBody) {
+			if status, errType, errMsg, matched := applyErrorPassthroughRule(c, account.Platform, resp.StatusCode, evBody,
+				http.StatusBadGateway, "upstream_error", "Upstream request failed"); matched {
+				return nil, s.writeChatCompletionsError(c, status, errType, errMsg)
+			}
+			return nil, newAsyncImageSizeCapabilityFailoverError(evBody, resp.Header)
+		}
 		if asyncImageGeneration && resp.StatusCode == http.StatusBadRequest {
 			if isGeminiAsyncAccountFailover400(evBody) {
 				return nil, newGeminiAsyncAccountFailover400(evBody, resp.Header)
