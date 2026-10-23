@@ -224,6 +224,9 @@ func (h *GatewayHandler) ChatCompletions(c *gin.Context) {
 				excludedAccountIDs[id] = struct{}{}
 			}
 		}
+		for id := range service.AsyncImageNonRetryableAccountIDs(c.Request.Context()) {
+			excludedAccountIDs[id] = struct{}{}
+		}
 		selection, err := h.gatewayService.SelectAccountWithLoadAwareness(c.Request.Context(), apiKey.GroupID, selectionSessionHash, reqModel, excludedAccountIDs, "", int64(0))
 		if err != nil {
 			if len(fs.FailedAccountIDs) == 0 && len(service.AsyncImageExcludedAccountIDs(c.Request.Context())) > 0 && !historicalExclusionsRetried &&
@@ -526,6 +529,10 @@ func (h *GatewayHandler) handleCCFailoverExhausted(c *gin.Context, lastErr *serv
 		c.JSON(http.StatusUnprocessableEntity, gin.H{"error": errorBody})
 		return
 	}
+	if errType, code, message, ok := asyncImageReferenceBudgetErrorDetails(c, lastErr); ok {
+		c.JSON(http.StatusBadRequest, gin.H{"error": gin.H{"type": errType, "code": code, "message": message}})
+		return
+	}
 	if lastErr != nil && lastErr.ProviderErrorMessage != "" && c != nil && c.Request != nil && service.IsGeminiAsyncImageGeneration(c.Request.Context()) {
 		errorBody := gin.H{"type": "upstream_error", "message": lastErr.ProviderErrorMessage}
 		if lastErr.ProviderErrorCode != "" {
@@ -600,6 +607,15 @@ func asyncImageFailedAccountAttempt(account *service.Account, err error) service
 		attempt.UpstreamRequestID = upstreamErr.UpstreamRequestID
 		if upstreamErr.ProviderErrorMessage != "" {
 			attempt.Error = upstreamErr.ProviderErrorMessage
+		}
+	}
+	var imagesErr *service.OpenAIImagesUpstreamError
+	if errors.As(err, &imagesErr) {
+		attempt.StatusCode = imagesErr.StatusCode
+		attempt.ProviderErrorCode = imagesErr.Code
+		attempt.UpstreamRequestID = imagesErr.UpstreamRequestID
+		if imagesErr.Message != "" {
+			attempt.Error = imagesErr.Message
 		}
 	}
 	return attempt

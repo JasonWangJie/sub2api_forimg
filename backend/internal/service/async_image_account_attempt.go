@@ -29,6 +29,7 @@ const (
 
 type asyncImageAccountAttemptContextKey struct{}
 type asyncImageExcludedAccountsContextKey struct{}
+type asyncImageNonRetryableAccountsContextKey struct{}
 type asyncImageGeminiMaxSwitchesContextKey struct{}
 type asyncImageAccountAttemptTimeoutContextKey struct{}
 type asyncImageRoutingSessionHashContextKey struct{}
@@ -69,6 +70,34 @@ func AsyncImageReferenceAccountSwitchActive(ctx context.Context) bool {
 	}
 	active, _ := ctx.Value(asyncImageReferenceAccountSwitchContextKey{}).(bool)
 	return active
+}
+
+// WithAsyncImageNonRetryableAccountIDs excludes accounts for this durable task
+// even when a gateway relaxes its normal recent-failure exclusions. These IDs
+// come from persisted definite failures, not from global account health.
+func WithAsyncImageNonRetryableAccountIDs(ctx context.Context, ids map[int64]struct{}) context.Context {
+	if ctx == nil || len(ids) == 0 {
+		return ctx
+	}
+	copyIDs := make(map[int64]struct{}, len(ids))
+	for id := range ids {
+		if id > 0 {
+			copyIDs[id] = struct{}{}
+		}
+	}
+	return context.WithValue(ctx, asyncImageNonRetryableAccountsContextKey{}, copyIDs)
+}
+
+func AsyncImageNonRetryableAccountIDs(ctx context.Context) map[int64]struct{} {
+	if ctx == nil {
+		return nil
+	}
+	ids, _ := ctx.Value(asyncImageNonRetryableAccountsContextKey{}).(map[int64]struct{})
+	copyIDs := make(map[int64]struct{}, len(ids))
+	for id := range ids {
+		copyIDs[id] = struct{}{}
+	}
+	return copyIDs
 }
 
 func WithAsyncImageExcludedAccountIDs(ctx context.Context, ids map[int64]struct{}) context.Context {

@@ -436,22 +436,69 @@ func ParseAsyncImageRetryAfter(value string, now time.Time) time.Duration {
 }
 
 // IsAsyncImageReferenceFetchFailureMessage identifies provider responses that
-// specifically say the upstream tried and failed to fetch a reference URL.
-// Durable Gemini hybrid transport uses this to bypass generic 5xx account
-// failover so the worker can persistently switch to local inlineData.
+// specifically say an input reference could not be fetched, excluding permanent
+// input errors and generated-result downloads. This is not proof that generation
+// never started: callers must preserve execution-unknown and retry-budget guards.
 func IsAsyncImageReferenceFetchFailureMessage(message string) bool {
-	lower := strings.ToLower(strings.TrimSpace(message))
+	lower := strings.ToLower(strings.Join(strings.Fields(message), " "))
+	for _, fragment := range []string{
+		"generated image", "generated result", "result image", "output image", "image output",
+		"execution_unknown", "execution unknown", "outcome is unknown",
+		"do not automatically regenerate", "do not regenerate", "do not retry",
+		"content policy", "content policies", "safety policy", "guardrails",
+		"content filter", "safety filter", "safety rejected", "content rejected",
+		"prompt or input images could not be processed",
+		"内容审核", "安全审核", "禁止自动再生成", "不要自动再生成",
+		"image_too_many_pixels", "too many pixels", "pixel limit", "pixels exceed",
+		"exceeds the configured", "exceed the configured", "image exceeds limit",
+		"size limit exceeded", "byte limit exceeded", "mb limit exceeded", "mib limit exceeded",
+		"image is too large", "image too large", "payload too large",
+		"corrupt image", "corrupted image", "image is corrupt",
+		"image_mime_mismatch", "image_signature_mismatch", "declared image type does not match",
+		"invalid base64", "invalid image data uri", "unsupported image format",
+		"unsupported image type", "url must be an absolute", "blocked network address",
+		"blocked addresses", "redirect limit exceeded", "redirects must use https",
+	} {
+		if strings.Contains(lower, fragment) {
+			return false
+		}
+	}
+	// Providers wrap download status codes in plain text or small JSON details.
+	// Match status labels rather than bare numbers that may occur in a URL.
+	statusText := strings.NewReplacer(
+		":", " ", "=", " ", "\"", "", "'", "", "_", " ",
+		"{", " ", "}", " ", "[", " ", "]", " ", "(", " ", ")", " ",
+		",", " ", ";", " ", ".", " ",
+	).Replace(lower)
+	statusText = strings.Join(strings.Fields(statusText), " ")
+	for _, code := range []string{"401", "403", "404"} {
+		for _, label := range []string{"http ", "http status ", "status ", "status code "} {
+			if strings.Contains(statusText+" ", label+code+" ") {
+				return false
+			}
+		}
+	}
+	for _, fragment := range []string{"401 unauthorized", "403 forbidden", "404 not found"} {
+		if strings.Contains(statusText, fragment) {
+			return false
+		}
+	}
 	for _, fragment := range []string{
 		"image_url fetch failed", "image url fetch failed", "fileuri fetch failed",
 		"fileuri download failed", "failed to fetch image", "failed to download image",
-		"download reference image", "fetch reference image", "could not fetch image",
-		"unable to fetch image",
+		"download reference image", "download openai reference image", "fetch reference image",
+		"reference image download failed", "reference image download exceeded its total time budget",
+		"reference image fetch failed", "could not fetch image", "unable to fetch image",
 	} {
 		if strings.Contains(lower, fragment) {
 			return true
 		}
 	}
-	return false
+	// Keep the existing provider-fetch fallback for malformed containers. A bare
+	// invalid-image response has no reference-fetch evidence and remains terminal.
+	return (strings.Contains(lower, "image container is invalid") &&
+		(strings.Contains(lower, "download") || strings.Contains(lower, "fetch") || strings.Contains(lower, "image_url"))) ||
+		(strings.Contains(lower, "invalid image") && strings.Contains(lower, "fetch"))
 }
 
 func (r *AsyncImageReference) DataURI() string {

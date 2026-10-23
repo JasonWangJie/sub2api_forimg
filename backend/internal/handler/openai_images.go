@@ -177,6 +177,9 @@ func (h *OpenAIGatewayHandler) Images(c *gin.Context) {
 				selectionExcludedIDs[id] = struct{}{}
 			}
 		}
+		for id := range service.AsyncImageNonRetryableAccountIDs(requestCtx) {
+			selectionExcludedIDs[id] = struct{}{}
+		}
 		selection, scheduleDecision, err := h.gatewayService.SelectAccountWithSchedulerForImages(
 			requestCtx,
 			apiKey.GroupID,
@@ -313,6 +316,10 @@ func (h *OpenAIGatewayHandler) Images(c *gin.Context) {
 			} else {
 				var imageUpstreamErr *service.OpenAIImagesUpstreamError
 				if errors.As(err, &imageUpstreamErr) {
+					if asyncImageGeneration {
+						attempt := asyncImageFailedAccountAttempt(account, imageUpstreamErr)
+						service.RecordAsyncImageAccountAttempt(c.Request.Context(), attempt)
+					}
 					retryableServerError := service.IsOpenAIImagesRetryableUpstreamError(imageUpstreamErr)
 					h.gatewayService.ReportOpenAIAccountScheduleResult(account.ID, openAIAccountScheduleModel(requestCtx, account, requestModel, result), !retryableServerError, nil)
 					logEvent := "openai.images.upstream_user_error"
@@ -335,7 +342,7 @@ func (h *OpenAIGatewayHandler) Images(c *gin.Context) {
 							AccountID: account.ID, AccountName: account.Name, Status: service.AsyncImageAccountAttemptFailed,
 							StatusCode: failoverErr.StatusCode, UpstreamRequestID: upstreamRequestIDFromFailover(failoverErr), Error: failoverErr.Error(),
 						}
-						if failoverErr.IsAsyncImageSizeCapabilityMismatch() {
+						if failoverErr.IsAsyncImageSizeCapabilityMismatch() || failoverErr.IsAsyncImageReferenceBudgetExceeded() {
 							attempt = asyncImageFailedAccountAttempt(account, failoverErr)
 						}
 						service.RecordAsyncImageAccountAttempt(c.Request.Context(), attempt)

@@ -1,5 +1,26 @@
 # AI 交接文档
 
+## 2026-10-24 当前交接：异步分类优化与预算400禁止同号
+
+- 用户已要求执行优化，并指定任务`asyncimg_48de7444b4968293bc7a5186be50a5ba`同类错误换号、不重试同账号。只读重查确认账号33/Gemini图生图2K/组2，提交北京时间10-24 00:10:21、终态00:10:58，错误为HTTP400参考图35秒总下载预算耗尽；原任务retry=0、只有该账号。生产仍`.54 / c623015c229be42ada6a9a5fdf076d42cf55fc99`、active，本轮没有修改生产/部署/重启/生图/重放。
+- 本地已实现严格HTTP400+完整已知预算耗尽格式（HTTPS参考地址、正预算、reason=timeout）的直接换号；支持OpenAI APIKey/OAuth和Gemini两种凭据。`RetryableOnSameAccount=false`优先于池的400同号重试；保留原provider诊断、requestID、headers，来源URL整条隐藏。耗尽在私有Worker响应中使用稳定`async_image_reference_budget_exceeded`标记且保留400，Worker直接终止，不能重新回普通reference同号循环。
+- 预算失败账号从完整持久`account_attempts`推导到`AsyncImageNonRetryableAccountIDs`，两Gateway每轮始终排除，即使B后续503导致Worker再执行、普通最近三号排除被放宽，A也不能再入选。预算失败不进入普通参考图sticky累计。只作用于该任务，不全局停用账号，不加数据库字段。
+- 普通参考图获取分类已在Service/Worker共用，覆盖Reference image download failed/exceeded、reference image fetch failed、OpenAI前缀；内容拒绝、永久输入错误和生成结果下载继续停止，保留既有明确fetch容器兼容。Gemini泛invalid_request先排除这些参考图语义，防止跳过Worker的local回退。特殊预算400由更早的直接换号分支接管，不走local同号重试。
+- 新组合422要求完整三段文案、`image_request_capability_not_supported`和恰好model/size两种capability_errors共同成立，复用既有422耗尽边界；中文槽位满400精确归容量，复用有界退避与Retry-After。OpenAI typed终止错误新增尝试审计status/provider code/requestID。管理员透传/临时规则、同步和请求规格均保持。
+- 模糊502/fileData deadline仍先保持unknown；本轮没有向上游独立核实其是否生成前失败，所以没有交换unknown判断顺序，也不重放历史105个unknown。没有普遍提高并发/重试预算、调整生产精确池或新增自动健康策略。后续若要处理这些事项，先核实运行证据与上游阶段，再安排真实验收/上线。
+- 当前HEAD仍`1eb4e1faf9e4e15579be23c96a2fa8f29189c501`、VERSION=`0.1.173.54`、describe=`v0.1.173.54-2-g1eb4e1f-dirty`，main与origin/main关系未改。开始已有上轮五份文档改动，保留后继续增加业务/回归与记录，未commit/push/tag。实际测试与文档终验见 [开发台账](开发台账.md)，实现说明见 [诊断报告实施记录](wiki-new/异步生图近三日生产诊断与优化建议.md#2026-10-24-本地优化实施)。
+
+## 2026-10-24 当前交接：近三天生产异步生图诊断
+
+- 本轮用户明确授权登录 `40.160.139.185` 查看近三天异步生图失败日志及建议，并要求多个子智能体。已完成只读 SSH、服务/版本/文件日志和 PostgreSQL 聚合；没有修改生产文件、配置、数据、服务或账号调度，没有部署、重启、生图或重放。数据库强制只读和语句/锁超时；不要保存登录口令、API Key、原始提示词或带签名 URL。
+- 固定提交窗口为北京时间 `[2026-10-20 23:55:16, 2026-10-23 23:55:16)`；20,292 个任务成功19,528、failed659、unknown105（成功率96.235%）。生产当前 `.54 / c623015c229be42ada6a9a5fdf076d42cf55fc99`、active，进程自北京时间10-20 07:23:36运行。本地业务源码与该发布提交一致，不能沿用旧`.53`问题判断新版是否生效。
+- 优先代码建议：统一参考图分类，覆盖 `Reference image download failed/exceeded` 与 `reference image fetch failed` 等词序；经上游语义核实为生成前失败的拉图错误，才做有限local回退，再进入通用unknown，本轮未完成该上游阶段核实。185个参考图失败+83个fileData未知合计268个受影响样本，不是保证挽回数；83个均账号12/image_to_image/hybrid/参考重试0，发生在10-21。
+- 21个新组合422全是组11/账号26/flare图生图（1K4、2K17），只尝试账号26；日志code为image_request_capability_not_supported，原因同时含model/size。旧尺寸规则只接受完整旧句，新文案不命中。另3个旧文案422均已多号；旧规则相关100个任务有87个最终成功。可另行授权调整不兼容精确池，但不能全局停26或悄悄改模型。
+- 中文槽位满400有101个，96个此前已多号，容量重排仅1个；建议补精确容量分类与退避，不盲目增并发。账号1产生过4825条503失败审计，涉及4754任务、4532最终成功，体现无效尝试负担；账号1/12当前均schedulable=false，本轮没有操作，不推断历史关闭时间。failed审计可能重复，不当独立调用数。
+- 实际运行参数来自管理端保存的settings：Worker100（启动日志确认）、网关150/等待360秒/队列120、单号300秒/调用900秒、Gemini切换3、上游/容量/参考图/总重试3/3/2/16、两平台hybrid、熔断5/600秒、下载32MiB/40MP/60秒、任务90天/结果2天。YAML网关200不是当前生效值；Worker数量改设置后需重启/重建runtime才应用。暂不建议提高并发或直接缩短单号超时。
+- 完整脱敏证据、源码和建议见 [异步生图近三日生产诊断与优化建议](wiki-new/异步生图近三日生产诊断与优化建议.md)。本轮仅新增报告并更新索引/三份记录；未跑代码测试、CI或真实上游。最终文档检查通过，详见 [开发台账](开发台账.md)。
+- 实际本地HEAD=`1eb4e1faf9e4e15579be23c96a2fa8f29189c501`、VERSION=`0.1.173.54`；开始main与origin/main同步且干净，describe=`v0.1.173.54-2-g1eb4e1f`；完成仅五份文档改动，describe=`v0.1.173.54-2-g1eb4e1f-dirty`，未提交/推送。下一步是按用户安排实现并回归上述分类修复，再安排精确池调整和生产验收；105个unknown不自动重放，207个安全拒绝保留停止边界。
+
 ## 2026-10-20 当前交接：v0.1.173.54 提交与发布
 
 - 已按用户授权提交并推送 422 修复、全部配套记录、VERSION `.54` 及发行手册；执行 checkout/pull main 后已创建并推送 annotated tag `v0.1.173.54`。发布提交为 `c623015c229be42ada6a9a5fdf076d42cf55fc99`，标题 `fix: 异步生图尺寸能力不兼容时自动换号重试`；tag 注释含完整正文，远端解引用同 SHA。

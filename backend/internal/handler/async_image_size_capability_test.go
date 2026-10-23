@@ -23,6 +23,9 @@ import (
 const sizeCapabilityMessage = "No eligible upstream image provider supports the requested image size or resolution tier. Adjust size/resolution or select a compatible route."
 const sizeCapabilityErrorBody = `{"error":{"type":"invalid_request_error","code":"image_size_not_supported","message":"` + sizeCapabilityMessage + `"}}`
 
+const combinedCapabilityMessage = "No eligible upstream image provider supports the requested capability combination. No eligible upstream image provider supports the requested model. Select a supported model or a compatible route. No eligible upstream image provider supports the requested image size or resolution tier. Adjust size/resolution or select a compatible route."
+const combinedCapabilityErrorBody = `{"code":"image_request_capability_not_supported","details":{"capability_errors":["image_model_not_supported","image_size_not_supported"]},"error":{"type":"invalid_request_error","code":"image_request_capability_not_supported","message":"` + combinedCapabilityMessage + `"}}`
+
 type sizeCapabilityPassthroughRepo struct {
 	service.ErrorPassthroughRepository
 	rules []*model.ErrorPassthroughRule
@@ -68,6 +71,8 @@ func TestAsyncImageSizeCapabilityFailover(t *testing.T) {
 		{"ordinary_422_is_terminal", map[int64]string{1: `{"error":{"type":"invalid_request_error","code":"invalid_size","message":"size must be 1024x1024"}}`}, 3, true, false, []int64{1}, http.StatusUnprocessableEntity},
 		{"synchronous_422_is_terminal", map[int64]string{1: sizeCapabilityErrorBody}, 3, false, false, []int64{1}, http.StatusUnprocessableEntity},
 		{"admin_passthrough_is_terminal", map[int64]string{1: sizeCapabilityErrorBody}, 3, true, true, []int64{1}, http.StatusConflict},
+		{"combined_next_account_succeeds", map[int64]string{1: combinedCapabilityErrorBody}, 3, true, false, []int64{1, 2}, http.StatusOK},
+		{"combined_candidate_pool_terminal", map[int64]string{1: combinedCapabilityErrorBody, 2: combinedCapabilityErrorBody}, 3, true, false, []int64{1, 2}, http.StatusUnprocessableEntity},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			accounts := []service.Account{}

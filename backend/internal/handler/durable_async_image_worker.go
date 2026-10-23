@@ -525,6 +525,7 @@ func (h *DurableAsyncImageHandler) invokeAsyncImageTask(parent context.Context, 
 		}
 	}
 	parent = service.WithAsyncImageAccountAttemptCapture(parent, attemptCapture)
+	parent = service.WithAsyncImageNonRetryableAccountIDs(parent, asyncImageNonRetryableAccountIDs(task))
 	referenceRetryState := asyncImageReferenceAccountRetryState(task)
 	referenceRetryState.switchPending = asyncImageReferenceAccountSwitchRetryAllowed(task, cfg)
 	parent = service.WithAsyncImageExcludedAccountIDs(parent, asyncImageReferenceRetryExcludedAccountIDs(task, cfg))
@@ -631,38 +632,7 @@ func (h *DurableAsyncImageHandler) invokeAsyncImageTask(parent context.Context, 
 		return asyncImageWorkerDisposition{}
 	}
 	if recorder.Code < http.StatusOK || recorder.Code >= http.StatusMultipleChoices {
-		message := formatAsyncImageUpstreamFailure(recorder.Code, recorder.Body.Bytes())
-		retryAfter := service.ParseAsyncImageRetryAfter(recorder.Header().Get("Retry-After"), time.Now())
-		logger.L().Warn("async_image.upstream_failed",
-			zap.String("task_id", task.TaskID),
-			zap.String("platform", task.Platform),
-			zap.String("model", task.Model),
-			zap.Int("status_code", recorder.Code),
-			zap.String("message", message),
-		)
-		if isAsyncImageAmbiguousUpstreamFailure(recorder.Code, message) {
-			h.markAsyncImageExecutionUnknown(parent, task, message)
-			return asyncImageWorkerDisposition{}
-		}
-		// The account-attempt capture is invocation-scoped. Record this response
-		// before classifying it so the retry policy sees the failure that just
-		// happened, not only the previous queued invocation's persisted snapshot.
-		recordAsyncImageReferenceFetchFailure(ginContext.Request.Context(), message)
-		if shouldRetryAsyncImageUpstreamReferenceFetchWithContext(ginContext.Request.Context(), task, cfg, recorder.Code, message) {
-			return h.retryAsyncImageUpstreamReferenceFetch(parent, task, cfg, message, retryAfter)
-		}
-		if isAsyncImageCapacityFailure(recorder.Code, message) {
-			if shouldRetryAsyncImageCapacity(task, cfg, recorder.Code, message) {
-				return h.retryAsyncImageCapacity(parent, task, cfg, message, retryAfter, "upstream_capacity")
-			}
-			h.failAsyncImageTask(parent, task, "upstream_capacity_exhausted", message, false)
-			return asyncImageWorkerDisposition{}
-		}
-		if shouldRetryAsyncImageUpstreamTransient(task, cfg, recorder.Code, message) {
-			return h.retryAsyncImageUpstreamTransient(parent, task, cfg, message, retryAfter)
-		}
-		h.failAsyncImageTask(parent, task, "upstream_failed", message, false)
-		return asyncImageWorkerDisposition{}
+		return h.handleAsyncImageUpstreamFailure(parent, ginContext.Request.Context(), task, cfg, recorder.Code, recorder.Body.Bytes(), recorder.Header())
 	}
 
 	return h.completeAsyncImageInvocation(parent, ginContext.Request.Context(), task, recorder.Body.Bytes(), usageCapture, geminiCapture, cfg)
@@ -795,44 +765,25 @@ func shouldRetryAsyncImageReferenceFetch(task *service.AsyncImageTask, cfg servi
 }
 
 func isAsyncImageExplicitReferenceFetchFailure(message string) bool {
-	lower := strings.ToLower(message)
-	for _, permanent := range []string{
-		"http 401", "http 403", "http 404", "401 unauthorized", "403 forbidden", "404 not found",
-		"image_too_many_pixels", "exceeds the configured", "corrupt image",
-	} {
-		if strings.Contains(lower, permanent) {
-			return false
-		}
-	}
-	for _, fragment := range []string{
-		"image_url fetch failed", "image url fetch failed", "failed to fetch image",
-		"failed to download image", "download reference image", "download openai reference image",
-		"fetch reference image",
-		"could not fetch image", "unable to fetch image", "fileuri fetch failed",
-	} {
-		if strings.Contains(lower, fragment) {
-			return true
-		}
-	}
-	if strings.Contains(lower, "image container is invalid") &&
-		(strings.Contains(lower, "download") || strings.Contains(lower, "fetch") || strings.Contains(lower, "image_url")) {
-		return true
-	}
-	// Provider-side INVALID_IMAGE is retryable only when it is explicitly
-	// attached to URL fetching; a bare malformed-image response is permanent.
-	return strings.Contains(lower, "invalid image") && strings.Contains(lower, "fetch")
+	return service.IsAsyncImageReferenceFetchFailureMessage(message)
 }
 
 func isAsyncImageMultipartRequiredFailure(message string) bool {
 	return strings.Contains(strings.ToLower(message), "requires multipart/form-data")
 }
 
-func shouldRetryAsyncImageUpstreamReferenceFetch(task *service.AsyncImageTask, cfg service.AsyncImageRuntimeConfig, _ int, message string) bool {
-	return shouldRetryAsyncImageUpstreamReferenceFetchWithContext(nil, task, cfg, 0, message)
+func shouldRetryAsyncImageUpstreamReferenceFetch(task *service.AsyncImageTask, cfg service.AsyncImageRuntimeConfig, statusCode int, message string) bool {
+	return shouldRetryAsyncImageUpstreamReferenceFetchWithContext(nil, task, cfg, statusCode, message)
 }
 
-func shouldRetryAsyncImageUpstreamReferenceFetchWithContext(ctx context.Context, task *service.AsyncImageTask, cfg service.AsyncImageRuntimeConfig, _ int, message string) bool {
+func shouldRetryAsyncImageUpstreamReferenceFetchWithContext(ctx context.Context, task *service.AsyncImageTask, cfg service.AsyncImageRuntimeConfig, statusCode int, message string) bool {
 	if task == nil || task.RequestType != service.AsyncImageRequestTypeImageToImage {
+		return false
+	}
+	// This explicit provider error already used the gateway's bounded account
+	// switch loop. Do not requeue it into the reference same-account retry path.
+	providerMessage := strings.TrimPrefix(message, "上游生图失败（HTTP 400）：")
+	if service.IsAsyncImageReferenceBudgetExceededMessage(statusCode, providerMessage) {
 		return false
 	}
 	state := asyncImageReferenceAccountRetryStateWithContext(task, ctx)
@@ -862,6 +813,13 @@ func shouldRetryAsyncImageUpstreamReferenceFetchWithContext(ctx context.Context,
 func isAsyncImageCapacityFailure(statusCode int, message string) bool {
 	if statusCode == http.StatusTooManyRequests {
 		return true
+	}
+	if statusCode == http.StatusBadRequest {
+		providerMessage := strings.TrimSpace(strings.TrimPrefix(message, "上游生图失败（HTTP 400）："))
+		providerMessage = strings.TrimRight(providerMessage, ".。")
+		if providerMessage == "排队等待可用账户槽位超时，当前并发已满" {
+			return true
+		}
 	}
 	lower := strings.ToLower(message)
 	for _, fragment := range []string{
@@ -2207,6 +2165,7 @@ func accumulateAsyncImageReferenceAccountFailures(state *asyncImageReferenceAcco
 	}
 	for _, attempt := range attempts {
 		if attempt.Status != service.AsyncImageAccountAttemptFailed || attempt.AccountID <= 0 ||
+			isAsyncImageReferenceBudgetAccountFailure(attempt) ||
 			!service.IsAsyncImageReferenceFetchFailureMessage(attempt.Error) {
 			continue
 		}

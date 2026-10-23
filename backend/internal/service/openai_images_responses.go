@@ -1742,7 +1742,8 @@ func (s *OpenAIGatewayService) forwardOpenAIImagesOAuth(
 		upstreamMsg := strings.TrimSpace(extractUpstreamErrorMessage(respBody))
 		upstreamMsg = sanitizeUpstreamErrorMessage(upstreamMsg)
 		asyncSizeMismatch := AsyncImageAccountAttemptCaptureFromContext(ctx) != nil && isAsyncImageSizeCapabilityMismatch(resp.StatusCode, respBody)
-		if asyncSizeMismatch {
+		asyncReferenceBudget := AsyncImageAccountAttemptCaptureFromContext(ctx) != nil && isAsyncImageReferenceBudgetExceeded(resp.StatusCode, respBody)
+		if asyncSizeMismatch || asyncReferenceBudget {
 			if rules := getBoundErrorPassthroughService(c); rules != nil && rules.MatchRule(account.Platform, resp.StatusCode, respBody) != nil {
 				return s.handleOpenAIImagesErrorResponse(upstreamCtx, resp, c, account, requestModel)
 			}
@@ -1756,7 +1757,12 @@ func (s *OpenAIGatewayService) forwardOpenAIImagesOAuth(
 		if !shouldFailover && resp.StatusCode == http.StatusBadRequest && AsyncImageAccountAttemptCaptureFromContext(ctx) != nil {
 			shouldFailover = isOpenAIAsyncAccountFailover400(upstreamMsg)
 		}
-		if shouldFailover || asyncSizeMismatch {
+		if shouldFailover || asyncSizeMismatch || asyncReferenceBudget {
+			var referenceBudgetErr *UpstreamFailoverError
+			if asyncReferenceBudget {
+				referenceBudgetErr = newAsyncImageReferenceBudgetFailoverError(respBody, resp.Header)
+				upstreamMsg = referenceBudgetErr.ProviderErrorMessage
+			}
 			appendOpsUpstreamError(c, OpsUpstreamErrorEvent{
 				Platform:           account.Platform,
 				AccountID:          account.ID,
@@ -1767,6 +1773,10 @@ func (s *OpenAIGatewayService) forwardOpenAIImagesOAuth(
 				Kind:               "failover",
 				Message:            upstreamMsg,
 			})
+			if referenceBudgetErr != nil {
+				s.handleOpenAIAccountUpstreamError(upstreamCtx, account, resp.StatusCode, resp.Header, respBody, requestModel)
+				return nil, referenceBudgetErr
+			}
 			if asyncSizeMismatch {
 				s.handleOpenAIAccountUpstreamError(upstreamCtx, account, resp.StatusCode, resp.Header, respBody, requestModel)
 				return nil, newAsyncImageSizeCapabilityFailoverError(respBody, resp.Header)

@@ -818,7 +818,8 @@ func (s *OpenAIGatewayService) forwardOpenAIImagesAPIKey(
 		upstreamMsg := strings.TrimSpace(extractUpstreamErrorMessage(respBody))
 		upstreamMsg = sanitizeUpstreamErrorMessage(upstreamMsg)
 		asyncSizeMismatch := AsyncImageAccountAttemptCaptureFromContext(ctx) != nil && isAsyncImageSizeCapabilityMismatch(resp.StatusCode, respBody)
-		if asyncSizeMismatch {
+		asyncReferenceBudget := AsyncImageAccountAttemptCaptureFromContext(ctx) != nil && isAsyncImageReferenceBudgetExceeded(resp.StatusCode, respBody)
+		if asyncSizeMismatch || asyncReferenceBudget {
 			if rules := getBoundErrorPassthroughService(c); rules != nil && rules.MatchRule(account.Platform, resp.StatusCode, respBody) != nil {
 				return s.handleOpenAIImagesErrorResponse(upstreamCtx, resp, c, account, upstreamModel)
 			}
@@ -827,7 +828,12 @@ func (s *OpenAIGatewayService) forwardOpenAIImagesAPIKey(
 		if !shouldFailover && resp.StatusCode == http.StatusBadRequest && AsyncImageAccountAttemptCaptureFromContext(ctx) != nil {
 			shouldFailover = isOpenAIAsyncAccountFailover400(upstreamMsg)
 		}
-		if shouldFailover || asyncSizeMismatch {
+		if shouldFailover || asyncSizeMismatch || asyncReferenceBudget {
+			var referenceBudgetErr *UpstreamFailoverError
+			if asyncReferenceBudget {
+				referenceBudgetErr = newAsyncImageReferenceBudgetFailoverError(respBody, resp.Header)
+				upstreamMsg = referenceBudgetErr.ProviderErrorMessage
+			}
 			appendOpsUpstreamError(c, OpsUpstreamErrorEvent{
 				Platform:           account.Platform,
 				AccountID:          account.ID,
@@ -838,6 +844,10 @@ func (s *OpenAIGatewayService) forwardOpenAIImagesAPIKey(
 				Kind:               "failover",
 				Message:            upstreamMsg,
 			})
+			if referenceBudgetErr != nil {
+				s.handleOpenAIAccountUpstreamError(upstreamCtx, account, resp.StatusCode, resp.Header, respBody, upstreamModel)
+				return nil, referenceBudgetErr
+			}
 			if asyncSizeMismatch {
 				// A fixed size capability cannot improve on the same account and
 				// does not imply that the account is unusable for other sizes.

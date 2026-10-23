@@ -92,14 +92,23 @@ func isGeminiAsyncAccountFailover400(body []byte) bool {
 	raw := strings.ToLower(strings.TrimSpace(string(body)))
 	message := strings.ToLower(strings.TrimSpace(extractUpstreamErrorMessage(body)))
 	combined := raw + " " + message
+	if IsAsyncImageReferenceFetchFailureMessage(message) {
+		return false
+	}
 	for _, fragment := range []string{
 		"image_url fetch failed", "image url fetch failed", "fileuri fetch failed",
+		"fileuri download failed", "download openai reference image",
 		"failed to fetch image", "failed to download image", "download reference image",
-		"fetch reference image", "image_too_many_pixels", "exceeds the configured pixel limit",
+		"fetch reference image", "could not fetch image", "unable to fetch image",
+		"reference image download failed", "reference image download exceeded its total time budget",
+		"reference image fetch failed", "image_too_many_pixels", "exceeds the configured pixel limit",
 		"image container is invalid", "invalid image file", "unsupported_image_format",
 		"requires multipart/form-data", "prompt is required", "content policy",
 		"safety policy", "violates our content policy",
 	} {
+		// Keep reference-shaped errors out of generic invalid_request failover
+		// even when the shared retry classifier rejects a permanent input error
+		// or an explicit stop warning. The dedicated budget rule runs earlier.
 		if strings.Contains(combined, fragment) {
 			return false
 		}
