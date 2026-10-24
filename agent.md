@@ -1,5 +1,18 @@
 # AI 交接文档
 
+## 2026-10-25 当前交接：v0.1.173.57 发布准备
+
+- 用户明确要求推送GitHub打包，指定annotated tag`v0.1.173.57`。已按其步骤checkout/pull main，结果up-to-date；真实完整HEAD=`ca6fee9a633d1391956e4fd0cb37608281a2340f`，main同步，describe=`v0.1.173.56-1-gca6fee9-dirty`，开始VERSION`.56`、工作树为上一轮14条改动。目标tag不存在，现将源码VERSION和发行手册同步`.57`，准备提交本轮代码/测试/记录后推main和tag。
+- 完整Release默认保留，tag注释含空行后的正文；没有更改工作流、GoReleaser、Fork身份或安装路径。回归证据见下节与台账，Release/产物须真实核验后补记；本次不连接或部署生产，不重放任务。
+
+## 2026-10-25 当前交接：脱敏参考图超时及换号本地回退
+
+- 新任务`asyncimg_67c8bef4112ca746842e3d08f64461c7`只读查明：北京时间00:29:04→00:29:36，Gemini图生图1K/16:9/1参考/hybrid，账号33只有1selected/1failed、总和子重试0。错误完整骨架为`Error while downloading HTTPS_MASK Get "HTTPS_MASK dial tcp MASK_IP:443: i/o timeout`，两个URL一致且均已脱敏，只有开引号。旧严格网络原型要求闭引号/冒号，故已部署`.56`仍漏识别。
+- 生产当前`.56 / 42ba69a70d86104bd07f1e8626168e230d0921ee`、active，自10-24 12:50:41（北京时间）运行；本地真实开始HEAD=`ca6fee9a633d1391956e4fd0cb37608281a2340f`、main同步且干净、describe=`v0.1.173.56-1-gca6fee9`、VERSION=`0.1.173.56`，与生产业务源码相同，不能沿用前轮“旧版未部署”结论。
+- 本轮补严格已脱敏Go格式，仍需私有图生图上下文。新`WithAsyncImageReferenceLocalFallback`由Worker依据任务实际hybrid和预算绑定；两Gateway首个明确reference400不再耗尽全池，而返回私有`async_image_reference_local_fallback`。Worker复核语义/实际模式/预算及失败账号审计，再原子保存local+尝试并重排；硬排A不随回退清空，下一次本机下载成功才选B提交。passthrough仍直接换号，local不重复fallback，无B沿用有限调度/上游/总预算，不放回A。旧耗尽marker仍终止，同步/结果/unknown/永久边界保持。
+- 本轮只读生产后SSH已关闭，没有修改或重启服务器，没有部署、真实生图、重放原任务或改变账号调度。HEAD/VERSION保持，describe完成为`v0.1.173.56-1-gca6fee9-dirty`，尚未提交/推送/升版；验证与剩余事项见 [开发台账](开发台账.md)，实现和生产证据见 [本轮专题](wiki-new/异步生图近三日生产诊断与优化建议.md#2026-10-25-脱敏下载超时与换号本地回退)。下一步须按用户后续安排发布/部署，新版生产真实任务验收仍未执行。
+- 最终两包完整unit通过：Service`163.155s`（skip既有外部token API对照），Handler`36.943s`；新38子例通过`0.108s`，常规编译Service`0.187s`/Handler`0.073s`均无测试运行。10份Go格式、14本地链接/6锚点及diff检查通过，共14条改动路径（12tracked+2新增），没有前端/CI/外部集成验收。
+
 ## 2026-10-24 当前交接：四任务复核与参考图400全部直接换号
 
 - 用户给出`asyncimg_772cdb9da58133687d7c4bf0414c95fc`、`asyncimg_469ef4dba6cd2115ad3c92087c8241be`、`asyncimg_d527dfda045921a5aa625a82c60186c9`投诉同号重试，并要求`asyncimg_5c35aaea12f5909cf9144a9aea79e900`同类错误换号。只读查到前三是Gemini图生图下载400、末条是OpenAI组合能力422；每条1次selected/1次invocation_started/retry=0，重复failed是审计层，不要误报成重复HTTP。任务分别落账号33/33/32/26，完整脱敏证据见 [报告最新章节](wiki-new/异步生图近三日生产诊断与优化建议.md#2026-10-24-四任务复核与参考图400统一换号)。

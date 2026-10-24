@@ -32,6 +32,7 @@ type asyncImageAccountAttemptContextKey struct{}
 type asyncImageExcludedAccountsContextKey struct{}
 type asyncImageNonRetryableAccountsContextKey struct{}
 type asyncImageInputReferenceTaskContextKey struct{}
+type asyncImageReferenceLocalFallbackContextKey struct{}
 type asyncImageGeminiMaxSwitchesContextKey struct{}
 type asyncImageAccountAttemptTimeoutContextKey struct{}
 type asyncImageRoutingSessionHashContextKey struct{}
@@ -89,6 +90,24 @@ func IsAsyncImageInputReferenceTask(ctx context.Context) bool {
 	}
 	inputReferenceTask, _ := ctx.Value(asyncImageInputReferenceTaskContextKey{}).(bool)
 	return inputReferenceTask
+}
+
+// WithAsyncImageReferenceLocalFallback lets an eligible private durable task
+// return a known reference failure to the worker before the next account call.
+// The worker owns transport persistence, budgets and task-scoped exclusions.
+func WithAsyncImageReferenceLocalFallback(ctx context.Context, enabled bool) context.Context {
+	if ctx == nil {
+		return nil
+	}
+	return context.WithValue(ctx, asyncImageReferenceLocalFallbackContextKey{}, enabled)
+}
+
+func AsyncImageReferenceLocalFallbackFromContext(ctx context.Context) bool {
+	if ctx == nil {
+		return false
+	}
+	enabled, _ := ctx.Value(asyncImageReferenceLocalFallbackContextKey{}).(bool)
+	return enabled
 }
 
 // WithAsyncImageNonRetryableAccountIDs excludes accounts for this durable task

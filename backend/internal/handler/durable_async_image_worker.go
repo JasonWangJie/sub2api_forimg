@@ -526,6 +526,7 @@ func (h *DurableAsyncImageHandler) invokeAsyncImageTask(parent context.Context, 
 	}
 	parent = service.WithAsyncImageAccountAttemptCapture(parent, attemptCapture)
 	parent = service.WithAsyncImageInputReferenceTask(parent, task.RequestType == service.AsyncImageRequestTypeImageToImage)
+	parent = service.WithAsyncImageReferenceLocalFallback(parent, canFallbackAsyncImageReferenceLocally(task, cfg))
 	parent = service.WithAsyncImageNonRetryableAccountIDs(parent, asyncImageNonRetryableAccountIDs(task))
 	referenceRetryState := asyncImageReferenceAccountRetryState(task)
 	referenceRetryState.switchPending = asyncImageReferenceAccountSwitchRetryAllowed(task, cfg)
@@ -947,7 +948,7 @@ func (h *DurableAsyncImageHandler) scheduleAsyncImageReferenceRetry(ctx context.
 	}
 	attempt := task.ReferenceRetryCount + 1
 	maxRetries := cfg.ReferenceFetchMaxRetries
-	if accountSwitchRetry {
+	if accountSwitchRetry && task.ReferenceRetryCount >= cfg.ReferenceFetchMaxRetries {
 		maxRetries++
 	}
 	code := asyncImageReferenceFetchRetryCode

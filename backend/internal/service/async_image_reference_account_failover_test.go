@@ -117,9 +117,9 @@ func TestAsyncImageReferenceAccount400ServicePolicies(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	for _, platform := range []string{PlatformOpenAI, PlatformGemini} {
 		for _, accountType := range []string{AccountTypeAPIKey, AccountTypeOAuth} {
-			for _, input := range []struct{ name, message string }{{"direct proxy", referenceAccountDirectProxyMessage}, {"network", referenceAccountNetworkMessage}} {
+			for _, input := range []struct{ name, message string }{{"direct proxy", referenceAccountDirectProxyMessage}, {"network", referenceAccountNetworkMessage}, {"redacted network", referenceRedactedNetworkTestMessage}} {
 				for _, mode := range []string{"async", "sync", "admin passthrough", "no replay", "permanent", "text task", "missing task flag"} {
-					if input.name != "network" && (mode == "text task" || mode == "missing task flag") {
+					if input.name != "network" && input.name != "redacted network" && (mode == "text task" || mode == "missing task flag") {
 						continue
 					}
 					t.Run(platform+"/"+accountType+"/"+input.name+"/"+mode, func(t *testing.T) {

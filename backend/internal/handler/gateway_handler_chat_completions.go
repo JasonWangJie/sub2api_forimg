@@ -409,6 +409,10 @@ func (h *GatewayHandler) ChatCompletions(c *gin.Context) {
 					h.handleCCFailoverExhausted(c, failoverErr, true)
 					return
 				}
+				if asyncImageReferenceLocalFallbackRequested(c, failoverErr) {
+					h.handleCCFailoverExhausted(c, failoverErr, streamStarted)
+					return
+				}
 				action := fs.HandleFailoverError(c.Request.Context(), h.gatewayService, account.ID, account.Platform, account.GetPoolModeRetryCount(), failoverErr)
 				switch action {
 				case FailoverContinue:

@@ -20,8 +20,13 @@ const AsyncImageReferenceBudgetExceededCode = "async_image_reference_budget_exce
 // fetch failure whose bounded account-switch loop must not restart on exhaustion.
 const AsyncImageReferenceAccountFailoverCode = "async_image_reference_account_failover"
 
+// AsyncImageReferenceLocalFallbackCode is an internal gateway handoff to the
+// worker, distinct from an exhausted account-switch loop.
+const AsyncImageReferenceLocalFallbackCode = "async_image_reference_local_fallback"
+
 var asyncImageReferenceBudgetExceededPattern = regexp.MustCompile(`(?i)^reference image download exceeded its total time budget for (https://[^\s]+) \(budgetms=([1-9][0-9]{0,8}); reason=timeout\)$`)
 var asyncImageReferenceNetworkDownloadPattern = regexp.MustCompile(`(?i)^error while downloading (https://[^\s]+?):? get "(https://[^"\s]+)": dial tcp [^"\s]+: i/o timeout$`)
+var asyncImageReferenceRedactedNetworkDownloadPattern = regexp.MustCompile(`(?i)^error while downloading (https://\*{3}\.[a-z]{3}(?:/\*{3}){3}) get "(https://\*{3}\.[a-z]{3}(?:/\*{3}){3}) dial tcp \*{3}\.\*{3}\.\*{3}\.\*{3}:443: i/o timeout$`)
 var asyncImageReferenceDiagnosticURLPattern = regexp.MustCompile(`(?i)https?://[^\s"'<>]+`)
 
 // IsAsyncImageReferenceBudgetExceededMessage accepts only the complete known
@@ -74,7 +79,14 @@ func isAsyncImageReferenceAccountFailoverForContext(ctx context.Context, statusC
 }
 
 func isAsyncImageReferenceNetworkDownloadFailure(message string) bool {
-	matches := asyncImageReferenceNetworkDownloadPattern.FindStringSubmatch(strings.Join(strings.Fields(message), " "))
+	message = strings.Join(strings.Fields(message), " ")
+	matches := asyncImageReferenceNetworkDownloadPattern.FindStringSubmatch(message)
+	if len(matches) == 0 {
+		// One provider masks both URLs and the IPv4 endpoint, removing the
+		// closing URL quote/colon in the process. Accept only that observed
+		// redaction shape, never arbitrary malformed unredacted network errors.
+		matches = asyncImageReferenceRedactedNetworkDownloadPattern.FindStringSubmatch(message)
+	}
 	if len(matches) != 3 || matches[1] != matches[2] {
 		return false
 	}

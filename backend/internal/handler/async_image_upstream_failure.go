@@ -25,6 +25,19 @@ func (h *DurableAsyncImageHandler) handleAsyncImageUpstreamFailure(parent, attem
 		zap.String("message", message),
 	)
 	if statusCode == http.StatusBadRequest &&
+		gjson.GetBytes(body, "error.code").String() == service.AsyncImageReferenceLocalFallbackCode {
+		if canFallbackAsyncImageReferenceLocally(task, cfg) &&
+			hasAsyncImageReferenceFallbackAccount(task, attemptCtx) &&
+			service.IsAsyncImageReferenceAccountFailoverMessage(statusCode, service.ExtractUpstreamErrorMessage(body)) {
+			// The gateway already recorded the definite failure. Persist the local
+			// transport and its account audit atomically; the next invocation must
+			// retain the hard exclusion instead of creating a sticky same-account retry.
+			return h.scheduleAsyncImageReferenceRetry(parent, task, cfg, message, retryAfter, true, true)
+		}
+		h.failAsyncImageTask(parent, task, "upstream_failed", message, false)
+		return asyncImageWorkerDisposition{}
+	}
+	if statusCode == http.StatusBadRequest &&
 		(gjson.GetBytes(body, "error.code").String() == service.AsyncImageReferenceBudgetExceededCode ||
 			gjson.GetBytes(body, "error.code").String() == service.AsyncImageReferenceAccountFailoverCode ||
 			service.IsAsyncImageReferenceAccountFailoverMessage(statusCode, service.ExtractUpstreamErrorMessage(body))) {

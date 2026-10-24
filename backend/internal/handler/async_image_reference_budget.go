@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"strings"
@@ -76,5 +77,39 @@ func asyncImageReferenceAccountErrorDetails(c *gin.Context, err *service.Upstrea
 	if err.IsAsyncImageReferenceBudgetExceeded() {
 		code = service.AsyncImageReferenceBudgetExceededCode
 	}
+	if asyncImageReferenceLocalFallbackRequested(c, err) {
+		code = service.AsyncImageReferenceLocalFallbackCode
+	}
 	return errType, code, message, true
+}
+
+// The worker owns transport changes and persists them together with the failed
+// account. Stop before consuming the remaining accounts with the same URL body.
+func asyncImageReferenceLocalFallbackRequested(c *gin.Context, err *service.UpstreamFailoverError) bool {
+	if c == nil || c.Request == nil || err == nil || err.StatusCode != http.StatusBadRequest || !err.IsAsyncImageReferenceAccountFailover() {
+		return false
+	}
+	ctx := c.Request.Context()
+	return service.AsyncImageAccountAttemptCaptureFromContext(ctx) != nil &&
+		service.IsAsyncImageInputReferenceTask(ctx) && service.AsyncImageReferenceLocalFallbackFromContext(ctx)
+}
+
+func canFallbackAsyncImageReferenceLocally(task *service.AsyncImageTask, cfg service.AsyncImageRuntimeConfig) bool {
+	return task != nil && task.RequestType == service.AsyncImageRequestTypeImageToImage &&
+		asyncImageReferenceTransport(task, cfg) == service.AsyncImageReferenceTransportPassthroughFallbackLocal &&
+		canRetryAsyncImage(task, task.ReferenceRetryCount, cfg.ReferenceFetchMaxRetries, cfg.TotalMaxRetries)
+}
+
+func hasAsyncImageReferenceFallbackAccount(task *service.AsyncImageTask, ctx context.Context) bool {
+	attemptsJSON, _ := asyncImageAttemptState(task, ctx)
+	var attempts []service.AsyncImageAccountAttempt
+	if json.Unmarshal(attemptsJSON, &attempts) != nil {
+		return false
+	}
+	for _, attempt := range attempts {
+		if isAsyncImageReferenceAccountFailure(attempt) {
+			return true
+		}
+	}
+	return false
 }
