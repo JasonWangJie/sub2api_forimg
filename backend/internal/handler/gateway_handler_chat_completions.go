@@ -529,7 +529,7 @@ func (h *GatewayHandler) handleCCFailoverExhausted(c *gin.Context, lastErr *serv
 		c.JSON(http.StatusUnprocessableEntity, gin.H{"error": errorBody})
 		return
 	}
-	if errType, code, message, ok := asyncImageReferenceBudgetErrorDetails(c, lastErr); ok {
+	if errType, code, message, ok := asyncImageReferenceAccountErrorDetails(c, lastErr); ok {
 		c.JSON(http.StatusBadRequest, gin.H{"error": gin.H{"type": errType, "code": code, "message": message}})
 		return
 	}
@@ -594,6 +594,7 @@ func asyncImageFailedAccountAttempt(account *service.Account, err error) service
 	if errors.As(err, &failoverErr) {
 		attempt.StatusCode = failoverErr.StatusCode
 		attempt.ProviderErrorCode = failoverErr.ProviderErrorCode
+		attempt.FailureReason = string(failoverErr.Reason)
 		attempt.UpstreamRequestID = upstreamRequestIDFromFailover(failoverErr)
 		if failoverErr.ProviderErrorMessage != "" {
 			attempt.Error = failoverErr.ProviderErrorMessage

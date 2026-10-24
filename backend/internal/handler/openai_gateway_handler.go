@@ -2570,7 +2570,7 @@ func (h *OpenAIGatewayHandler) handleFailoverExhausted(c *gin.Context, failoverE
 		h.handleStreamingAwareErrorWithCode(c, http.StatusUnprocessableEntity, errType, code, message, streamStarted, false)
 		return
 	}
-	if errType, code, message, ok := asyncImageReferenceBudgetErrorDetails(c, failoverErr); ok {
+	if errType, code, message, ok := asyncImageReferenceAccountErrorDetails(c, failoverErr); ok {
 		h.handleStreamingAwareErrorWithCode(c, http.StatusBadRequest, errType, code, message, streamStarted, false)
 		return
 	}

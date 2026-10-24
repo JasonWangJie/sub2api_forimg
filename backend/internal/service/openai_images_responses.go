@@ -1742,7 +1742,7 @@ func (s *OpenAIGatewayService) forwardOpenAIImagesOAuth(
 		upstreamMsg := strings.TrimSpace(extractUpstreamErrorMessage(respBody))
 		upstreamMsg = sanitizeUpstreamErrorMessage(upstreamMsg)
 		asyncSizeMismatch := AsyncImageAccountAttemptCaptureFromContext(ctx) != nil && isAsyncImageSizeCapabilityMismatch(resp.StatusCode, respBody)
-		asyncReferenceBudget := AsyncImageAccountAttemptCaptureFromContext(ctx) != nil && isAsyncImageReferenceBudgetExceeded(resp.StatusCode, respBody)
+		asyncReferenceBudget := AsyncImageAccountAttemptCaptureFromContext(ctx) != nil && isAsyncImageReferenceAccountFailoverForContext(ctx, resp.StatusCode, respBody)
 		if asyncSizeMismatch || asyncReferenceBudget {
 			if rules := getBoundErrorPassthroughService(c); rules != nil && rules.MatchRule(account.Platform, resp.StatusCode, respBody) != nil {
 				return s.handleOpenAIImagesErrorResponse(upstreamCtx, resp, c, account, requestModel)
@@ -1760,7 +1760,7 @@ func (s *OpenAIGatewayService) forwardOpenAIImagesOAuth(
 		if shouldFailover || asyncSizeMismatch || asyncReferenceBudget {
 			var referenceBudgetErr *UpstreamFailoverError
 			if asyncReferenceBudget {
-				referenceBudgetErr = newAsyncImageReferenceBudgetFailoverError(respBody, resp.Header)
+				referenceBudgetErr = newAsyncImageReferenceAccountFailoverError(respBody, resp.Header)
 				upstreamMsg = referenceBudgetErr.ProviderErrorMessage
 			}
 			appendOpsUpstreamError(c, OpsUpstreamErrorEvent{

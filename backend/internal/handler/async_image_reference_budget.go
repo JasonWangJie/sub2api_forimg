@@ -10,15 +10,29 @@ import (
 	"github.com/tidwall/gjson"
 )
 
-func isAsyncImageReferenceBudgetAccountFailure(attempt service.AsyncImageAccountAttempt) bool {
-	return attempt.Status == service.AsyncImageAccountAttemptFailed && attempt.AccountID > 0 &&
-		attempt.StatusCode == http.StatusBadRequest &&
+func isAsyncImageReferenceAccountFailure(attempt service.AsyncImageAccountAttempt) bool {
+	if attempt.Status != service.AsyncImageAccountAttemptFailed || attempt.AccountID <= 0 {
+		return false
+	}
+	statusCode, message := attempt.StatusCode, attempt.Error
+	const worker400Prefix = "上游生图失败（HTTP 400）："
+	if strings.HasPrefix(message, worker400Prefix) {
+		message = strings.TrimPrefix(message, worker400Prefix)
+		if statusCode == 0 {
+			statusCode = http.StatusBadRequest
+		}
+	}
+	return statusCode == http.StatusBadRequest &&
 		(attempt.ProviderErrorCode == service.AsyncImageReferenceBudgetExceededCode ||
-			service.IsAsyncImageReferenceBudgetExceededMessage(attempt.StatusCode, attempt.Error))
+			attempt.ProviderErrorCode == service.AsyncImageReferenceAccountFailoverCode ||
+			attempt.FailureReason == service.AsyncImageReferenceBudgetExceededCode ||
+			attempt.FailureReason == service.AsyncImageReferenceAccountFailoverCode ||
+			service.IsAsyncImageReferenceAccountFailoverMessage(statusCode, message))
 }
 
 // Unlike the normal recent-three exclusion, this set spans the complete task
-// audit. A later transient failure on B must never make budget-failed A eligible.
+// audit. A transient failure on B must not revive A's definite reference or
+// capability failure for this task's unchanged request specification.
 func asyncImageNonRetryableAccountIDs(task *service.AsyncImageTask) map[int64]struct{} {
 	if task == nil {
 		return nil
@@ -29,7 +43,11 @@ func asyncImageNonRetryableAccountIDs(task *service.AsyncImageTask) map[int64]st
 	}
 	ids := make(map[int64]struct{})
 	for _, attempt := range attempts {
-		if isAsyncImageReferenceBudgetAccountFailure(attempt) {
+		if isAsyncImageReferenceAccountFailure(attempt) ||
+			(attempt.Status == service.AsyncImageAccountAttemptFailed && attempt.AccountID > 0 &&
+				attempt.StatusCode == http.StatusUnprocessableEntity &&
+				(attempt.FailureReason == string(service.AsyncImageSizeCapabilityMismatchReason) ||
+					service.IsAsyncImageCapabilityAccountFailure(attempt.StatusCode, attempt.ProviderErrorCode, attempt.Error))) {
 			ids[attempt.AccountID] = struct{}{}
 		}
 	}
@@ -38,8 +56,8 @@ func asyncImageNonRetryableAccountIDs(task *service.AsyncImageTask) map[int64]st
 
 // Only the private durable worker receives this exhaustion marker. It keeps the
 // upstream's definite 400 and safe diagnostics while preventing worker replay.
-func asyncImageReferenceBudgetErrorDetails(c *gin.Context, err *service.UpstreamFailoverError) (errType, code, message string, ok bool) {
-	if c == nil || c.Request == nil || err == nil || err.StatusCode != http.StatusBadRequest || !err.IsAsyncImageReferenceBudgetExceeded() {
+func asyncImageReferenceAccountErrorDetails(c *gin.Context, err *service.UpstreamFailoverError) (errType, code, message string, ok bool) {
+	if c == nil || c.Request == nil || err == nil || err.StatusCode != http.StatusBadRequest || !err.IsAsyncImageReferenceAccountFailover() {
 		return "", "", "", false
 	}
 	ctx := c.Request.Context()
@@ -54,5 +72,9 @@ func asyncImageReferenceBudgetErrorDetails(c *gin.Context, err *service.Upstream
 	if message == "" {
 		message = service.ExtractUpstreamErrorMessage(err.ResponseBody)
 	}
-	return errType, service.AsyncImageReferenceBudgetExceededCode, message, true
+	code = service.AsyncImageReferenceAccountFailoverCode
+	if err.IsAsyncImageReferenceBudgetExceeded() {
+		code = service.AsyncImageReferenceBudgetExceededCode
+	}
+	return errType, code, message, true
 }

@@ -7,7 +7,37 @@ import (
 	"github.com/tidwall/gjson"
 )
 
-const asyncImageSizeCapabilityMismatchReason = GatewayFailureReason("async_image_size_capability_mismatch")
+// AsyncImageSizeCapabilityMismatchReason survives provider-code variations in
+// persisted task attempts without changing the upstream diagnostic code.
+const AsyncImageSizeCapabilityMismatchReason = GatewayFailureReason("async_image_size_capability_mismatch")
+
+const asyncImageSizeCapabilityMismatchReason = AsyncImageSizeCapabilityMismatchReason
+
+const asyncImageSizeCapabilityMessage = "no eligible upstream image provider supports the requested image size or resolution tier. adjust size/resolution or select a compatible route"
+const asyncImageCombinedCapabilityMessage = "no eligible upstream image provider supports the requested capability combination. no eligible upstream image provider supports the requested model. select a supported model or a compatible route. no eligible upstream image provider supports the requested image size or resolution tier. adjust size/resolution or select a compatible route"
+
+func normalizeAsyncImageCapabilityMessage(message string) string {
+	return strings.TrimRight(strings.ToLower(strings.Join(strings.Fields(message), " ")), ".。")
+}
+
+// IsAsyncImageCapabilityAccountFailure recognizes already-persisted safe
+// diagnostics for task-scoped account exclusion. It is not an HTTP response
+// classifier: incoming combined rejections still require their structured pair
+// of capability reasons in isAsyncImageSizeCapabilityMismatch.
+func IsAsyncImageCapabilityAccountFailure(statusCode int, providerCode, message string) bool {
+	if statusCode != http.StatusUnprocessableEntity {
+		return false
+	}
+	message = normalizeAsyncImageCapabilityMessage(message)
+	switch providerCode {
+	case "image_size_not_supported":
+		return message == asyncImageSizeCapabilityMessage
+	case "image_request_capability_not_supported":
+		return message == asyncImageCombinedCapabilityMessage
+	default:
+		return false
+	}
+}
 
 // isAsyncImageSizeCapabilityMismatch recognizes a provider-selection failure,
 // rather than a malformed size supplied by the caller. Codes such as
@@ -18,12 +48,11 @@ func isAsyncImageSizeCapabilityMismatch(statusCode int, body []byte) bool {
 	if statusCode != http.StatusUnprocessableEntity {
 		return false
 	}
-	message := strings.ToLower(strings.Join(strings.Fields(extractUpstreamErrorMessage(body)), " "))
-	message = strings.TrimRight(message, ".。")
-	if message == "no eligible upstream image provider supports the requested image size or resolution tier. adjust size/resolution or select a compatible route" {
+	message := normalizeAsyncImageCapabilityMessage(extractUpstreamErrorMessage(body))
+	if message == asyncImageSizeCapabilityMessage {
 		return true
 	}
-	if message != "no eligible upstream image provider supports the requested capability combination. no eligible upstream image provider supports the requested model. select a supported model or a compatible route. no eligible upstream image provider supports the requested image size or resolution tier. adjust size/resolution or select a compatible route" {
+	if message != asyncImageCombinedCapabilityMessage {
 		return false
 	}
 	return hasAsyncImageCombinedCapabilityDetails(body)

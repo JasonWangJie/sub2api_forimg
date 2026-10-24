@@ -1136,7 +1136,7 @@ func TestOpenAIGatewayServiceForwardImages_GenerationFailure400RetryPolicy(t *te
 		{name: "async explicit no regeneration", message: generationFailure + "。 Do not automatically regenerate; check usage or contact support.", async: true},
 		{name: "async content policy", message: generationFailure + "。 The request was rejected by the upstream safety policy.", async: true},
 		{name: "async incomplete phrase", message: "未能生成图片", async: true},
-		{name: "async reference fetch", message: "image_url fetch failed: " + generationFailure, async: true},
+		{name: "async reference fetch", message: "image_url fetch failed: " + generationFailure, async: true, wantFailover: true},
 	}
 	for _, accountType := range []string{AccountTypeAPIKey, AccountTypeOAuth} {
 		t.Run(accountType, func(t *testing.T) {
@@ -1187,6 +1187,9 @@ func TestOpenAIGatewayServiceForwardImages_GenerationFailure400RetryPolicy(t *te
 						require.Equal(t, "rid-generation-failure", failoverErr.ResponseHeaders.Get("x-request-id"))
 						require.Equal(t, "15", failoverErr.ResponseHeaders.Get("Retry-After"))
 						require.False(t, failoverErr.RetryableOnSameAccount, "async generation failure must switch accounts even when the pool retries HTTP 400")
+						if tt.name == "async reference fetch" {
+							require.True(t, failoverErr.IsAsyncImageReferenceAccountFailover())
+						}
 						require.Empty(t, rec.Body.Bytes(), "the failure must remain available to the handler's account switch loop")
 					} else {
 						var upstreamErr *OpenAIImagesUpstreamError

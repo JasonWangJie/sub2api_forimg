@@ -47,14 +47,18 @@ func TestGeminiAsyncReferenceErrorsDoNotBecomeGenericInvalidRequestFailover(t *t
 	require.True(t, isGeminiAsyncAccountFailover400([]byte(ordinaryInvalidRequest)))
 }
 
-func TestGeminiAsyncReferenceErrorsRemainAvailableToWorker(t *testing.T) {
+func TestGeminiAsyncReferenceErrorsSwitchTemporaryAndPreservePermanent(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	for _, accountType := range []string{AccountTypeAPIKey, AccountTypeOAuth} {
-		for _, message := range []string{
-			"Reference image download failed for https://cdn.example/input.png: timeout",
-			"reference image fetch failed: failed after 3 attempts: handshake error",
-			"Reference image download failed: HTTP 403 forbidden",
+		for _, test := range []struct {
+			message      string
+			wantFailover bool
+		}{
+			{"Reference image download failed for https://cdn.example/input.png: timeout", true},
+			{"reference image fetch failed: failed after 3 attempts: handshake error", true},
+			{"Reference image download failed: HTTP 403 forbidden", false},
 		} {
+			message := test.message
 			t.Run(accountType+"/"+message, func(t *testing.T) {
 				ctx := WithGeminiAsyncImageGeneration(context.Background())
 				body := []byte(`{"model":"gemini-3-pro-image-preview","messages":[{"role":"user","content":"draw a cat"}]}`)
@@ -67,7 +71,7 @@ func TestGeminiAsyncReferenceErrorsRemainAvailableToWorker(t *testing.T) {
 				}
 				upstream := &geminiCompatHTTPUpstreamStub{response: &http.Response{
 					StatusCode: http.StatusBadRequest,
-					Header:     http.Header{"Content-Type": []string{"application/json"}},
+					Header:     http.Header{"Content-Type": []string{"application/json"}, "X-Request-Id": []string{"req-reference-routing"}},
 					Body:       io.NopCloser(strings.NewReader(upstreamBody)),
 				}}
 				svc := &GeminiMessagesCompatService{tokenProvider: &GeminiTokenProvider{}, cfg: &config.Config{}, httpUpstream: upstream}
@@ -78,10 +82,22 @@ func TestGeminiAsyncReferenceErrorsRemainAvailableToWorker(t *testing.T) {
 				_, err := svc.ForwardAsChatCompletions(ctx, c, account, body)
 				require.Error(t, err)
 				var failover *UpstreamFailoverError
-				require.NotErrorAs(t, err, &failover)
 				require.Equal(t, 1, upstream.calls)
-				require.Equal(t, http.StatusBadRequest, recorder.Code)
-				require.Contains(t, recorder.Body.String(), message)
+				if test.wantFailover {
+					require.ErrorAs(t, err, &failover)
+					require.True(t, failover.IsAsyncImageReferenceAccountFailover())
+					require.False(t, failover.RetryableOnSameAccount)
+					require.Equal(t, http.StatusBadRequest, failover.StatusCode)
+					require.Equal(t, "bad_request", failover.ProviderErrorCode)
+					require.Equal(t, "req-reference-routing", failover.UpstreamRequestID)
+					require.True(t, IsAsyncImageReferenceAccountFailoverMessage(http.StatusBadRequest, failover.ProviderErrorMessage))
+					require.NotContains(t, failover.ProviderErrorMessage, "cdn.example")
+					require.Empty(t, recorder.Body.Bytes(), "the gateway must retain the opportunity to switch accounts")
+				} else {
+					require.NotErrorAs(t, err, &failover)
+					require.Equal(t, http.StatusBadRequest, recorder.Code)
+					require.Contains(t, recorder.Body.String(), message)
+				}
 			})
 		}
 	}

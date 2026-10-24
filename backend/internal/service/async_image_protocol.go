@@ -444,6 +444,8 @@ func IsAsyncImageReferenceFetchFailureMessage(message string) bool {
 	for _, fragment := range []string{
 		"generated image", "generated result", "result image", "output image", "image output",
 		"execution_unknown", "execution unknown", "outcome is unknown",
+		"may already have been charged", "may already be charged", "already been charged",
+		"generation may have started", "generation already started", "execution may have started",
 		"do not automatically regenerate", "do not regenerate", "do not retry",
 		"content policy", "content policies", "safety policy", "guardrails",
 		"content filter", "safety filter", "safety rejected", "content rejected",
@@ -482,6 +484,9 @@ func IsAsyncImageReferenceFetchFailureMessage(message string) bool {
 		if strings.Contains(statusText, fragment) {
 			return false
 		}
+	}
+	if isAsyncImageReferenceNetworkDownloadFailure(message) {
+		return true
 	}
 	for _, fragment := range []string{
 		"image_url fetch failed", "image url fetch failed", "fileuri fetch failed",

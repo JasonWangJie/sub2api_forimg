@@ -245,6 +245,8 @@ func isOpenAIAsyncAccountFailover400(message string) bool {
 		"requires multipart/form-data", "image_url fetch failed", "image url fetch failed",
 		"failed to fetch image", "failed to download image", "download openai reference image",
 		"download reference image", "fetch reference image", "fileuri fetch failed",
+		"fileuri download failed", "reference image download", "reference image fetch",
+		"error while downloading",
 	} {
 		if strings.Contains(lower, fragment) {
 			return false

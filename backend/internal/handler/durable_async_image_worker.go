@@ -525,6 +525,7 @@ func (h *DurableAsyncImageHandler) invokeAsyncImageTask(parent context.Context, 
 		}
 	}
 	parent = service.WithAsyncImageAccountAttemptCapture(parent, attemptCapture)
+	parent = service.WithAsyncImageInputReferenceTask(parent, task.RequestType == service.AsyncImageRequestTypeImageToImage)
 	parent = service.WithAsyncImageNonRetryableAccountIDs(parent, asyncImageNonRetryableAccountIDs(task))
 	referenceRetryState := asyncImageReferenceAccountRetryState(task)
 	referenceRetryState.switchPending = asyncImageReferenceAccountSwitchRetryAllowed(task, cfg)
@@ -783,7 +784,7 @@ func shouldRetryAsyncImageUpstreamReferenceFetchWithContext(ctx context.Context,
 	// This explicit provider error already used the gateway's bounded account
 	// switch loop. Do not requeue it into the reference same-account retry path.
 	providerMessage := strings.TrimPrefix(message, "上游生图失败（HTTP 400）：")
-	if service.IsAsyncImageReferenceBudgetExceededMessage(statusCode, providerMessage) {
+	if service.IsAsyncImageReferenceAccountFailoverMessage(statusCode, providerMessage) {
 		return false
 	}
 	state := asyncImageReferenceAccountRetryStateWithContext(task, ctx)
@@ -2165,7 +2166,7 @@ func accumulateAsyncImageReferenceAccountFailures(state *asyncImageReferenceAcco
 	}
 	for _, attempt := range attempts {
 		if attempt.Status != service.AsyncImageAccountAttemptFailed || attempt.AccountID <= 0 ||
-			isAsyncImageReferenceBudgetAccountFailure(attempt) ||
+			isAsyncImageReferenceAccountFailure(attempt) ||
 			!service.IsAsyncImageReferenceFetchFailureMessage(attempt.Error) {
 			continue
 		}
@@ -2207,6 +2208,9 @@ func asyncImageReferenceRetryExcludedAccountIDs(task *service.AsyncImageTask, cf
 }
 
 func recordAsyncImageReferenceFetchFailure(ctx context.Context, message string) {
+	if !service.IsAsyncImageReferenceFetchFailureMessage(message) {
+		return
+	}
 	capture := service.AsyncImageAccountAttemptCaptureFromContext(ctx)
 	if capture == nil {
 		return

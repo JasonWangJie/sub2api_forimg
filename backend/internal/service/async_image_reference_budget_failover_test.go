@@ -151,9 +151,10 @@ func TestAsyncImageReferenceBudget400SwitchesWithoutSameAccountRetry(t *testing.
 					}
 					require.Error(t, err)
 					var failover *UpstreamFailoverError
-					if mode == "async" {
+					if mode == "async" || mode == "other reference timeout" {
 						require.ErrorAs(t, err, &failover)
-						require.True(t, failover.IsAsyncImageReferenceBudgetExceeded())
+						require.True(t, failover.IsAsyncImageReferenceAccountFailover())
+						require.Equal(t, mode == "async", failover.IsAsyncImageReferenceBudgetExceeded())
 						require.False(t, failover.RetryableOnSameAccount, "pool retry 400 must not override direct switching")
 						require.Equal(t, "reference_download_error", failover.ProviderErrorCode)
 						require.Equal(t, "req-budget-400", failover.UpstreamRequestID)

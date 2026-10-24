@@ -1,5 +1,12 @@
 # Sub2API Fork 二次开发总览
 
+## 2026-10-24 四任务复核与参考图400统一直接换号
+
+- 按用户要求只读复核四条任务：`772cdb9d…` 是参考图直连/代理同时失败400，`469ef4db…` / `d527dfda…` 是`Error while downloading … i/o timeout` 400，`5c35aaea…` 是组合能力422。四条均只有一次selected、一次invocation_started、所有Worker子重试为0；前三条两层failed是重复审计，不代表两次上游HTTP请求。检查时生产仍是`0.1.173.54 / c623015c229be42ada6a9a5fdf076d42cf55fc99`，进程自10-20运行，没有部署已在本地tag`.55`中的修复。
+- 本轮已把明确的上游输入参考图临时获取失败HTTP400统一接入有限直接换号，覆盖此前只识别预算耗尽之外的参考图失败；两平台/两类凭据均禁用同号重试。耗尽保留400和新旧内部标记，Worker不再回普通参考图同号循环；完整尝试历史的不可放宽排除扩展到这些错误，跨Worker也不会回选。无“reference”字样的新网络格式只在私有图生图上下文放行；内容/永久错误、502执行未知和生成结果下载边界保持。
+- 组合能力422规则已在当前HEAD存在，本轮通过该任务真实journal结构再次核对并回归，并补该类跨Worker硬排除；尝试JSON持久化`failure_reason`保留服务已确认的分类，避免上游status覆盖code或缺code后重选原号，HTTP入口严格条件未放宽。Worker参考图辅助函数新增语义守卫，避免给普通400/422/503再追加无关failed审计。完整任务ID、证据和实现见 [本轮复核记录](wiki-new/异步生图近三日生产诊断与优化建议.md#2026-10-24-四任务复核与参考图400统一换号)，实际验证见 [开发台账](开发台账.md)。
+- 真实开始基线：HEAD=`02348bfadb2cb2a34d62764e1ffae3946420d4d5`，`## main...origin/main`且干净，describe=`v0.1.173.55`，源码VERSION=`0.1.173.54`。本轮仍保留该HEAD/VERSION，完成describe=`v0.1.173.55-dirty`；没有修改版本、发布流程或生产，没有提交/推送、部署、重启或历史重放。
+
 ## 2026-10-24 异步错误分类与参考图预算耗尽直接换号
 
 - 已按用户要求实施本地优化，并只读核对任务 `asyncimg_48de7444b4968293bc7a5186be50a5ba`：Gemini 图生图 2K、账号33，HTTP400 `Reference image download exceeded its total time budget ... (budgetMs=35000; reason=timeout)`，原任务只选一次、retry=0。新增该完整已知错误的异步直接换号规则，OpenAI/Gemini、API Key/OAuth共用，显式禁止同账号重试；候选/预算耗尽保留400并停止Worker重排。混合错误导致任务再次执行时，也从持久尝试历史排除该账号，不被最近三号窗口或历史排除放宽重新选回。

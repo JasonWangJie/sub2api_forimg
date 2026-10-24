@@ -26,7 +26,8 @@ func (h *DurableAsyncImageHandler) handleAsyncImageUpstreamFailure(parent, attem
 	)
 	if statusCode == http.StatusBadRequest &&
 		(gjson.GetBytes(body, "error.code").String() == service.AsyncImageReferenceBudgetExceededCode ||
-			service.IsAsyncImageReferenceBudgetExceededMessage(statusCode, service.ExtractUpstreamErrorMessage(body))) {
+			gjson.GetBytes(body, "error.code").String() == service.AsyncImageReferenceAccountFailoverCode ||
+			service.IsAsyncImageReferenceAccountFailoverMessage(statusCode, service.ExtractUpstreamErrorMessage(body))) {
 		h.failAsyncImageTask(parent, task, "upstream_failed", message, false)
 		return asyncImageWorkerDisposition{}
 	}

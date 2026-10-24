@@ -22,8 +22,10 @@ func TestAsyncImageUpstreamFailureTransitions(t *testing.T) {
 		capacityExhausted, local                     bool
 		wantRequeue, wantLocal                       bool
 	}{
-		{name: "new download word order falls back locally", status: 400, message: "Reference image download failed for https://cdn.example/input.png; direct=timeout; proxy=status 502", wantStatus: "queued", wantEvent: "reference_image_fetch_retry", wantRequeue: true, wantLocal: true},
-		{name: "new fetch word order falls back locally", status: 400, message: "reference image fetch failed: failed after 3 attempts: handshake error", wantStatus: "queued", wantEvent: "reference_image_fetch_retry", wantRequeue: true, wantLocal: true},
+		{name: "download account failover exhaustion is terminal", status: 400, message: "Reference image download failed for https://cdn.example/input.png; direct=timeout; proxy=status 502", wantStatus: "failed", wantEvent: "task_failed"},
+		{name: "fetch account failover exhaustion is terminal", status: 400, message: "reference image fetch failed: failed after 3 attempts: handshake error", wantStatus: "failed", wantEvent: "task_failed"},
+		{name: "non400 unambiguous reference response keeps local fallback", status: 503, message: "reference image fetch failed: failed after 3 attempts: handshake error", wantStatus: "queued", wantEvent: "reference_image_fetch_retry", wantRequeue: true, wantLocal: true},
+		{name: "generic download marker survives shortened diagnostics", status: 400, message: "upstream reference download failed", marker: service.AsyncImageReferenceAccountFailoverCode, wantStatus: "failed", wantEvent: "task_failed"},
 		{name: "budget failover exhaustion is terminal", status: 400, message: referenceBudgetTestMessage, wantStatus: "failed", wantEvent: "task_failed"},
 		{name: "budget marker survives shortened diagnostics", status: 400, message: "Reference image download exceeded its total time budget", marker: service.AsyncImageReferenceBudgetExceededCode, wantStatus: "failed", wantEvent: "task_failed"},
 		{name: "ambiguous fileData timeout stays unknown", status: 502, message: "invalid fileData image: image URL fetch failed: context deadline exceeded", wantStatus: "execution_unknown", wantEvent: "execution_unknown"},

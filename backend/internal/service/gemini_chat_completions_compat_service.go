@@ -248,12 +248,12 @@ func (s *GeminiMessagesCompatService) forwardClaudeBodyAsChatCompletions(
 			}
 			return nil, newAsyncImageSizeCapabilityFailoverError(evBody, resp.Header)
 		}
-		if asyncImageGeneration && isAsyncImageReferenceBudgetExceeded(resp.StatusCode, evBody) {
+		if asyncImageGeneration && isAsyncImageReferenceAccountFailoverForContext(ctx, resp.StatusCode, evBody) {
 			if status, errType, errMsg, matched := applyErrorPassthroughRule(c, account.Platform, resp.StatusCode, evBody,
 				http.StatusBadGateway, "upstream_error", "Upstream request failed"); matched {
 				return nil, s.writeChatCompletionsError(c, status, errType, errMsg)
 			}
-			return nil, newAsyncImageReferenceBudgetFailoverError(evBody, resp.Header)
+			return nil, newAsyncImageReferenceAccountFailoverError(evBody, resp.Header)
 		}
 		if asyncImageGeneration && resp.StatusCode == http.StatusBadRequest {
 			if isGeminiAsyncAccountFailover400(evBody) {

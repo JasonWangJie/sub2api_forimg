@@ -16,6 +16,7 @@ type AsyncImageAccountAttempt struct {
 	Status            string    `json:"status"`
 	StatusCode        int       `json:"status_code,omitempty"`
 	ProviderErrorCode string    `json:"provider_error_code,omitempty"`
+	FailureReason     string    `json:"failure_reason,omitempty"`
 	UpstreamRequestID string    `json:"upstream_request_id,omitempty"`
 	Error             string    `json:"error,omitempty"`
 	AttemptedAt       time.Time `json:"attempted_at"`
@@ -30,6 +31,7 @@ const (
 type asyncImageAccountAttemptContextKey struct{}
 type asyncImageExcludedAccountsContextKey struct{}
 type asyncImageNonRetryableAccountsContextKey struct{}
+type asyncImageInputReferenceTaskContextKey struct{}
 type asyncImageGeminiMaxSwitchesContextKey struct{}
 type asyncImageAccountAttemptTimeoutContextKey struct{}
 type asyncImageRoutingSessionHashContextKey struct{}
@@ -70,6 +72,23 @@ func AsyncImageReferenceAccountSwitchActive(ctx context.Context) bool {
 	}
 	active, _ := ctx.Value(asyncImageReferenceAccountSwitchContextKey{}).(bool)
 	return active
+}
+
+// WithAsyncImageInputReferenceTask marks the private durable image-to-image
+// request. Unqualified download errors must not make text-to-image replayable.
+func WithAsyncImageInputReferenceTask(ctx context.Context, inputReferenceTask bool) context.Context {
+	if ctx == nil {
+		return nil
+	}
+	return context.WithValue(ctx, asyncImageInputReferenceTaskContextKey{}, inputReferenceTask)
+}
+
+func IsAsyncImageInputReferenceTask(ctx context.Context) bool {
+	if ctx == nil {
+		return false
+	}
+	inputReferenceTask, _ := ctx.Value(asyncImageInputReferenceTaskContextKey{}).(bool)
+	return inputReferenceTask
 }
 
 // WithAsyncImageNonRetryableAccountIDs excludes accounts for this durable task

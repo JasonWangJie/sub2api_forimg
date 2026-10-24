@@ -1,5 +1,16 @@
 # AI 交接文档
 
+## 2026-10-24 当前交接：四任务复核与参考图400全部直接换号
+
+- 用户给出`asyncimg_772cdb9da58133687d7c4bf0414c95fc`、`asyncimg_469ef4dba6cd2115ad3c92087c8241be`、`asyncimg_d527dfda045921a5aa625a82c60186c9`投诉同号重试，并要求`asyncimg_5c35aaea12f5909cf9144a9aea79e900`同类错误换号。只读查到前三是Gemini图生图下载400、末条是OpenAI组合能力422；每条1次selected/1次invocation_started/retry=0，重复failed是审计层，不要误报成重复HTTP。任务分别落账号33/33/32/26，完整脱敏证据见 [报告最新章节](wiki-new/异步生图近三日生产诊断与优化建议.md#2026-10-24-四任务复核与参考图400统一换号)。
+- 本轮生产再次确认仍`.54 / c623015c229be42ada6a9a5fdf076d42cf55fc99`、active、进程起点10-20；本地已在其他操作中提交到`02348bfadb2cb2a34d62764e1ffae3946420d4d5`且有tag`v0.1.173.55`，但是源码VERSION仍`.54`。本地tag存在不等于生产已升级，也不能推断CI/Release完成；本轮未执行发布或部署。
+- 已新增通用`IsAsyncImageReferenceAccountFailoverMessage`/ForContext/`IsAsyncImageReferenceAccountFailover()`，明确输入参考图临时失败HTTP400直接换号，覆盖预算耗尽、直连/代理失败、fetch失败、新`Error while downloading HTTPS…Get同URL…dial tcp…i/o timeout`。旧预算API/Reason/marker兼容，普通新类用`async_image_reference_account_failover`。APIKey/OAuth、OpenAI/Gemini共用，`RetryableOnSameAccount=false`优先于池400重试3次。
+- 无reference字样的新网络格式额外要求Worker绑定`WithAsyncImageInputReferenceTask(task.RequestType==image_to_image)`，缺省/false不放行，防止文生图结果下载错误重新生成。诊断整URL隐藏后仍可按安全原型识别，原provider码、request ID和Retry-After保留；永久输入/内容/已计费或执行已开始提示不进入新分类。
+- Handler耗尽及Worker同时接受新旧标记并终止；普通上游reference400不再走A/A/A/B。完整历史硬排除和sticky累计都扩展到通用错误，兼容旧status0但含明确HTTP400前缀的审计；B503重排、soft排除放宽或旧stickyA也不能回选A。普通400/422/503不再被reference辅助函数追加第二条无关failed。非400和multipart协商保留原兼容机制，模糊502及结果后处理仍不重放。
+- `5c35aaea…`的真实journal完整结构为`image_request_capability_not_supported`、`fixed_capability_mismatch`、model/size两种capability_errors和已知三段message，符合现有严格422规则；这条生产失败来自旧二进制，不是本地缺少规则。保持模型、清晰度/比例/参考图，不静默降级、不全局停用账号。
+- 已将已知能力422也加入完整任务历史硬排除，覆盖A422后B503再排队的情况。新尝试JSON增加可选`failure_reason`（无数据库迁移），由Handler保存服务端failover Reason；保留原providerCode，不受`error.status=INVALID_ARGUMENT`优先或旧尺寸无code影响。旧审计使用严格status/code/完整message谓词回退；新审计以确定的Reason保留分类证据，HTTP入口组合details的严格条件不变。
+- 当前实际HEAD仍=`02348bfadb2cb2a34d62764e1ffae3946420d4d5`，VERSION=`0.1.173.54`，describe=`v0.1.173.55-dirty`，main与origin/main关系未变；本轮只改后端/测试和五份文档，没有commit/push/tag、生产变更或重放四任务。测试终验和未完成项见 [开发台账](开发台账.md)。
+
 ## 2026-10-24 当前交接：异步分类优化与预算400禁止同号
 
 - 用户已要求执行优化，并指定任务`asyncimg_48de7444b4968293bc7a5186be50a5ba`同类错误换号、不重试同账号。只读重查确认账号33/Gemini图生图2K/组2，提交北京时间10-24 00:10:21、终态00:10:58，错误为HTTP400参考图35秒总下载预算耗尽；原任务retry=0、只有该账号。生产仍`.54 / c623015c229be42ada6a9a5fdf076d42cf55fc99`、active，本轮没有修改生产/部署/重启/生图/重放。
