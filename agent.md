@@ -1,9 +1,11 @@
 # AI 交接文档
 
-## 2026-10-25 当前交接：v0.1.173.57 发布准备
+## 2026-10-25 当前交接：v0.1.173.57 GitHub发布
 
-- 用户明确要求推送GitHub打包，指定annotated tag`v0.1.173.57`。已按其步骤checkout/pull main，结果up-to-date；真实完整HEAD=`ca6fee9a633d1391956e4fd0cb37608281a2340f`，main同步，describe=`v0.1.173.56-1-gca6fee9-dirty`，开始VERSION`.56`、工作树为上一轮14条改动。目标tag不存在，现将源码VERSION和发行手册同步`.57`，准备提交本轮代码/测试/记录后推main和tag。
-- 完整Release默认保留，tag注释含空行后的正文；没有更改工作流、GoReleaser、Fork身份或安装路径。回归证据见下节与台账，Release/产物须真实核验后补记；本次不连接或部署生产，不重放任务。
+- 用户明确要求推送GitHub打包，指定annotated tag`v0.1.173.57`。开始按其步骤checkout/pull main，结果up-to-date；当时完整HEAD=`ca6fee9a633d1391956e4fd0cb37608281a2340f`，main同步，describe=`v0.1.173.56-1-gca6fee9-dirty`，VERSION`.56`、工作树为上一轮14条改动。目标tag当时不存在，本次已同步源码VERSION和发行手册为`.57`并完成提交、main/tag推送。
+- 已提交并推main，随后创建推送tag；发布完整SHA=`1fdc9dd8bda9dca911e5ddd5fc8bcff1a9a5a245`，远端annotated tag对象`afa42077afe26470c693816ca593840ec97038f7`解引用一致。补记前status=`## main...origin/main`干净，describe=`v0.1.173.57`、VERSION=`0.1.173.57`。本条为发布后补记，后续文档提交不得移动tag。
+- 完整[Release流水线](https://github.com/JasonWangJie/sub2api_forimg/actions/runs/40113792694)已completed/success、四job成功，01:08:42（北京时间）完成；[Release](https://github.com/JasonWangJie/sub2api_forimg/releases/tag/v0.1.173.57)于01:08:25公开，五平台包+非空checksums完整uploaded、清单五项与资产digest一致，匿名GHCR manifest含linux/amd64、linux/arm64，未下载压缩包或运行二进制。tag注释含完整正文，未改工作流/GoReleaser/Fork身份/安装路径；只读API一度滞后，重新读取已核实成功，没有重跑或改tag。
+- [tag CI](https://github.com/JasonWangJie/sub2api_forimg/actions/runs/40113792728)test/frontend成功、shell/lint失败；[Security](https://github.com/JasonWangJie/sub2api_forimg/actions/runs/40113792789)失败，已定位lint行与依赖注释均非本次新增改动，详细边界见台账，不要误报全CI绿。后续可按用户要求单独处理这些既有检查及生产部署/真实任务验收；本次未连接或部署生产，未重放任务。
 
 ## 2026-10-25 当前交接：脱敏参考图超时及换号本地回退
 

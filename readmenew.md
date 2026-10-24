@@ -1,9 +1,11 @@
 # Sub2API Fork 二次开发总览
 
-## 2026-10-25 v0.1.173.57 发布准备
+## 2026-10-25 v0.1.173.57 GitHub发布
 
 - 用户明确要求将本轮修复推送GitHub并以annotated tag `v0.1.173.57`触发打包；已执行`git checkout main`、`git pull origin main`，远端与本地基线一致。发布前完整HEAD=`ca6fee9a633d1391956e4fd0cb37608281a2340f`，status=`## main...origin/main`加本轮改动，describe=`v0.1.173.56-1-gca6fee9-dirty`；源码VERSION由`.56`同步为`.57`，发行手册同步本次tag标题及完整更新正文。
-- 修复及已通过回归见下一节；本次仅授权GitHub提交/推送/打tag与打包验证，没有生产部署或历史任务重放。Release/产物状态待实际执行后补记，不能将准备状态当作打包成功。
+- 已将修复提交`1fdc9dd8bda9dca911e5ddd5fc8bcff1a9a5a245`推到main，创建并推送annotated tag`v0.1.173.57`；远端tag对象`afa42077afe26470c693816ca593840ec97038f7`已解引用核对至该发布提交。补记基线为同一HEAD，status=`## main...origin/main`且干净，describe=`v0.1.173.57`，VERSION=`0.1.173.57`。
+- [Release打包](https://github.com/JasonWangJie/sub2api_forimg/actions/runs/40113792694)已completed/success，四个job成功；[v0.1.173.57 Release](https://github.com/JasonWangJie/sub2api_forimg/releases/tag/v0.1.173.57)于北京时间10-25 01:08:25公开发布，五个平台压缩包及非空`checksums.txt`均uploaded，清单五项SHA-256与GitHub各资产digest一致；匿名GHCR manifest确认`linux/amd64`、`linux/arm64`。未下载压缩包或实测二进制运行。
+- 独立[tag CI](https://github.com/JasonWangJie/sub2api_forimg/actions/runs/40113792728)的test/frontend成功、shell/lint失败，[安全扫描](https://github.com/JasonWangJie/sub2api_forimg/actions/runs/40113792789)失败；已定位lint行均早于本次变更，未扩大本次发行范围修复它们。本次没有生产部署或历史任务重放；本条为发布后的文档补记，后续文档提交不移动tag。
 
 ## 2026-10-25 脱敏参考图超时识别与换号本地回退
 
