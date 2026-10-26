@@ -238,6 +238,9 @@ func (s *OpenAIGatewayService) shouldFailoverOpenAIUpstreamResponse(statusCode i
 // trigger a persisted local transport fallback.
 func isOpenAIAsyncAccountFailover400(message string) bool {
 	lower := strings.ToLower(strings.TrimSpace(message))
+	if strings.Contains(strings.Join(strings.Fields(lower), " "), "service timeout") {
+		return false
+	}
 	// These are transport/encoding mismatches, not account capability
 	// failures. The durable worker must see the original response so the
 	// hybrid reference strategy can persistently fall back to local multipart.

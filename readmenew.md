@@ -1,5 +1,12 @@
 # Sub2API Fork 二次开发总览
 
+## 2026-10-26 四任务复核与TLS/服务超时400换渠道
+
+- 四条指定任务均已在一次调用中由账号1的503/UNAVAILABLE换到账号32，最终被账号32的400终止；retry_count=0只表示没有Worker重排。只读核对运行进程仍为`.57 / 1fdc9dd8bda9dca911e5ddd5fc8bcff1a9a5a245`，本地已是`.58 / 93eaddf01a978ebfac44e7f0a0489e8aef3605a7`。其中两条I/O下载超时已经由`.58`可变mask路径规则覆盖，当前失败来自旧运行版本。
+- 本轮新增严格参考下载TLS握手超时识别，支持原始完整及脱敏缺闭引号两种同HTTPS地址格式，沿hybrid持久local并排除失败账号后换号；另给完整HTTP400 `service timeout, please try again later.`新增独立有限换号/noSame规则，耗尽保400、跨Worker不选回该类失败账号。补对应错误家族的通用400拦截，防止精确规则拒绝的附加文案从invalid_request兜底绕过。
+- 开始实际HEAD=`93eaddf01a978ebfac44e7f0a0489e8aef3605a7`，status=`## main...origin/main`及用户原有发行手册修改，describe=`v0.1.173.58-1-g93eaddf-dirty`，VERSION=`0.1.173.58`。保留该手册修改；本轮只读生产及本地后端修复，没有升版、发布、部署、重启或重放历史任务。证据与验证见 [四任务新复核](wiki-new/异步生图近三日生产诊断与优化建议.md#2026-10-26-四任务复核与tls服务超时400换渠道)和 [开发台账](开发台账.md)。
+- 最终Service完整unit通过163.220s（仅skip既有外部token API对照）、Handler完整unit通过36.833s；新增40个Handler场景及Service四凭据/家族旁路定向通过，常规编译0.091s/0.091s通过。18份Go格式、差异、16个新本地链接/8锚点通过，用户发行手册SHA与开始一致；完成HEAD/VERSION不变，新修复仍未提交或上线。
+
 ## 2026-10-26 拉取与合并更新核对
 
 - 按用户要求执行`git fetch origin`、`git pull --ff-only origin main`，返回`Already up to date`；HEAD与origin/main均为`ea6f1606178a422c944a4992aabe9dbc81bb4c34`，没有新增远端提交或合并提交。

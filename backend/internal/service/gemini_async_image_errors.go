@@ -95,6 +95,9 @@ func isGeminiAsyncAccountFailover400(body []byte) bool {
 	if IsAsyncImageReferenceFetchFailureMessage(message) {
 		return false
 	}
+	if strings.Contains(strings.Join(strings.Fields(message), " "), "service timeout") {
+		return false
+	}
 	for _, fragment := range []string{
 		"image_url fetch failed", "image url fetch failed", "fileuri fetch failed",
 		"fileuri download failed", "download openai reference image",
@@ -106,6 +109,7 @@ func isGeminiAsyncAccountFailover400(body []byte) bool {
 		"image container is invalid", "invalid image file", "unsupported_image_format",
 		"requires multipart/form-data", "prompt is required", "content policy",
 		"safety policy", "violates our content policy",
+		"service timeout",
 	} {
 		// Keep reference-shaped errors out of generic invalid_request failover
 		// even when the shared retry classifier rejects a permanent input error

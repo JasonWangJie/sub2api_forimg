@@ -1,5 +1,13 @@
 # AI 交接文档
 
+## 2026-10-26 当前交接：四任务TLS及服务超时400补换渠道
+
+- 用户指定f1e392eb…/1f3cf926…/fde187b4…/76622ee3…要求加换渠道。只读事实：四条都已先A1 503/UNAVAILABLE后B32 400，不能把retry_count=0误报完全未换号。进程/proc/PID2504191版本仍`.57 / 1fdc9dd8…`、active、始于10-25 09:05:28；本地已`.58`，此前改动已由其他操作提交，最新真实HEAD=`93eaddf01a978ebfac44e7f0a0489e8aef3605a7`，describe=`v0.1.173.58-1-g93eaddf-dirty`、VERSION=`0.1.173.58`。
+- 两条I/O下载400的2/4段全mask路径已在58规则内，失败来自运行旧版；本轮新增参考下载TLS完整raw/mask同URL格式及独立safe TLS canonical，仍私有图生图；新增精确HTTP400 service timeout, please try again later.独立Reason/noSame/全历史hard排，耗尽保400不Worker重排。service timeout不进入reference local，TLS沿hybrid local后换别号。
+- 真实invalid_request_error负例发现generic400旁路，Service同步补本family归一化排除，阻止partial/prefix/附加停止文案绕精确分类；其他generic行为保持。四凭据、管理员优先、诊断/请求ID/headers、请求规格及原预算保持，unknown/结果/内容/永久错误边界不变。
+- 开始仅用户发行手册未提交修改（tag示例59）；必须保留，不视为本轮授权发版。本轮仅读服务器后SSH已关闭，journal尝试因10054未取得结果，不要写成日志查询成功或已核实原始body字段。当前仅本地实现，不自动发布/部署/重放；验证和完整任务事实见 [台账](开发台账.md)及 [专题](wiki-new/异步生图近三日生产诊断与优化建议.md#2026-10-26-四任务复核与tls服务超时400换渠道)。
+- 最终Service完整unit163.220s（仅skip既有外部token API对照）/Handler36.833s通过；40个真实wrapper Handler子例0.144s，Service TLS/新400四凭据0.285s及family旁路0.210s通过，普通编译两包0.091s仅无测试运行。18Go格式/差异、16本地链接/8锚点通过，独立审查无阻断；user manual SHA与开始相同。HEAD/VERSION不变，工作树23路径=本轮18Go+4docs+原manual（17tracked+6新增），尚未提交/推送/发布/部署。
+
 ## 2026-10-26 当前交接：拉取合并核对无远端新提交
 
 - 用户要求拉取代码并合并更新；已执行origin fetch及`git pull --ff-only origin main`，返回Already up to date，HEAD与origin/main均为`ea6f1606178a422c944a4992aabe9dbc81bb4c34`，ahead/behind=`0/0`，没有冲突或新合并提交。

@@ -24,6 +24,10 @@ func (h *DurableAsyncImageHandler) handleAsyncImageUpstreamFailure(parent, attem
 		zap.Int("status_code", statusCode),
 		zap.String("message", message),
 	)
+	if service.IsAsyncImageServiceTimeout400AccountFailure(statusCode, service.ExtractUpstreamErrorMessage(body)) {
+		h.failAsyncImageTask(parent, task, "upstream_failed", message, false)
+		return asyncImageWorkerDisposition{}
+	}
 	if statusCode == http.StatusBadRequest &&
 		gjson.GetBytes(body, "error.code").String() == service.AsyncImageReferenceLocalFallbackCode {
 		if canFallbackAsyncImageReferenceLocally(task, cfg) &&

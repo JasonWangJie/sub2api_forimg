@@ -27,6 +27,8 @@ const AsyncImageReferenceLocalFallbackCode = "async_image_reference_local_fallba
 var asyncImageReferenceBudgetExceededPattern = regexp.MustCompile(`(?i)^reference image download exceeded its total time budget for (https://[^\s]+) \(budgetms=([1-9][0-9]{0,8}); reason=timeout\)$`)
 var asyncImageReferenceNetworkDownloadPattern = regexp.MustCompile(`(?i)^error while downloading (https://[^\s]+?):? get "(https://[^"\s]+)": dial tcp [^"\s]+: i/o timeout$`)
 var asyncImageReferenceRedactedNetworkDownloadPattern = regexp.MustCompile(`(?i)^error while downloading (https://\*{3}(?:\.\*{3})*\.[a-z]+(?:/\*{3})+) get "(https://\*{3}(?:\.\*{3})*\.[a-z]+(?:/\*{3})+) dial tcp \*{3}\.\*{3}\.\*{3}\.\*{3}:443: i/o timeout$`)
+var asyncImageReferenceTLSDownloadPattern = regexp.MustCompile(`(?i)^error while downloading (https://[^\s]+?):? get "(https://[^"\s]+)": net/http: tls handshake timeout$`)
+var asyncImageReferenceRedactedTLSDownloadPattern = regexp.MustCompile(`(?i)^error while downloading (https://\*{3}(?:\.\*{3})*\.[a-z]+(?:/\*{3})+) get "(https://\*{3}(?:\.\*{3})*\.[a-z]+(?:/\*{3})+) net/http: tls handshake timeout$`)
 var asyncImageReferenceDiagnosticURLPattern = regexp.MustCompile(`(?i)https?://[^\s"'<>]+`)
 
 // IsAsyncImageReferenceBudgetExceededMessage accepts only the complete known
@@ -80,12 +82,15 @@ func isAsyncImageReferenceAccountFailoverForContext(ctx context.Context, statusC
 
 func isAsyncImageReferenceNetworkDownloadFailure(message string) bool {
 	message = strings.Join(strings.Fields(message), " ")
-	matches := asyncImageReferenceNetworkDownloadPattern.FindStringSubmatch(message)
-	if len(matches) == 0 {
-		// One provider masks both URLs and the IPv4 endpoint, removing the
-		// closing URL quote/colon in the process. Accept only that observed
-		// redaction shape, never arbitrary malformed unredacted network errors.
-		matches = asyncImageReferenceRedactedNetworkDownloadPattern.FindStringSubmatch(message)
+	var matches []string
+	for _, pattern := range []*regexp.Regexp{
+		asyncImageReferenceNetworkDownloadPattern, asyncImageReferenceRedactedNetworkDownloadPattern,
+		asyncImageReferenceTLSDownloadPattern, asyncImageReferenceRedactedTLSDownloadPattern,
+	} {
+		matches = pattern.FindStringSubmatch(message)
+		if len(matches) != 0 {
+			break
+		}
 	}
 	if len(matches) != 3 || matches[1] != matches[2] {
 		return false
@@ -101,7 +106,11 @@ func newAsyncImageReferenceAccountFailoverError(body []byte, headers http.Header
 	_, providerCode, requestID := geminiAsyncUpstreamDiagnostics(body, geminiRequestIDFromHeaders(headers))
 	message := strings.Join(strings.Fields(extractUpstreamErrorMessage(body)), " ")
 	if isAsyncImageReferenceNetworkDownloadFailure(message) {
-		message = `Error while downloading https://*** Get "https://***": dial tcp ***:443: i/o timeout`
+		if strings.HasSuffix(strings.ToLower(message), "net/http: tls handshake timeout") {
+			message = `Error while downloading https://*** Get "https://***": net/http: TLS handshake timeout`
+		} else {
+			message = `Error while downloading https://*** Get "https://***": dial tcp ***:443: i/o timeout`
+		}
 	} else {
 		// Remove entire URLs before diagnostic truncation so long signed paths
 		// cannot leak or push the failure prototype beyond the retained prefix.

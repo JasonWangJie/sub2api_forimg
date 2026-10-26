@@ -1744,7 +1744,8 @@ func (s *OpenAIGatewayService) forwardOpenAIImagesOAuth(
 		asyncSizeMismatch := AsyncImageAccountAttemptCaptureFromContext(ctx) != nil && isAsyncImageSizeCapabilityMismatch(resp.StatusCode, respBody)
 		asyncReferenceBudget := AsyncImageAccountAttemptCaptureFromContext(ctx) != nil && isAsyncImageReferenceAccountFailoverForContext(ctx, resp.StatusCode, respBody)
 		asyncInternal422 := AsyncImageAccountAttemptCaptureFromContext(ctx) != nil && isAsyncImageInternalError422(resp.StatusCode, respBody)
-		if asyncSizeMismatch || asyncReferenceBudget || asyncInternal422 {
+		asyncServiceTimeout := AsyncImageAccountAttemptCaptureFromContext(ctx) != nil && isAsyncImageServiceTimeout400(resp.StatusCode, respBody)
+		if asyncSizeMismatch || asyncReferenceBudget || asyncInternal422 || asyncServiceTimeout {
 			if rules := getBoundErrorPassthroughService(c); rules != nil && rules.MatchRule(account.Platform, resp.StatusCode, respBody) != nil {
 				return s.handleOpenAIImagesErrorResponse(upstreamCtx, resp, c, account, requestModel)
 			}
@@ -1758,7 +1759,7 @@ func (s *OpenAIGatewayService) forwardOpenAIImagesOAuth(
 		if !shouldFailover && resp.StatusCode == http.StatusBadRequest && AsyncImageAccountAttemptCaptureFromContext(ctx) != nil {
 			shouldFailover = isOpenAIAsyncAccountFailover400(upstreamMsg)
 		}
-		if shouldFailover || asyncSizeMismatch || asyncReferenceBudget || asyncInternal422 {
+		if shouldFailover || asyncSizeMismatch || asyncReferenceBudget || asyncInternal422 || asyncServiceTimeout {
 			var referenceBudgetErr *UpstreamFailoverError
 			if asyncReferenceBudget {
 				referenceBudgetErr = newAsyncImageReferenceAccountFailoverError(respBody, resp.Header)
@@ -1785,6 +1786,10 @@ func (s *OpenAIGatewayService) forwardOpenAIImagesOAuth(
 			if asyncInternal422 {
 				s.handleOpenAIAccountUpstreamError(upstreamCtx, account, resp.StatusCode, resp.Header, respBody, requestModel)
 				return nil, newAsyncImageInternalError422FailoverError(respBody, resp.Header)
+			}
+			if asyncServiceTimeout {
+				s.handleOpenAIAccountUpstreamError(upstreamCtx, account, resp.StatusCode, resp.Header, respBody, requestModel)
+				return nil, newAsyncImageServiceTimeout400FailoverError(respBody, resp.Header)
 			}
 			shouldDisable := s.handleFailoverSideEffects(upstreamCtx, resp, account, respBody, requestModel)
 			retrySameAccount := !shouldDisable && account.IsPoolMode() && account.IsPoolModeRetryableStatus(resp.StatusCode)
