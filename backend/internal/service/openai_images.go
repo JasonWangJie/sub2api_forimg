@@ -819,7 +819,8 @@ func (s *OpenAIGatewayService) forwardOpenAIImagesAPIKey(
 		upstreamMsg = sanitizeUpstreamErrorMessage(upstreamMsg)
 		asyncSizeMismatch := AsyncImageAccountAttemptCaptureFromContext(ctx) != nil && isAsyncImageSizeCapabilityMismatch(resp.StatusCode, respBody)
 		asyncReferenceBudget := AsyncImageAccountAttemptCaptureFromContext(ctx) != nil && isAsyncImageReferenceAccountFailoverForContext(ctx, resp.StatusCode, respBody)
-		if asyncSizeMismatch || asyncReferenceBudget {
+		asyncInternal422 := AsyncImageAccountAttemptCaptureFromContext(ctx) != nil && isAsyncImageInternalError422(resp.StatusCode, respBody)
+		if asyncSizeMismatch || asyncReferenceBudget || asyncInternal422 {
 			if rules := getBoundErrorPassthroughService(c); rules != nil && rules.MatchRule(account.Platform, resp.StatusCode, respBody) != nil {
 				return s.handleOpenAIImagesErrorResponse(upstreamCtx, resp, c, account, upstreamModel)
 			}
@@ -828,7 +829,7 @@ func (s *OpenAIGatewayService) forwardOpenAIImagesAPIKey(
 		if !shouldFailover && resp.StatusCode == http.StatusBadRequest && AsyncImageAccountAttemptCaptureFromContext(ctx) != nil {
 			shouldFailover = isOpenAIAsyncAccountFailover400(upstreamMsg)
 		}
-		if shouldFailover || asyncSizeMismatch || asyncReferenceBudget {
+		if shouldFailover || asyncSizeMismatch || asyncReferenceBudget || asyncInternal422 {
 			var referenceBudgetErr *UpstreamFailoverError
 			if asyncReferenceBudget {
 				referenceBudgetErr = newAsyncImageReferenceAccountFailoverError(respBody, resp.Header)
@@ -854,6 +855,10 @@ func (s *OpenAIGatewayService) forwardOpenAIImagesAPIKey(
 				// Preserve any explicit administrator error/temporary rules.
 				s.handleOpenAIAccountUpstreamError(upstreamCtx, account, resp.StatusCode, resp.Header, respBody, upstreamModel)
 				return nil, newAsyncImageSizeCapabilityFailoverError(respBody, resp.Header)
+			}
+			if asyncInternal422 {
+				s.handleOpenAIAccountUpstreamError(upstreamCtx, account, resp.StatusCode, resp.Header, respBody, upstreamModel)
+				return nil, newAsyncImageInternalError422FailoverError(respBody, resp.Header)
 			}
 			shouldDisable := s.handleFailoverSideEffects(upstreamCtx, resp, account, respBody, upstreamModel)
 			retrySameAccount := !shouldDisable && account.IsPoolMode() && account.IsPoolModeRetryableStatus(resp.StatusCode)

@@ -1,5 +1,20 @@
 # AI 交接文档
 
+## 2026-10-26 当前交接：拉取合并核对无远端新提交
+
+- 用户要求拉取代码并合并更新；已执行origin fetch及`git pull --ff-only origin main`，返回Already up to date，HEAD与origin/main均为`ea6f1606178a422c944a4992aabe9dbc81bb4c34`，ahead/behind=`0/0`，没有冲突或新合并提交。
+- 上一轮13Go+4docs的17条未提交改动全部保留（13tracked+4新增）；本次仅补三份记录，没有业务源码变化。实际status=`## main...origin/main`加17条，describe=`v0.1.173.57-1-gea6f160-dirty`，VERSION=`0.1.173.57`。差异/文档链接检查通过，未重复业务测试、提交/推送/发布或生产操作。
+- 下一步若用户要求，可提交上一轮修复并安排发布；不要将此次“已拉取”误写成修复已经提交或生产已升级。本地仍只有origin远端，未新增或合入其他来源。
+
+## 2026-10-26 当前交接：参考图可变路径与精确内部422换渠道
+
+- 用户指定`asyncimg_4f17477b240392544c44901d659535bb`问为何已加规则仍失败，并要求`asyncimg_3c189479bfd3240567ef9f472307330b`这类也换渠道。只读证据：生产已`.57 / 1fdc9dd8bda9dca911e5ddd5fc8bcff1a9a5a245`、active、自北京时间10-25 09:05:28运行；两任务各1selected/1failed、总和子重试0，没有换号。不是旧版未部署，也不是换完所有账号才失败。
+- 前者是参考图HTTP400，两个一致的缺闭引号mask URL有四段路径，`.57`固定三段漏判。已按脱敏结构识别可变域后缀/路径数量，保留私有图生图和完整负面守卫；hybrid仍A失败持久local、硬排A后本机内联给B。后者为HTTP422/诊断UNKNOWN/完整Internal error encountered.，本轮新独立Reason/code=`async_image_internal_error_422`，四凭据路径直接换号/noSame，耗尽保422，完整历史持久Reason或strict legacy tuple排A，混合503重排不能回A。
+- 原始422 body未从限定journal恢复，UNKNOWN按已有诊断提取口径核对，不推断具体字段位置、生成前阶段或无费用；provider UNKNOWN不是execution_unknown。本轮未放宽其他422/UNKNOWN、502/504未知、结果、内容/永久和同步边界，不改账号池/预算/请求规格/数据库结构。
+- 实际开始HEAD=`ea6f1606178a422c944a4992aabe9dbc81bb4c34`、main同步干净、describe=`v0.1.173.57-1-gea6f160`、VERSION=`0.1.173.57`。生产仅读后SSH已关闭，没有部署/重启/历史重放；本地实现与验证完成状态见 [开发台账](开发台账.md)，证据见 [本轮专题](wiki-new/异步生图近三日生产诊断与优化建议.md#2026-10-26-可变路径下载超时与422内部错误换渠道)。本轮没有自动发布新tag，后续提交/发布/部署按用户后续安排。
+- 最终Service完整unit165.480s（仅skip既有外部token API对照）/Handler42.576s通过，新Handler28例0.411s、Service真实池422配置60分支1.912s及mask定向通过。两轮Service旧分配/UTC23:59峰时夹具失败已分别复核，最终全包保留它们通过，原因及命令在台账，不要误写为首轮全绿或已修复旧夹具。常规编译、13Go格式/差异、14本地链接/7锚点通过；完成HEAD/VERSION不变、describe增加`-dirty`，共17改动路径（13tracked+4新增）。
+- 08:08再次只读核对正在运行进程的`/proc/2504191/exe --version`及映像/磁盘SHA一致，确认`.57 / 1fdc9dd8…`；未重启，第二次SSH也已关闭。本轮新规则仍只在本地未提交，不能写成生产已应用。
+
 ## 2026-10-25 当前交接：v0.1.173.57 GitHub发布
 
 - 用户明确要求推送GitHub打包，指定annotated tag`v0.1.173.57`。开始按其步骤checkout/pull main，结果up-to-date；当时完整HEAD=`ca6fee9a633d1391956e4fd0cb37608281a2340f`，main同步，describe=`v0.1.173.56-1-gca6fee9-dirty`，VERSION`.56`、工作树为上一轮14条改动。目标tag当时不存在，本次已同步源码VERSION和发行手册为`.57`并完成提交、main/tag推送。

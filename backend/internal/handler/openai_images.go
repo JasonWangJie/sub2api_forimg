@@ -342,7 +342,7 @@ func (h *OpenAIGatewayHandler) Images(c *gin.Context) {
 							AccountID: account.ID, AccountName: account.Name, Status: service.AsyncImageAccountAttemptFailed,
 							StatusCode: failoverErr.StatusCode, UpstreamRequestID: upstreamRequestIDFromFailover(failoverErr), Error: failoverErr.Error(),
 						}
-						if failoverErr.IsAsyncImageSizeCapabilityMismatch() || failoverErr.IsAsyncImageReferenceAccountFailover() {
+						if failoverErr.IsAsyncImageSizeCapabilityMismatch() || failoverErr.IsAsyncImageReferenceAccountFailover() || failoverErr.IsAsyncImageInternalError422() {
 							attempt = asyncImageFailedAccountAttempt(account, failoverErr)
 						}
 						service.RecordAsyncImageAccountAttempt(c.Request.Context(), attempt)

@@ -537,6 +537,10 @@ func (h *GatewayHandler) handleCCFailoverExhausted(c *gin.Context, lastErr *serv
 		c.JSON(http.StatusBadRequest, gin.H{"error": gin.H{"type": errType, "code": code, "message": message}})
 		return
 	}
+	if errType, code, message, ok := asyncImageInternalError422ErrorDetails(c, lastErr); ok {
+		c.JSON(http.StatusUnprocessableEntity, gin.H{"error": gin.H{"type": errType, "code": code, "message": message}})
+		return
+	}
 	if lastErr != nil && lastErr.ProviderErrorMessage != "" && c != nil && c.Request != nil && service.IsGeminiAsyncImageGeneration(c.Request.Context()) {
 		errorBody := gin.H{"type": "upstream_error", "message": lastErr.ProviderErrorMessage}
 		if lastErr.ProviderErrorCode != "" {

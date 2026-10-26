@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -21,7 +22,7 @@ func TestAsyncImageReferenceRedactedTimeoutIsLimitedToObservedShape(t *testing.T
 		{"different URLs", strings.Replace(referenceRedactedNetworkTestMessage, ".com", ".net", 1), false},
 		{"partially visible host", strings.ReplaceAll(referenceRedactedNetworkTestMessage, "***.com", "images.example.com"), false},
 		{"partially visible path", strings.ReplaceAll(referenceRedactedNetworkTestMessage, "/***/***/***", "/public/***/***"), false},
-		{"wrong masked path", strings.ReplaceAll(referenceRedactedNetworkTestMessage, "/***/***/***", "/***/***"), false},
+		{"two masked path segments", strings.ReplaceAll(referenceRedactedNetworkTestMessage, "/***/***/***", "/***/***"), true},
 		{"non HTTPS", strings.ReplaceAll(referenceRedactedNetworkTestMessage, "https://", "http://"), false},
 		{"unredacted malformed URLs", strings.ReplaceAll(referenceRedactedNetworkTestMessage, "https://***.com/***/***/***", "https://references.example/input.png"), false},
 		{"unredacted endpoint", strings.Replace(referenceRedactedNetworkTestMessage, "***.***.***.***:443", "203.0.113.4:443", 1), false},
@@ -39,6 +40,31 @@ func TestAsyncImageReferenceRedactedTimeoutIsLimitedToObservedShape(t *testing.T
 	}
 	require.False(t, IsAsyncImageReferenceAccountFailoverMessage(502, referenceRedactedNetworkTestMessage))
 	require.False(t, IsAsyncImageReferenceAccountFailoverMessage(504, referenceRedactedNetworkTestMessage))
+}
+
+func TestAsyncImageReferenceRedactedTimeoutUsesMaskStructureInsteadOfPathDepth(t *testing.T) {
+	for _, depth := range []int{1, 2, 3, 4, 12} {
+		for _, suffix := range []string{"ai", "com", "technology"} {
+			t.Run(fmt.Sprintf("%d segments/%s", depth, suffix), func(t *testing.T) {
+				message := strings.ReplaceAll(referenceRedactedNetworkTestMessage, ".com/***/***/***", "."+suffix+strings.Repeat("/***", depth))
+				require.True(t, IsAsyncImageReferenceAccountFailoverMessage(400, message))
+				require.True(t, isAsyncImageReferenceAccountFailoverForContext(WithAsyncImageInputReferenceTask(context.Background(), true), 400, []byte(referenceBudgetTestBody(message))))
+			})
+		}
+	}
+	for _, source := range []string{
+		"https://***.***.com/***", // A fully masked subdomain is still a masked host.
+	} {
+		message := strings.ReplaceAll(referenceRedactedNetworkTestMessage, "https://***.com/***/***/***", source)
+		require.True(t, IsAsyncImageReferenceAccountFailoverMessage(400, message))
+	}
+	for _, source := range []string{
+		"https://images.example.com/***/***/***", "https://images.***.com/***", "https://***.com/public/***",
+		"https://***.com/***/***/file.png", "https://***.com/***?token=private", "https://user:secret@***.com/***",
+	} {
+		message := strings.ReplaceAll(referenceRedactedNetworkTestMessage, "https://***.com/***/***/***", source)
+		require.False(t, IsAsyncImageReferenceAccountFailoverMessage(400, message), source)
+	}
 }
 
 func TestAsyncImageReferenceRedactedTimeoutRequiresInputContextAndKeepsSafeAudit(t *testing.T) {

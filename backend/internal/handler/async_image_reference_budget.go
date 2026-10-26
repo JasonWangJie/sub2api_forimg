@@ -32,8 +32,8 @@ func isAsyncImageReferenceAccountFailure(attempt service.AsyncImageAccountAttemp
 }
 
 // Unlike the normal recent-three exclusion, this set spans the complete task
-// audit. A transient failure on B must not revive A's definite reference or
-// capability failure for this task's unchanged request specification.
+// audit. A transient failure on B must not revive an account whose recognized
+// reference, capability or internal-error rejection already required switching.
 func asyncImageNonRetryableAccountIDs(task *service.AsyncImageTask) map[int64]struct{} {
 	if task == nil {
 		return nil
@@ -48,7 +48,9 @@ func asyncImageNonRetryableAccountIDs(task *service.AsyncImageTask) map[int64]st
 			(attempt.Status == service.AsyncImageAccountAttemptFailed && attempt.AccountID > 0 &&
 				attempt.StatusCode == http.StatusUnprocessableEntity &&
 				(attempt.FailureReason == string(service.AsyncImageSizeCapabilityMismatchReason) ||
-					service.IsAsyncImageCapabilityAccountFailure(attempt.StatusCode, attempt.ProviderErrorCode, attempt.Error))) {
+					attempt.FailureReason == string(service.AsyncImageInternalError422Reason) ||
+					service.IsAsyncImageCapabilityAccountFailure(attempt.StatusCode, attempt.ProviderErrorCode, attempt.Error) ||
+					service.IsAsyncImageInternalError422AccountFailure(attempt.StatusCode, attempt.ProviderErrorCode, attempt.Error))) {
 			ids[attempt.AccountID] = struct{}{}
 		}
 	}

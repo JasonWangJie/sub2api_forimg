@@ -1,5 +1,17 @@
 # Sub2API Fork 二次开发总览
 
+## 2026-10-26 拉取与合并更新核对
+
+- 按用户要求执行`git fetch origin`、`git pull --ff-only origin main`，返回`Already up to date`；HEAD与origin/main均为`ea6f1606178a422c944a4992aabe9dbc81bb4c34`，没有新增远端提交或合并提交。
+- 上一轮13份Go及4份文档的17条未提交改动完整保留，本轮仅补记三份交接记录。实际status=`## main...origin/main`加17条改动，describe=`v0.1.173.57-1-gea6f160-dirty`，VERSION=`0.1.173.57`；差异和新增链接检查通过。本次未修改业务源码或重跑业务测试，未提交/推送/发布/部署。
+
+## 2026-10-26 可变路径参考图超时与422内部错误换渠道
+
+- 只读核对两条指定任务，生产已是`.57 / 1fdc9dd8bda9dca911e5ddd5fc8bcff1a9a5a245`、active；两条均只调用一个账号，总及分类重试0。`4f17477b…`仍是缺闭引号的脱敏参考图下载400，但本次URL有四段mask路径，`.57`固定三段的正则再次漏判；已取消路径数量及域后缀长度限制，保留完整脱敏结构、相同双URL、图生图及停止边界。
+- `3c189479…`是HTTP422、完整`Internal error encountered.`、诊断provider code=`UNKNOWN`，原能力422规则不涵盖它。已新增该精确类的有限直接换渠道规则，两平台API Key/OAuth均禁止同号重试；耗尽保留422、不转502重开Worker循环，并把独立Reason或严格旧审计加入任务全历史硬排除。UNKNOWN诊断不等于任务execution_unknown，未把全部UNKNOWN或422放行。
+- 实际基线HEAD=`ea6f1606178a422c944a4992aabe9dbc81bb4c34`，开始status=`## main...origin/main`且干净，describe=`v0.1.173.57-1-gea6f160`，VERSION=`0.1.173.57`。本轮没有部署、重启、配置/账号操作、真实生图或历史重放；验证与完整证据见 [本轮复核](wiki-new/异步生图近三日生产诊断与优化建议.md#2026-10-26-可变路径下载超时与422内部错误换渠道)及 [开发台账](开发台账.md)。
+- 最终Service完整unit通过165.480s（仅skip既有外部token API对照），Handler完整unit通过42.576s；新Handler28子例、Service60策略分支及mask结构回归通过，常规编译、13份Go格式/差异和14个新本地链接/7锚点检查通过。前两轮Service分别遇到旧分配测试与UTC23:59峰时夹具失败，已原范围复核并最终通过，没有跳过它们。完成HEAD/VERSION不变、describe增加`-dirty`，本轮尚未提交/发布/部署。
+
 ## 2026-10-25 v0.1.173.57 GitHub发布
 
 - 用户明确要求将本轮修复推送GitHub并以annotated tag `v0.1.173.57`触发打包；已执行`git checkout main`、`git pull origin main`，远端与本地基线一致。发布前完整HEAD=`ca6fee9a633d1391956e4fd0cb37608281a2340f`，status=`## main...origin/main`加本轮改动，describe=`v0.1.173.56-1-gca6fee9-dirty`；源码VERSION由`.56`同步为`.57`，发行手册同步本次tag标题及完整更新正文。
