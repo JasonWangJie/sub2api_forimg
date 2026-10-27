@@ -2566,6 +2566,10 @@ func (h *OpenAIGatewayHandler) handleFailoverExhausted(c *gin.Context, failoverE
 	// 记录原始上游状态码，以便 ops 错误日志捕获真实的上游错误
 	upstreamMsg := service.ExtractUpstreamErrorMessage(responseBody)
 	service.SetOpsUpstreamError(c, statusCode, upstreamMsg, "")
+	if status, code, message, ok := asyncImageRetryableRejectionErrorDetails(c, failoverErr); ok {
+		h.handleStreamingAwareErrorWithCode(c, status, "upstream_error", code, message, streamStarted, false)
+		return
+	}
 	if errType, code, message, ok := asyncImageSizeCapabilityErrorDetails(c, failoverErr); ok {
 		h.handleStreamingAwareErrorWithCode(c, http.StatusUnprocessableEntity, errType, code, message, streamStarted, false)
 		return

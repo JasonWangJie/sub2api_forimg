@@ -92,7 +92,8 @@ func asyncImageReferenceAccountErrorDetails(c *gin.Context, err *service.Upstrea
 // The worker owns transport changes and persists them together with the failed
 // account. Stop before consuming the remaining accounts with the same URL body.
 func asyncImageReferenceLocalFallbackRequested(c *gin.Context, err *service.UpstreamFailoverError) bool {
-	if c == nil || c.Request == nil || err == nil || err.StatusCode != http.StatusBadRequest || !err.IsAsyncImageReferenceAccountFailover() {
+	if c == nil || c.Request == nil || err == nil || err.StatusCode != http.StatusBadRequest ||
+		(!err.IsAsyncImageReferenceAccountFailover() && err.Reason != service.AsyncImageReferenceTransportRejectionReason) {
 		return false
 	}
 	ctx := c.Request.Context()

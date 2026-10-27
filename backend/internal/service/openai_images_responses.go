@@ -1741,6 +1741,13 @@ func (s *OpenAIGatewayService) forwardOpenAIImagesOAuth(
 		resp.Body = io.NopCloser(bytes.NewReader(respBody))
 		upstreamMsg := strings.TrimSpace(extractUpstreamErrorMessage(respBody))
 		upstreamMsg = sanitizeUpstreamErrorMessage(upstreamMsg)
+		if rejection := newAsyncImageRetryableRejectionForContext(ctx, resp.StatusCode, respBody, resp.Header); rejection != nil {
+			if rules := getBoundErrorPassthroughService(c); rules != nil && rules.MatchRule(account.Platform, resp.StatusCode, respBody) != nil {
+				return s.handleOpenAIImagesErrorResponse(upstreamCtx, resp, c, account, requestModel)
+			}
+			s.handleOpenAIAccountUpstreamError(upstreamCtx, account, resp.StatusCode, resp.Header, respBody, requestModel)
+			return nil, rejection
+		}
 		asyncSizeMismatch := AsyncImageAccountAttemptCaptureFromContext(ctx) != nil && isAsyncImageSizeCapabilityMismatch(resp.StatusCode, respBody)
 		asyncReferenceBudget := AsyncImageAccountAttemptCaptureFromContext(ctx) != nil && isAsyncImageReferenceAccountFailoverForContext(ctx, resp.StatusCode, respBody)
 		asyncInternal422 := AsyncImageAccountAttemptCaptureFromContext(ctx) != nil && isAsyncImageInternalError422(resp.StatusCode, respBody)

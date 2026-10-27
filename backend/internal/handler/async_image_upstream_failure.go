@@ -24,6 +24,21 @@ func (h *DurableAsyncImageHandler) handleAsyncImageUpstreamFailure(parent, attem
 		zap.Int("status_code", statusCode),
 		zap.String("message", message),
 	)
+	if (statusCode == http.StatusBadRequest || statusCode == http.StatusUnprocessableEntity) &&
+		(gjson.GetBytes(body, "error.code").String() == service.AsyncImageRetryableRejectionCode ||
+			gjson.GetBytes(body, "error.code").String() == service.AsyncImageReferenceTransportRetryCode) {
+		if gjson.GetBytes(body, "error.code").String() == service.AsyncImageReferenceTransportRetryCode &&
+			canFallbackAsyncImageReferenceLocally(task, cfg) {
+			// Transport compatibility is a soft exclusion: try another account
+			// with inline references first, but allow A if no alternate exists.
+			return h.scheduleAsyncImageReferenceRetry(parent, task, cfg, message, retryAfter, true, false)
+		}
+		if canRetryAsyncImage(task, task.UpstreamRetryCount, cfg.UpstreamTransientMaxRetries, cfg.TotalMaxRetries) {
+			return h.retryAsyncImageUpstreamTransient(parent, task, cfg, message, retryAfter)
+		}
+		h.failAsyncImageTask(parent, task, "upstream_failed", message, false)
+		return asyncImageWorkerDisposition{}
+	}
 	if service.IsAsyncImageServiceTimeout400AccountFailure(statusCode, service.ExtractUpstreamErrorMessage(body)) {
 		h.failAsyncImageTask(parent, task, "upstream_failed", message, false)
 		return asyncImageWorkerDisposition{}

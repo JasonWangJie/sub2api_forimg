@@ -241,6 +241,13 @@ func (s *GeminiMessagesCompatService) forwardClaudeBodyAsChatCompletions(
 		if policy == ErrorPolicyNone || policy == ErrorPolicyMatched {
 			s.handleGeminiUpstreamError(ctx, account, resp.StatusCode, resp.Header, respBody)
 		}
+		if rejection := newAsyncImageRetryableRejectionForContext(ctx, resp.StatusCode, evBody, resp.Header); rejection != nil {
+			if status, errType, errMsg, matched := applyErrorPassthroughRule(c, account.Platform, resp.StatusCode, evBody,
+				http.StatusBadGateway, "upstream_error", "Upstream request failed"); matched {
+				return nil, s.writeChatCompletionsError(c, status, errType, errMsg)
+			}
+			return nil, rejection
+		}
 		if asyncImageGeneration && isAsyncImageSizeCapabilityMismatch(resp.StatusCode, evBody) {
 			if status, errType, errMsg, matched := applyErrorPassthroughRule(c, account.Platform, resp.StatusCode, evBody,
 				http.StatusBadGateway, "upstream_error", "Upstream request failed"); matched {
@@ -277,6 +284,7 @@ func (s *GeminiMessagesCompatService) forwardClaudeBodyAsChatCompletions(
 
 		upstreamMessage := strings.TrimSpace(extractUpstreamErrorMessage(evBody))
 		if s.shouldFailoverGeminiUpstreamError(resp.StatusCode) &&
+			!(asyncImageGeneration && isAsyncImageTerminalRejection(extractUpstreamErrorCode(evBody), upstreamMessage)) &&
 			!(asyncImageGeneration && IsAsyncImageReferenceFetchFailureMessage(upstreamMessage)) {
 			upstreamMsg := sanitizeUpstreamErrorMessage(upstreamMessage)
 			providerCode := ""

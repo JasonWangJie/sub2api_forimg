@@ -237,6 +237,9 @@ func (s *OpenAIGatewayService) shouldFailoverOpenAIUpstreamResponse(statusCode i
 // this helper: the Durable Worker needs their original response text to
 // trigger a persisted local transport fallback.
 func isOpenAIAsyncAccountFailover400(message string) bool {
+	if isAsyncImageTerminalRejection("", message) {
+		return false
+	}
 	lower := strings.ToLower(strings.TrimSpace(message))
 	if strings.Contains(strings.Join(strings.Fields(lower), " "), "service timeout") {
 		return false

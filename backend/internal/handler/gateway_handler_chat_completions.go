@@ -525,6 +525,10 @@ func (h *GatewayHandler) handleCCFailoverExhausted(c *gin.Context, lastErr *serv
 		h.chatCompletionsErrorResponse(c, http.StatusBadGateway, "upstream_error", service.OpenAISilentRefusalClientMessage())
 		return
 	}
+	if status, code, message, ok := asyncImageRetryableRejectionErrorDetails(c, lastErr); ok {
+		c.JSON(status, gin.H{"error": gin.H{"type": "upstream_error", "code": code, "message": message}})
+		return
+	}
 	if errType, code, message, ok := asyncImageSizeCapabilityErrorDetails(c, lastErr); ok {
 		errorBody := gin.H{"type": errType, "message": message}
 		if code != "" {

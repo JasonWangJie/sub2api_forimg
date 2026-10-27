@@ -91,6 +91,9 @@ func isGeminiAsyncAccountFailover400(body []byte) bool {
 	}
 	raw := strings.ToLower(strings.TrimSpace(string(body)))
 	message := strings.ToLower(strings.TrimSpace(extractUpstreamErrorMessage(body)))
+	if isAsyncImageTerminalRejection(extractUpstreamErrorCode(body), message) {
+		return false
+	}
 	combined := raw + " " + message
 	if IsAsyncImageReferenceFetchFailureMessage(message) {
 		return false

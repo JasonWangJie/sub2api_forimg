@@ -27,7 +27,7 @@ func TestGeminiServiceTimeoutFamilyCannotBypassStrictClassification(t *testing.T
 			{"known timeout uses dedicated rule", asyncServiceTimeout400TestMessage, true, true, true},
 			{"partial timeout", "service timeout", true, false, false},
 			{"whitespace partial timeout", "service \t timeout", true, false, false},
-			{"prefixed timeout", "generation failed: " + asyncServiceTimeout400TestMessage, true, false, false},
+			{"generation failure uses semantic retry policy", "generation failed: " + asyncServiceTimeout400TestMessage, true, true, false},
 			{"appended no replay", asyncServiceTimeout400TestMessage + " Do not automatically regenerate.", true, false, false},
 			{"appended safety refusal", asyncServiceTimeout400TestMessage + " Request rejected by safety policy.", true, false, false},
 			{"appended execution unknown", asyncServiceTimeout400TestMessage + " Generation may already have been charged.", true, false, false},
@@ -71,6 +71,9 @@ func TestGeminiServiceTimeoutFamilyCannotBypassStrictClassification(t *testing.T
 				if test.wantFailover {
 					require.ErrorAs(t, err, &failure)
 					require.Equal(t, test.wantSpecificTimeout, failure.IsAsyncImageServiceTimeout400())
+					if strings.HasPrefix(test.message, "generation failed:") {
+						require.True(t, failure.IsAsyncImageRetryableRejection(), "generation failures use the shared semantic policy, not the strict timeout rule")
+					}
 					require.False(t, failure.RetryableOnSameAccount)
 					require.Empty(t, recorder.Body.Bytes())
 				} else {

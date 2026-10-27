@@ -525,9 +525,13 @@ func (h *DurableAsyncImageHandler) invokeAsyncImageTask(parent context.Context, 
 		}
 	}
 	parent = service.WithAsyncImageAccountAttemptCapture(parent, attemptCapture)
+	parent = service.WithAsyncImageProviderRetryPolicy(parent)
 	parent = service.WithAsyncImageInputReferenceTask(parent, task.RequestType == service.AsyncImageRequestTypeImageToImage)
 	parent = service.WithAsyncImageReferenceLocalFallback(parent, canFallbackAsyncImageReferenceLocally(task, cfg))
-	parent = service.WithAsyncImageNonRetryableAccountIDs(parent, asyncImageNonRetryableAccountIDs(task))
+	// Complete provider rejections use recent task-local exclusions below,
+	// rather than permanent task bans: prefer an alternate, then allow the
+	// original eligible account after selection exhaustion. Global account,
+	// model, pool and health checks remain owned by the scheduler.
 	referenceRetryState := asyncImageReferenceAccountRetryState(task)
 	referenceRetryState.switchPending = asyncImageReferenceAccountSwitchRetryAllowed(task, cfg)
 	parent = service.WithAsyncImageExcludedAccountIDs(parent, asyncImageReferenceRetryExcludedAccountIDs(task, cfg))
