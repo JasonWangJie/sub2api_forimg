@@ -56,6 +56,7 @@
             </button>
           </div>
         </div>
+        <AsyncImageReliabilitySummary :stats="stats.reliability" />
       </template>
 
       <template #filters>
@@ -579,6 +580,7 @@
 </template>
 
 <script setup lang="ts">
+import AsyncImageReliabilitySummary from './AsyncImageReliabilitySummary.vue'
 import { computed, defineComponent, h, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 

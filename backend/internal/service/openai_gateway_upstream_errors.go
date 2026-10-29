@@ -240,6 +240,9 @@ func isOpenAIAsyncAccountFailover400(message string) bool {
 	if isAsyncImageTerminalRejection("", message) {
 		return false
 	}
+	if isAsyncImageOperationalRejectionFamily(message) {
+		return false
+	}
 	lower := strings.ToLower(strings.TrimSpace(message))
 	if strings.Contains(strings.Join(strings.Fields(lower), " "), "service timeout") {
 		return false

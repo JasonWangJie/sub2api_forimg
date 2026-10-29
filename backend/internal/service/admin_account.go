@@ -484,6 +484,9 @@ func buildAccountForCreate(input *CreateAccountInput, accountExtra map[string]an
 		}
 		account.LoadFactor = input.LoadFactor
 	}
+	if err := ValidateImageAccountExtra(account.Extra); err != nil {
+		return nil, infraerrors.BadRequest("INVALID_IMAGE_ACCOUNT_SETTINGS", err.Error())
+	}
 	return account, nil
 }
 
@@ -836,6 +839,9 @@ func (s *adminServiceImpl) UpdateAccount(ctx context.Context, id int64, input *U
 		}
 	}
 
+	if err := ValidateImageAccountExtra(account.Extra); err != nil {
+		return nil, infraerrors.BadRequest("INVALID_IMAGE_ACCOUNT_SETTINGS", err.Error())
+	}
 	billingSettingsAppliedAtomically := false
 	updater := s.accountBillingRepo
 	if updater == nil {
@@ -907,17 +913,23 @@ func (s *adminServiceImpl) UpdateAccountExtra(ctx context.Context, id int64, upd
 	delete(updates, OllamaCloudUsageSessionExtraKey)
 	delete(updates, OllamaCloudUsageAutoRefreshExtraKey)
 	delete(updates, OllamaCloudUsageSnapshotExtraKey)
+	if len(updates) == 0 {
+		return nil
+	}
+	account, err := s.accountRepo.GetByID(ctx, id)
+	if err != nil {
+		return err
+	}
 	if _, exists := updates[openAILongContextBillingEnabledKey]; exists {
-		account, err := s.accountRepo.GetByID(ctx, id)
-		if err != nil {
-			return err
-		}
 		if err := ValidateOpenAILongContextBillingExtra(account.Platform, updates); err != nil {
 			return err
 		}
 	}
-	if len(updates) == 0 {
-		return nil
+	merged := make(map[string]any, len(account.Extra)+len(updates))
+	maps.Copy(merged, account.Extra)
+	maps.Copy(merged, updates)
+	if err := ValidateImageAccountExtra(merged); err != nil {
+		return infraerrors.BadRequest("INVALID_IMAGE_ACCOUNT_SETTINGS", err.Error())
 	}
 	return s.accountRepo.UpdateExtra(ctx, id, updates)
 }
@@ -964,12 +976,25 @@ func (s *adminServiceImpl) BulkUpdateAccounts(ctx context.Context, input *BulkUp
 
 	// 预取所有目标账号，供凭据守卫/代理守卫/混合渠道检查共用，避免多次 DB 查询。
 	var cachedTargets []*Account
-	if len(input.Credentials) > 0 || input.ProxyID != nil || needMixedChannelCheck || hasLongContextBillingUpdate || input.ProbeEnabled != nil || input.RateMultiplier != nil {
+	if len(input.Credentials) > 0 || len(input.Extra) > 0 || input.ProxyID != nil || needMixedChannelCheck || hasLongContextBillingUpdate || input.ProbeEnabled != nil || input.RateMultiplier != nil {
 		loaded, err := s.accountRepo.GetByIDs(ctx, input.AccountIDs)
 		if err != nil {
 			return nil, err
 		}
 		cachedTargets = loaded
+	}
+	if len(input.Extra) > 0 {
+		for _, account := range cachedTargets {
+			if account == nil {
+				continue
+			}
+			merged := make(map[string]any, len(account.Extra)+len(input.Extra))
+			maps.Copy(merged, account.Extra)
+			maps.Copy(merged, input.Extra)
+			if err := ValidateImageAccountExtra(merged); err != nil {
+				return nil, infraerrors.BadRequest("INVALID_IMAGE_ACCOUNT_SETTINGS", err.Error())
+			}
+		}
 	}
 	if input.ProbeEnabled != nil {
 		targetsByID := make(map[int64]*Account, len(cachedTargets))

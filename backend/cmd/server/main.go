@@ -178,6 +178,9 @@ func runMainServer() {
 	<-quit
 
 	log.Println("Shutting down server...")
+	if app.DurableAsyncImage != nil {
+		app.DurableAsyncImage.BeginDrain()
+	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -186,5 +189,13 @@ func runMainServer() {
 		log.Printf("Server forced to shutdown: %v", err)
 	}
 
+	// Drain before Cleanup stops billing, storage and database dependencies.
+	if app.DurableAsyncImage != nil {
+		drainCtx, drainCancel := context.WithTimeout(context.Background(), 930*time.Second)
+		if err := app.DurableAsyncImage.Shutdown(drainCtx); err != nil {
+			log.Printf("Image worker drain deadline reached: %v", err)
+		}
+		drainCancel()
+	}
 	log.Println("Server exited")
 }

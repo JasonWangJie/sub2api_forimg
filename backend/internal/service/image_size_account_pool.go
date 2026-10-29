@@ -29,7 +29,7 @@ func WithImageAccountPoolRoute(ctx context.Context, model, sizeTier string) (con
 	if strings.TrimSpace(sizeTier) != "" {
 		tier = NormalizeImageSizePoolTier(sizeTier)
 	}
-	return context.WithValue(ctx, imageSizeAccountPoolContextKey{}, ImageAccountPoolRoute{
+	return context.WithValue(withImageCircuitIdentities(ctx), imageSizeAccountPoolContextKey{}, ImageAccountPoolRoute{
 		Model:    normalizedModel,
 		SizeTier: tier,
 	}), nil
@@ -43,7 +43,7 @@ func WithImageSizeAccountPoolTier(ctx context.Context, sizeTier string) context.
 	}
 	route, _ := ImageAccountPoolRouteFromContext(ctx)
 	route.SizeTier = tier
-	return context.WithValue(ctx, imageSizeAccountPoolContextKey{}, route)
+	return context.WithValue(withImageCircuitIdentities(ctx), imageSizeAccountPoolContextKey{}, route)
 }
 
 // ImageSizeAccountPoolTierFromContext returns the size-tier pool hint when present.

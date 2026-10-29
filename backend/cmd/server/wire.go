@@ -25,9 +25,10 @@ import (
 )
 
 type Application struct {
-	Server      *http.Server
-	PromptAudit *securityaudit.PromptService
-	Cleanup     func()
+	DurableAsyncImage *handler.DurableAsyncImageHandler
+	Server            *http.Server
+	PromptAudit       *securityaudit.PromptService
+	Cleanup           func()
 }
 
 func initializeApplication(buildInfo handler.BuildInfo) (*Application, error) {
@@ -57,7 +58,7 @@ func initializeApplication(buildInfo handler.BuildInfo) (*Application, error) {
 		provideCleanup,
 
 		// Application struct
-		wire.Struct(new(Application), "Server", "PromptAudit", "Cleanup"),
+		wire.Struct(new(Application), "Server", "PromptAudit", "Cleanup", "DurableAsyncImage"),
 	)
 	return nil, nil
 }

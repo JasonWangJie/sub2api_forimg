@@ -739,7 +739,7 @@ func (s *OpenAIGatewayService) forwardOpenAIImagesAPIKey(
 	body []byte,
 	parsed *OpenAIImagesRequest,
 	channelMappedModel string,
-) (*OpenAIForwardResult, error) {
+) (forwardResult *OpenAIForwardResult, forwardErr error) {
 	startTime := time.Now()
 	requestModel := strings.TrimSpace(parsed.Model)
 	if mapped := strings.TrimSpace(channelMappedModel); mapped != "" {
@@ -794,7 +794,19 @@ func (s *OpenAIGatewayService) forwardOpenAIImagesAPIKey(
 		proxyURL = account.Proxy.URL()
 	}
 	upstreamStart := time.Now()
-	resp, err := s.httpUpstream.Do(upstreamReq, proxyURL, account.ID, account.Concurrency)
+	probeDone, gateErr := AcquireImageCircuitAttempt(ctx, s.imageCircuitBreaker, account)
+	if gateErr != nil {
+		return nil, gateErr
+	}
+	var resp *http.Response
+	observedImageOutput := false
+	defer func() {
+		finishImageCircuitAttempt(probeDone, forwardErr == nil && observedImageOutput, resp, forwardErr)
+	}()
+	if budgetErr := BeginAsyncImageUpstreamAttempt(ctx, account.ID); budgetErr != nil {
+		return nil, budgetErr
+	}
+	resp, err = s.httpUpstream.Do(upstreamReq, proxyURL, account.ID, account.Concurrency)
 	SetOpsLatencyMs(c, OpsUpstreamLatencyMsKey, time.Since(upstreamStart).Milliseconds())
 	if err != nil {
 		safeErr := sanitizeUpstreamErrorMessage(err.Error())
@@ -893,6 +905,7 @@ func (s *OpenAIGatewayService) forwardOpenAIImagesAPIKey(
 	var firstTokenMs *int
 	if parsed.Stream && isEventStreamResponse(resp.Header) {
 		streamUsage, streamCount, streamSizes, ttft, err := s.handleOpenAIImagesStreamingResponse(resp, c, startTime)
+		observedImageOutput = streamCount > 0
 		if err != nil {
 			if streamCount > 0 {
 				return &OpenAIForwardResult{
@@ -932,6 +945,7 @@ func (s *OpenAIGatewayService) forwardOpenAIImagesAPIKey(
 		}, nil
 	} else {
 		nonStreamUsage, nonStreamCount, nonStreamSizes, err := s.handleOpenAIImagesNonStreamingResponse(resp, c)
+		observedImageOutput = nonStreamCount > 0
 		if err != nil {
 			return nil, err
 		}

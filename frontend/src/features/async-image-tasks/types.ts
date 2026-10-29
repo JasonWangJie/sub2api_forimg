@@ -138,11 +138,38 @@ export interface AsyncImageTaskListResponse {
 }
 
 export interface AsyncImageTaskStats {
+  expired?: number
+  reliability?: AsyncImageReliabilityStats | null
   active: number
   completed: number
   failed: number
   success_rate: number
   average_duration_ms: number | null
+}
+
+export interface AsyncImageReliabilityStats {
+  total: number
+  unknown: number
+  expired: number
+  admin_terminated: number
+  instrumented_tasks: number
+  first_attempt_succeeded: number
+  http_invocations: number
+  account_selections: number
+  multi_account_tasks: number
+  multi_account_succeeded: number
+  local_fallback_tasks: number
+  local_fallback_succeeded: number
+  result_fetch_retried_tasks: number
+  result_fetch_recovered_tasks: number
+  unknown_events: number
+  p95_duration_ms: number | null
+  p99_duration_ms: number | null
+  p95_queue_ms: number | null
+  p95_generation_ms: number | null
+  p95_postprocess_ms: number | null
+  oldest_queued_age_ms: number | null
+  actual_cost: number
 }
 
 export interface AsyncImageResultAccess {

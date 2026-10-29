@@ -12,6 +12,7 @@ import (
 	"path"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
@@ -33,6 +34,7 @@ type durableAsyncImagePayload struct {
 	ContentType string                               `json:"content_type"`
 	Body        []byte                               `json:"body,omitempty"`
 	Normalized  *service.AsyncImageNormalizedRequest `json:"normalized,omitempty"`
+	Prepared    *asyncImagePreparedRequest           `json:"prepared,omitempty"`
 }
 
 // DurableAsyncImageHandler implements the new BB/SC compatibility surface.
@@ -56,10 +58,17 @@ type DurableAsyncImageHandler struct {
 	referenceCacheTTL      time.Duration
 	referenceCacheMaxBytes int64
 
-	startOnce sync.Once
-	stopOnce  sync.Once
-	stop      context.CancelFunc
-	runtimeWG sync.WaitGroup
+	startOnce     sync.Once
+	stopOnce      sync.Once
+	stop          context.CancelFunc
+	runtimeWG     sync.WaitGroup
+	lifecycleMu   sync.Mutex
+	intakeCtx     context.Context
+	stopIntake    context.CancelFunc
+	draining      atomic.Bool
+	activeWorkers atomic.Int64
+	drainWaitOnce sync.Once
+	drainDone     chan struct{}
 }
 
 func NewDurableAsyncImageHandler(
@@ -90,9 +99,15 @@ func (h *DurableAsyncImageHandler) Start() {
 	if h == nil || h.tasks == nil || h.queue == nil || h.storage == nil {
 		return
 	}
+	h.lifecycleMu.Lock()
+	defer h.lifecycleMu.Unlock()
+	if h.draining.Load() {
+		return
+	}
 	h.startOnce.Do(func() {
 		ctx, cancel := context.WithCancel(context.Background())
 		h.stop = cancel
+		h.intakeCtx, h.stopIntake = context.WithCancel(ctx)
 		h.startRuntime(ctx)
 	})
 }
@@ -101,12 +116,15 @@ func (h *DurableAsyncImageHandler) Stop() {
 	if h == nil {
 		return
 	}
+	// Cleanup must join canceled workers before closing their dependencies.
+	// The server calls Shutdown first to give live generations a drain window.
+	h.BeginDrain()
 	h.stopOnce.Do(func() {
 		if h.stop != nil {
 			h.stop()
 		}
-		h.runtimeWG.Wait()
 	})
+	h.runtimeWG.Wait()
 }
 
 func (h *DurableAsyncImageHandler) SubmitGeminiBB(c *gin.Context) {
@@ -122,6 +140,11 @@ func (h *DurableAsyncImageHandler) SubmitGeminiSC(c *gin.Context) {
 }
 
 func (h *DurableAsyncImageHandler) submit(c *gin.Context, protocol, expectedPlatform string) {
+	if h != nil && h.draining.Load() {
+		c.Header("Retry-After", "5")
+		h.writeProtocolError(c, protocol, http.StatusServiceUnavailable, "service_draining", "image workers are draining; retry submission later with the same idempotency key")
+		return
+	}
 	apiKey, ok := middleware.GetAPIKeyFromContext(c)
 	if !ok || apiKey == nil || apiKey.User == nil {
 		h.writeError(c, protocol, service.ErrAsyncImageTaskNotFound)

@@ -48,6 +48,12 @@ func AsyncImageRetryableRejectionKind(status int, providerCode, message string, 
 	if isAsyncImageTerminalRejection(providerCode, message) {
 		return ""
 	}
+	if kind := asyncImageOperationalRejectionKind(status, message); kind != "" {
+		return kind
+	}
+	if isAsyncImageOperationalRejectionFamily(message) {
+		return ""
+	}
 	text := strings.ToLower(strings.Join(strings.Fields(providerCode+" "+message), " "))
 	if inputReference {
 		transport := containsAsyncImageRejectionPart(text, "filedata", "fileuri", "file_id", "file id")
@@ -122,6 +128,12 @@ func newAsyncImageRetryableRejectionForContext(ctx context.Context, status int, 
 	if kind == "reference_transport" {
 		reason = AsyncImageReferenceTransportRejectionReason
 	}
+	if kind == "capacity" {
+		reason = AsyncImageCapacityRejectionReason
+	}
+	if kind == "reference_limit" {
+		reason = AsyncImageReferenceLimitReason
+	}
 	message = asyncImageReferenceDiagnosticURLPattern.ReplaceAllString(message, "https://***")
 	return &UpstreamFailoverError{
 		StatusCode: status, ResponseBody: body, ResponseHeaders: headers.Clone(),
@@ -134,5 +146,6 @@ func newAsyncImageRetryableRejectionForContext(ctx context.Context, status int, 
 }
 
 func (e *UpstreamFailoverError) IsAsyncImageRetryableRejection() bool {
-	return e != nil && (e.Reason == AsyncImageRetryableRejectionReason || e.Reason == AsyncImageReferenceTransportRejectionReason)
+	return e != nil && (e.Reason == AsyncImageRetryableRejectionReason || e.Reason == AsyncImageReferenceTransportRejectionReason ||
+		e.Reason == AsyncImageCapacityRejectionReason || e.Reason == AsyncImageReferenceLimitReason)
 }

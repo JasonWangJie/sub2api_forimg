@@ -82,7 +82,7 @@ type referenceDownloadGatewayHarness struct {
 	path     string
 }
 
-func newReferenceDownloadGatewayHarness(t *testing.T, platform string, accountCount, maxSwitch int, failures map[int64]referenceDownloadGatewayFailure) *referenceDownloadGatewayHarness {
+func newReferenceDownloadGatewayHarness(t *testing.T, platform string, accountCount, maxSwitch int, failures map[int64]referenceDownloadGatewayFailure, configure ...func(*service.Account)) *referenceDownloadGatewayHarness {
 	t.Helper()
 	groupID := int64(8501)
 	group := &service.Group{ID: groupID, Hydrated: true, Platform: platform, Status: service.StatusActive, AllowImageGeneration: true}
@@ -97,6 +97,9 @@ func newReferenceDownloadGatewayHarness(t *testing.T, platform string, accountCo
 			},
 			AccountGroups: []service.AccountGroup{{AccountID: id, GroupID: groupID}},
 		})
+		for _, apply := range configure {
+			apply(&accounts[len(accounts)-1])
+		}
 	}
 	upstream := &referenceDownloadGatewayUpstream{t: t, platform: platform, failures: failures}
 	cfg := &config.Config{RunMode: config.RunModeSimple}

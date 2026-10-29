@@ -71,7 +71,8 @@ func (s *GeminiMessagesCompatService) forwardClaudeBodyAsChatCompletions(
 	includeUsage bool,
 	startTime time.Time,
 	originalChatBody []byte,
-) (*ForwardResult, error) {
+) (forwardResult *ForwardResult, forwardErr error) {
+	beginGeminiImageOutputObservation(c)
 	var req struct {
 		Model  string `json:"model"`
 		Stream bool   `json:"stream"`
@@ -126,6 +127,14 @@ func (s *GeminiMessagesCompatService) forwardClaudeBodyAsChatCompletions(
 	}
 
 	var resp *http.Response
+	var probeDone func(*http.Response, error)
+	defer func() {
+		observed := observedGeminiImageOutputs(c) > 0
+		if capture := GeminiImageResponseCaptureFromContext(c.Request.Context()); capture != nil {
+			observed = capture.Error() == nil && capture.Count() > 0
+		}
+		finishImageCircuitAttempt(probeDone, forwardErr == nil && observed, resp, forwardErr)
+	}()
 	for attempt := 1; attempt <= maxAttempts; attempt++ {
 		upstreamReq, idHeader, err := buildReq(ctx)
 		if err != nil {
@@ -136,6 +145,16 @@ func (s *GeminiMessagesCompatService) forwardClaudeBodyAsChatCompletions(
 		}
 		requestIDHeader = idHeader
 
+		if probeDone == nil {
+			var gateErr error
+			probeDone, gateErr = AcquireImageCircuitAttempt(ctx, s.imageCircuitBreaker, account)
+			if gateErr != nil {
+				return nil, gateErr
+			}
+		}
+		if budgetErr := BeginAsyncImageUpstreamAttempt(ctx, account.ID); budgetErr != nil {
+			return nil, budgetErr
+		}
 		resp, err = s.httpUpstream.Do(upstreamReq, proxyURL, account.ID, account.Concurrency)
 		if err != nil {
 			safeErr := sanitizeUpstreamErrorMessage(err.Error())
@@ -329,6 +348,7 @@ func (s *GeminiMessagesCompatService) forwardClaudeBodyAsChatCompletions(
 			return nil, s.writeChatCompletionsError(c, http.StatusBadGateway, "upstream_error", "Failed to read upstream stream")
 		}
 		collectedBytes, _ := json.Marshal(collected)
+		observeGeminiImageOutputs(c, collectedBytes)
 		if capture := GeminiImageResponseCaptureFromContext(c.Request.Context()); capture != nil {
 			images, captureErr := ExtractGeminiGeneratedImages(collected)
 			if captureErr != nil {
@@ -541,6 +561,7 @@ func (s *GeminiMessagesCompatService) handleChatCompletionsNonStreamingResponseF
 			respBody = unwrappedBody
 		}
 	}
+	observeGeminiImageOutputs(c, respBody)
 
 	if capture := GeminiImageResponseCaptureFromContext(c.Request.Context()); capture != nil {
 		images, captureErr := extractGeminiAsyncImageResponse(respBody)
@@ -720,6 +741,7 @@ func (s *GeminiMessagesCompatService) handleChatCompletionsStreamingResponseFrom
 
 					var geminiResp map[string]any
 					if err := json.Unmarshal(rawBytes, &geminiResp); err == nil {
+						observeGeminiImageOutputs(c, rawBytes)
 						if firstChunk {
 							firstChunk = false
 							ms := int(time.Since(startTime).Milliseconds())

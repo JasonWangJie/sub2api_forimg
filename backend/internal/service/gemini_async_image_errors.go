@@ -94,6 +94,9 @@ func isGeminiAsyncAccountFailover400(body []byte) bool {
 	if isAsyncImageTerminalRejection(extractUpstreamErrorCode(body), message) {
 		return false
 	}
+	if isAsyncImageOperationalRejectionFamily(message) {
+		return false
+	}
 	combined := raw + " " + message
 	if IsAsyncImageReferenceFetchFailureMessage(message) {
 		return false

@@ -207,6 +207,9 @@ func (r *asyncImageTaskRepository) CountAsyncImageTaskStatuses(ctx context.Conte
 
 func (r *asyncImageTaskRepository) AverageCompletedAsyncImageTaskDuration(ctx context.Context, filter service.AsyncImageTaskFilter) (*float64, error) {
 	where, args := buildAsyncImageTaskFilter(filter)
+	if where == "" {
+		where = " WHERE TRUE"
+	}
 	where += " AND status = 'succeeded' AND finished_at IS NOT NULL"
 	var average sql.NullFloat64
 	if err := r.sql.QueryRowContext(ctx, `
@@ -547,7 +550,13 @@ func (r *asyncImageTaskRepository) RecordAsyncImageUpstreamSuccess(ctx context.C
 	if err := tx.QueryRowContext(ctx, `SELECT status, version FROM async_image_tasks WHERE task_id = $1 FOR UPDATE`, params.TaskID).Scan(&currentStatus, &currentVersion); err != nil {
 		return nil, translatePersistenceError(err, service.ErrAsyncImageTaskNotFound, nil)
 	}
-	if currentStatus != service.AsyncImageTaskStatusInvoking || (params.ExpectedVersion > 0 && params.ExpectedVersion != currentVersion) {
+	recoveringResult := false
+	if currentStatus == service.AsyncImageTaskStatusUpstreamSucceeded || currentStatus == service.AsyncImageTaskStatusUploading || currentStatus == service.AsyncImageTaskStatusStorageFailed {
+		if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM async_image_result_fetches WHERE task_id=$1)`, params.TaskID).Scan(&recoveringResult); err != nil {
+			return nil, err
+		}
+	}
+	if (currentStatus != service.AsyncImageTaskStatusInvoking && !recoveringResult) || (params.ExpectedVersion > 0 && params.ExpectedVersion != currentVersion) {
 		return nil, service.ErrAsyncImageInvalidTransition
 	}
 	if err := validateAsyncImageStagingObjects(params.TaskID, params.StagingObjects); err != nil {
@@ -609,6 +618,14 @@ RETURNING `+asyncImageTaskColumns,
 		Payload: normalizeJSONPayload(params.EventPayload),
 	}); err != nil {
 		return nil, err
+	}
+	if recoveringResult {
+		if _, err := tx.ExecContext(ctx, `DELETE FROM async_image_result_fetches WHERE task_id=$1`, params.TaskID); err != nil {
+			return nil, err
+		}
+		if err := appendAsyncImageEventWithSQL(ctx, tx, service.AsyncImageEvent{TaskID: params.TaskID, EventType: "result_fetch_completed", Payload: json.RawMessage(`{"stage":"result_fetch"}`)}); err != nil {
+			return nil, err
+		}
 	}
 	if err := tx.Commit(); err != nil {
 		return nil, err
@@ -830,6 +847,12 @@ func (r *asyncImageTaskRepository) DeleteAsyncImageStagingObjects(ctx context.Co
 }
 
 func (r *asyncImageTaskRepository) DeleteExpiredAsyncImageStagingObjects(ctx context.Context, before time.Time, limit int) (int64, error) {
+	// Result URLs are encrypted and retained only for bounded recovery.
+	// Keep an expired source on active tasks until recovery records the expiry;
+	// otherwise an outage spanning the TTL would erase the recovery phase.
+	if _, err := r.sql.ExecContext(ctx, `DELETE FROM async_image_result_fetches WHERE task_id IN (SELECT f.task_id FROM async_image_result_fetches f JOIN async_image_tasks t ON t.task_id=f.task_id WHERE f.expires_at <= $1 AND t.status IN ('succeeded','failed','execution_unknown','expired') ORDER BY f.expires_at LIMIT 500)`, before); err != nil {
+		return 0, err
+	}
 	if limit <= 0 || limit > 10000 {
 		limit = 500
 	}

@@ -4,6 +4,7 @@ package handler
 
 import (
 	"bytes"
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -20,7 +21,7 @@ var providerRejectionMessages = []string{
 	"The prompt or input images could not be processed. Adjust the request and try again.",
 }
 
-func invokeProviderRejectionGateway(t *testing.T, h *referenceDownloadGatewayHarness, task *service.AsyncImageTask, cfg service.AsyncImageRuntimeConfig) (*gin.Context, *httptest.ResponseRecorder, *service.AsyncImageAccountAttemptCapture) {
+func invokeProviderRejectionGateway(t *testing.T, h *referenceDownloadGatewayHarness, task *service.AsyncImageTask, cfg service.AsyncImageRuntimeConfig, configure ...func(context.Context) context.Context) (*gin.Context, *httptest.ResponseRecorder, *service.AsyncImageAccountAttemptCapture) {
 	t.Helper()
 	c, recorder := newAsyncGeminiWorkerContext(h.apiKey)
 	capture := &service.AsyncImageAccountAttemptCapture{}
@@ -29,12 +30,16 @@ func invokeProviderRejectionGateway(t *testing.T, h *referenceDownloadGatewayHar
 	ctx = service.WithAsyncImageInputReferenceTask(ctx, task.RequestType == service.AsyncImageRequestTypeImageToImage)
 	ctx = service.WithAsyncImageReferenceLocalFallback(ctx, canFallbackAsyncImageReferenceLocally(task, cfg))
 	ctx = service.WithAsyncImageExcludedAccountIDs(ctx, asyncImageReferenceRetryExcludedAccountIDs(task, cfg))
+	ctx = service.WithAsyncImageNonRetryableAccountIDs(ctx, asyncImageFixedCapabilityAccountIDs(task))
 	ctx = service.WithAsyncImageRoutingSessionHash(ctx, "async-image:"+task.TaskID)
 	ctx = withAsyncImageUsageCapture(ctx, &AsyncImageUsageCapture{})
 	ctx = service.WithPrefetchedStickySession(ctx, 1, *h.apiKey.GroupID, true)
 	if h.platform == service.PlatformGemini {
 		ctx = service.WithGeminiAsyncImageGeneration(ctx)
 		ctx = service.WithGeminiImageResponseCapture(ctx, &service.GeminiImageResponseCapture{})
+	}
+	for _, apply := range configure {
+		ctx = apply(ctx)
 	}
 	c.Request = httptest.NewRequest(http.MethodPost, h.path, bytes.NewReader(h.body)).WithContext(ctx)
 	c.Request.Header.Set("Content-Type", "application/json")
@@ -71,7 +76,9 @@ func TestAsyncImageRetryableRejectionSwitchesBeforeWorkerRetry(t *testing.T) {
 func TestAsyncImageRetryableRejectionOnlyAccountRetriesArePersistedAndBounded(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	for _, platform := range []string{service.PlatformGemini, service.PlatformOpenAI} {
-		for _, message := range providerRejectionMessages {
+		// Fixed byte limits are covered by TestAsyncImageFixedCapabilityStopsOnlyFixedFailures.
+		// Only transport or transient processing can recover on the original account.
+		for _, message := range providerRejectionMessages[1:] {
 			t.Run(platform+"/"+message, func(t *testing.T) {
 				h := newReferenceDownloadGatewayHarness(t, platform, 1, 3, map[int64]referenceDownloadGatewayFailure{1: {400, message}})
 				cfg := referenceLocalFallbackConfig()

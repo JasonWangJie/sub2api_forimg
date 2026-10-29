@@ -152,11 +152,13 @@ type AsyncImageTaskFilter struct {
 // AsyncImageTaskStats contains counts for the full filtered result set, not
 // only the current page of tasks.
 type AsyncImageTaskStats struct {
-	Active            int64    `json:"active"`
-	Completed         int64    `json:"completed"`
-	Failed            int64    `json:"failed"`
-	SuccessRate       float64  `json:"success_rate"`
-	AverageDurationMS *float64 `json:"average_duration_ms"`
+	Expired           int64                       `json:"expired"`
+	Reliability       *AsyncImageReliabilityStats `json:"reliability,omitempty"`
+	Active            int64                       `json:"active"`
+	Completed         int64                       `json:"completed"`
+	Failed            int64                       `json:"failed"`
+	SuccessRate       float64                     `json:"success_rate"`
+	AverageDurationMS *float64                    `json:"average_duration_ms"`
 }
 
 // AsyncImageTaskStatsRepository is optional so lightweight task repositories
@@ -488,13 +490,13 @@ func (s *AsyncImageTaskService) taskStats(ctx context.Context, filter AsyncImage
 		return AsyncImageTaskStats{}, err
 	}
 	stats := AsyncImageTaskStats{
+		Expired: counts[AsyncImageTaskStatusExpired],
 		Active: counts[AsyncImageTaskStatusQueued] + counts[AsyncImageTaskStatusInvoking] +
 			counts[AsyncImageTaskStatusUpstreamSucceeded] + counts[AsyncImageTaskStatusUploading] +
 			counts[AsyncImageTaskStatusBillingPending],
 		Completed: counts[AsyncImageTaskStatusSucceeded],
 		Failed: counts[AsyncImageTaskStatusFailed] + counts[AsyncImageTaskStatusExecutionUnknown] +
-			counts[AsyncImageTaskStatusStorageFailed] + counts[AsyncImageTaskStatusBillingFailed] +
-			counts[AsyncImageTaskStatusExpired],
+			counts[AsyncImageTaskStatusStorageFailed] + counts[AsyncImageTaskStatusBillingFailed],
 	}
 	finished := stats.Completed + stats.Failed
 	if finished > 0 {
@@ -502,6 +504,12 @@ func (s *AsyncImageTaskService) taskStats(ctx context.Context, filter AsyncImage
 	}
 	if durationRepo, ok := s.repo.(AsyncImageTaskDurationStatsRepository); ok {
 		stats.AverageDurationMS, err = durationRepo.AverageCompletedAsyncImageTaskDuration(ctx, filter)
+		if err != nil {
+			return AsyncImageTaskStats{}, err
+		}
+	}
+	if reliabilityRepo, ok := s.repo.(AsyncImageReliabilityStatsRepository); ok {
+		stats.Reliability, err = reliabilityRepo.AsyncImageReliabilityStats(ctx, filter)
 		if err != nil {
 			return AsyncImageTaskStats{}, err
 		}

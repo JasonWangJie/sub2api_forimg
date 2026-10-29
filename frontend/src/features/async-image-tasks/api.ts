@@ -102,6 +102,8 @@ function normalizeListResponse(
   const rawAverageDurationMS = data?.stats?.average_duration_ms
   const averageDurationMS = rawAverageDurationMS == null ? null : Number(rawAverageDurationMS)
   const stats: AsyncImageTaskStats = {
+	    expired: Number(data?.stats?.expired) || 0,
+	    reliability: data?.stats?.reliability || null,
     active: Number(data?.stats?.active) || 0,
     completed: Number(data?.stats?.completed) || 0,
     failed: Number(data?.stats?.failed) || 0,

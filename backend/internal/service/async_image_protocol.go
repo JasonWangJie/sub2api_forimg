@@ -485,6 +485,9 @@ func IsAsyncImageReferenceFetchFailureMessage(message string) bool {
 			return false
 		}
 	}
+	if isAsyncImageReferenceAdditionalDownloadFailure(message) {
+		return true
+	}
 	if isAsyncImageReferenceNetworkDownloadFailure(message) {
 		return true
 	}
@@ -558,6 +561,7 @@ type AsyncImageReferenceCache struct {
 	maxBytes int64
 	bytes    int64
 	entries  map[string]asyncImageReferenceCacheEntry
+	inflight map[string]chan struct{}
 }
 
 func NewAsyncImageReferenceCache(ttl time.Duration, maxBytes int64) *AsyncImageReferenceCache {
@@ -764,6 +768,11 @@ func (d AsyncImageReferenceDownloader) download(ctx context.Context, rawURL stri
 	if cached := d.Cache.get(parsed.String(), time.Now()); cached != nil {
 		return d.accept(cached)
 	}
+	finish, err := d.Cache.acquireURL(ctx, parsed.String())
+	if err != nil {
+		return nil, &AsyncImageReferenceDownloadError{Phase: "download", Err: err}
+	}
+	defer finish()
 	release, err := d.FetchGate.acquire(ctx)
 	if err != nil {
 		return nil, &AsyncImageReferenceDownloadError{Phase: "download", Err: err}

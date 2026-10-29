@@ -29,6 +29,12 @@ func asyncImageRetryableRejectionErrorDetails(c *gin.Context, err *service.Upstr
 		}
 	}
 	code = service.AsyncImageRetryableRejectionCode
+	if err.IsAsyncImageFixedCapabilityFailure() {
+		code = service.AsyncImageFixedCapabilityCode
+	}
+	if err.Reason == service.AsyncImageCapacityRejectionReason {
+		code = service.AsyncImageCapacityRejectionCode
+	}
 	if err.Reason == service.AsyncImageReferenceTransportRejectionReason &&
 		service.AsyncImageReferenceLocalFallbackFromContext(ctx) {
 		code = service.AsyncImageReferenceTransportRetryCode

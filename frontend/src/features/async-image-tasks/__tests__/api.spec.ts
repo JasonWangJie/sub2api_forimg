@@ -135,7 +135,7 @@ describe('async image task API', () => {
       preview_url: 'https://signed.example/result-1.png',
       view_url: '/api/v1/user/async-image-tasks/asyncimg_list/results/1/view',
     })
-    expect(response.stats).toEqual({ active: 2, completed: 13, failed: 7, success_rate: 65, average_duration_ms: 1234.5 })
+    expect(response.stats).toEqual({ active: 2, completed: 13, failed: 7, expired: 0, reliability: null, success_rate: 65, average_duration_ms: 1234.5 })
     expect(client.get).toHaveBeenLastCalledWith('/user/async-image-tasks', expect.objectContaining({
       params: { page: 1, page_size: 20, status: 'succeeded', platform: 'openai' },
     }))

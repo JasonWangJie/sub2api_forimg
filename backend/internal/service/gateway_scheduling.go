@@ -1103,14 +1103,14 @@ func (s *GatewayService) listSchedulableAccounts(ctx context.Context, groupID *i
 }
 
 func (s *GatewayService) filterImageCircuitOpenAccounts(ctx context.Context, accounts []Account) []Account {
-	scope, ok := ImageCircuitScopeFromContext(ctx)
+	accounts = filterImageInputCapableAccounts(ctx, accounts)
+	_, ok := ImageCircuitScopeFromContext(ctx)
 	if !ok || s == nil || s.imageCircuitBreaker == nil || len(accounts) == 0 {
 		return accounts
 	}
 	filtered := make([]Account, 0, len(accounts))
 	for i := range accounts {
-		open, err := s.imageCircuitBreaker.IsOpen(ctx, accounts[i].ID, scope)
-		if err != nil || !open {
+		if !IsImageAccountCircuitOpen(ctx, s.imageCircuitBreaker, &accounts[i]) {
 			filtered = append(filtered, accounts[i])
 		}
 	}
@@ -1572,10 +1572,8 @@ func (s *GatewayService) getSchedulableAccount(ctx context.Context, accountID in
 	if s.isAccountBlockedBySchedulingThreshold(ctx, account) {
 		return nil, nil
 	}
-	if scope, ok := ImageCircuitScopeFromContext(ctx); ok && s.imageCircuitBreaker != nil {
-		if open, err := s.imageCircuitBreaker.IsOpen(ctx, account.ID, scope); err == nil && open {
-			return nil, nil
-		}
+	if IsImageAccountCircuitOpen(ctx, s.imageCircuitBreaker, account) {
+		return nil, nil
 	}
 	// Sticky / non-list selection must honor free soft-gate (same as listSchedulableAccounts).
 	if account.IsGrok() {

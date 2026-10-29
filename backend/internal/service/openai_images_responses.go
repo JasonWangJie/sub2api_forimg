@@ -1667,7 +1667,7 @@ func (s *OpenAIGatewayService) forwardOpenAIImagesOAuth(
 	account *Account,
 	parsed *OpenAIImagesRequest,
 	channelMappedModel string,
-) (*OpenAIForwardResult, error) {
+) (forwardResult *OpenAIForwardResult, forwardErr error) {
 	startTime := time.Now()
 	requestModel := strings.TrimSpace(parsed.Model)
 	if mapped := strings.TrimSpace(channelMappedModel); mapped != "" {
@@ -1711,7 +1711,19 @@ func (s *OpenAIGatewayService) forwardOpenAIImagesOAuth(
 		proxyURL = account.Proxy.URL()
 	}
 	upstreamStart := time.Now()
-	resp, err := s.httpUpstream.Do(upstreamReq, proxyURL, account.ID, account.Concurrency)
+	probeDone, gateErr := AcquireImageCircuitAttempt(ctx, s.imageCircuitBreaker, account)
+	if gateErr != nil {
+		return nil, gateErr
+	}
+	var resp *http.Response
+	observedImageOutput := false
+	defer func() {
+		finishImageCircuitAttempt(probeDone, forwardErr == nil && observedImageOutput, resp, forwardErr)
+	}()
+	if budgetErr := BeginAsyncImageUpstreamAttempt(ctx, account.ID); budgetErr != nil {
+		return nil, budgetErr
+	}
+	resp, err = s.httpUpstream.Do(upstreamReq, proxyURL, account.ID, account.Concurrency)
 	SetOpsLatencyMs(c, OpsUpstreamLatencyMsKey, time.Since(upstreamStart).Milliseconds())
 	if err != nil {
 		safeErr := sanitizeUpstreamErrorMessage(err.Error())
@@ -1736,7 +1748,7 @@ func (s *OpenAIGatewayService) forwardOpenAIImagesOAuth(
 			if err := s.recoverAgentIdentityTask(ctx, account, expectedTaskID); err != nil {
 				return nil, fmt.Errorf("agent identity task recovery failed: %w", err)
 			}
-			return s.forwardOpenAIImagesOAuth(markAgentIdentityTaskRecoveryTried(ctx), c, account, parsed, channelMappedModel)
+			return s.forwardOpenAIImagesOAuth(markAgentIdentityTaskRecoveryTried(withImageCircuitAttemptOwner(ctx, account.ID, probeDone)), c, account, parsed, channelMappedModel)
 		}
 		resp.Body = io.NopCloser(bytes.NewReader(respBody))
 		upstreamMsg := strings.TrimSpace(extractUpstreamErrorMessage(respBody))
@@ -1829,6 +1841,7 @@ func (s *OpenAIGatewayService) forwardOpenAIImagesOAuth(
 	writerSizeBeforeResponse := OpenAIImagesJSONKeepaliveAdjustedWrittenSize(c)
 	if parsed.Stream {
 		usage, imageCount, imageOutputSizes, firstTokenMs, err = s.handleOpenAIImagesOAuthStreamingResponse(resp, c, startTime, parsed.ResponseFormat, openAIImagesStreamPrefix(parsed), requestModel)
+		observedImageOutput = imageCount > 0
 		if err != nil {
 			if imageCount > 0 {
 				return &OpenAIForwardResult{
@@ -1859,6 +1872,7 @@ func (s *OpenAIGatewayService) forwardOpenAIImagesOAuth(
 		}
 	} else {
 		usage, imageCount, imageOutputSizes, err = s.handleOpenAIImagesOAuthNonStreamingResponse(resp, c, parsed.ResponseFormat, requestModel)
+		observedImageOutput = imageCount > 0
 		if err != nil {
 			return nil, s.handleOpenAIImagesOAuthResponseError(
 				upstreamCtx,

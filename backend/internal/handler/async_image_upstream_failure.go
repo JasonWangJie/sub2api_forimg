@@ -11,12 +11,22 @@ import (
 	"go.uber.org/zap"
 )
 
-// handleAsyncImageUpstreamFailure handles a complete error response only. An
-// exhausted direct-account failover must remain terminal rather than entering
-// the worker's independent reference retry loop and selecting the same account.
+// handleAsyncImageUpstreamFailure applies a persisted category budget after
+// alternate-account selection. Fixed capabilities cannot change on retry.
 func (h *DurableAsyncImageHandler) handleAsyncImageUpstreamFailure(parent, attemptCtx context.Context, task *service.AsyncImageTask, cfg service.AsyncImageRuntimeConfig, statusCode int, body []byte, headers http.Header) asyncImageWorkerDisposition {
 	message := formatAsyncImageUpstreamFailure(statusCode, body)
+	if statusCode == http.StatusBadRequest && gjson.GetBytes(body, "error.code").String() == "async_image_attempt_budget_exhausted" {
+		h.failAsyncImageTask(parent, task, "generation_budget_exhausted", message, false)
+		return asyncImageWorkerDisposition{}
+	}
 	retryAfter := service.ParseAsyncImageRetryAfter(headers.Get("Retry-After"), time.Now())
+	if statusCode == http.StatusServiceUnavailable && service.HasAsyncImageAttemptBudget(attemptCtx) &&
+		service.AsyncImageUpstreamAttemptCount(attemptCtx) == 0 && service.ImageInputLocalFallbackSuggested(attemptCtx) &&
+		canFallbackAsyncImageReferenceLocally(task, cfg) {
+		// The real invocation counter proves preselection rejected passthrough
+		// before generation. Keep the same accounts eligible after inlining.
+		return h.scheduleAsyncImageReferenceRetry(parent, task, cfg, "eligible image channels require locally loaded reference images", retryAfter, true, false)
+	}
 	logger.L().Warn("async_image.upstream_failed",
 		zap.String("task_id", task.TaskID),
 		zap.String("platform", task.Platform),
@@ -24,6 +34,18 @@ func (h *DurableAsyncImageHandler) handleAsyncImageUpstreamFailure(parent, attem
 		zap.Int("status_code", statusCode),
 		zap.String("message", message),
 	)
+	if (statusCode == http.StatusBadRequest || statusCode == http.StatusUnprocessableEntity) &&
+		gjson.GetBytes(body, "error.code").String() == service.AsyncImageFixedCapabilityCode {
+		h.failAsyncImageTask(parent, task, "upstream_capability_exhausted", message, false)
+		return asyncImageWorkerDisposition{}
+	}
+	if service.IsAsyncImageCapacityRejection(statusCode, service.ExtractUpstreamErrorMessage(body)) {
+		if canRetryAsyncImage(task, task.CapacityRetryCount, cfg.CapacityMaxRetries, cfg.TotalMaxRetries) {
+			return h.retryAsyncImageCapacity(parent, task, cfg, message, retryAfter, "upstream_capacity")
+		}
+		h.failAsyncImageTask(parent, task, "upstream_capacity_exhausted", message, false)
+		return asyncImageWorkerDisposition{}
+	}
 	if (statusCode == http.StatusBadRequest || statusCode == http.StatusUnprocessableEntity) &&
 		(gjson.GetBytes(body, "error.code").String() == service.AsyncImageRetryableRejectionCode ||
 			gjson.GetBytes(body, "error.code").String() == service.AsyncImageReferenceTransportRetryCode) {

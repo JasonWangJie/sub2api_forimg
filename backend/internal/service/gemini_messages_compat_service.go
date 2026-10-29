@@ -227,10 +227,8 @@ func (s *GeminiMessagesCompatService) tryStickySessionHit(
 	if err != nil || account == nil {
 		return nil
 	}
-	if scope, ok := ImageCircuitScopeFromContext(ctx); ok && s.imageCircuitBreaker != nil {
-		if open, err := s.imageCircuitBreaker.IsOpen(ctx, account.ID, scope); err == nil && open {
-			return nil
-		}
+	if IsImageAccountCircuitOpen(ctx, s.imageCircuitBreaker, account) {
+		return nil
 	}
 
 	// 检查账号是否需要清理粘性会话
@@ -351,10 +349,8 @@ func (s *GeminiMessagesCompatService) selectBestGeminiAccount(
 
 	for i := range accounts {
 		acc := &accounts[i]
-		if scope, ok := ImageCircuitScopeFromContext(ctx); ok && s.imageCircuitBreaker != nil {
-			if open, err := s.imageCircuitBreaker.IsOpen(ctx, acc.ID, scope); err == nil && open {
-				continue
-			}
+		if IsImageAccountCircuitOpen(ctx, s.imageCircuitBreaker, acc) {
+			continue
 		}
 
 		// 跳过被排除的账号

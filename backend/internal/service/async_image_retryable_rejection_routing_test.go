@@ -24,6 +24,10 @@ func TestAsyncImageRetryableRejectionFourServicePaths(t *testing.T) {
 		for _, accountType := range []string{AccountTypeAPIKey, AccountTypeOAuth} {
 			for _, message := range []string{
 				"reference image exceeds limit: 20 MB limit exceeded",
+				"服务繁忙，请稍后重试",
+				"service error, please try again later.",
+				"Internal error encountered.",
+				"I wasn't able to generate the image due to an error on my side.",
 				"Provider API error: fileData requires a user YouTube reference or a gateway file_id (request id: changing)",
 				"The prompt or input images could not be processed. Adjust the request and try again.",
 			} {

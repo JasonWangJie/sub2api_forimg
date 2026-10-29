@@ -29,6 +29,7 @@ var asyncImageReferenceNetworkDownloadPattern = regexp.MustCompile(`(?i)^error w
 var asyncImageReferenceRedactedNetworkDownloadPattern = regexp.MustCompile(`(?i)^error while downloading (https://\*{3}(?:\.\*{3})*\.[a-z]+(?:/\*{3})+) get "(https://\*{3}(?:\.\*{3})*\.[a-z]+(?:/\*{3})+) dial tcp \*{3}\.\*{3}\.\*{3}\.\*{3}:443: i/o timeout$`)
 var asyncImageReferenceTLSDownloadPattern = regexp.MustCompile(`(?i)^error while downloading (https://[^\s]+?):? get "(https://[^"\s]+)": net/http: tls handshake timeout$`)
 var asyncImageReferenceRedactedTLSDownloadPattern = regexp.MustCompile(`(?i)^error while downloading (https://\*{3}(?:\.\*{3})*\.[a-z]+(?:/\*{3})+) get "(https://\*{3}(?:\.\*{3})*\.[a-z]+(?:/\*{3})+) net/http: tls handshake timeout$`)
+var asyncImageReferenceReadResetPattern = regexp.MustCompile(`(?i)^error while downloading (https://[^\s]+?)(?::? get "(https://[^"\s]+)"?:?)? read tcp [^\s]+: read: connection reset by peer$`)
 var asyncImageReferenceDiagnosticURLPattern = regexp.MustCompile(`(?i)https?://[^\s"'<>]+`)
 
 // IsAsyncImageReferenceBudgetExceededMessage accepts only the complete known
@@ -74,7 +75,7 @@ func isAsyncImageReferenceAccountFailoverForContext(ctx context.Context, statusC
 	// This provider format does not identify the image as an input reference.
 	// Require the durable task's explicit image-to-image context so an output
 	// download failure during text-to-image cannot restart generation.
-	if isAsyncImageReferenceNetworkDownloadFailure(message) && !IsAsyncImageInputReferenceTask(ctx) {
+	if (isAsyncImageReferenceNetworkDownloadFailure(message) || isAsyncImageReferenceAdditionalDownloadFailure(message)) && !IsAsyncImageInputReferenceTask(ctx) {
 		return false
 	}
 	return IsAsyncImageReferenceAccountFailoverMessage(statusCode, message)
@@ -82,6 +83,13 @@ func isAsyncImageReferenceAccountFailoverForContext(ctx context.Context, statusC
 
 func isAsyncImageReferenceNetworkDownloadFailure(message string) bool {
 	message = strings.Join(strings.Fields(message), " ")
+	if matches := asyncImageReferenceReadResetPattern.FindStringSubmatch(message); len(matches) == 3 {
+		if matches[2] != "" && matches[1] != matches[2] {
+			return false
+		}
+		source, err := url.Parse(matches[1])
+		return err == nil && strings.EqualFold(source.Scheme, "https") && source.Hostname() != "" && source.User == nil && source.Fragment == ""
+	}
 	var matches []string
 	for _, pattern := range []*regexp.Regexp{
 		asyncImageReferenceNetworkDownloadPattern, asyncImageReferenceRedactedNetworkDownloadPattern,
@@ -106,7 +114,9 @@ func newAsyncImageReferenceAccountFailoverError(body []byte, headers http.Header
 	_, providerCode, requestID := geminiAsyncUpstreamDiagnostics(body, geminiRequestIDFromHeaders(headers))
 	message := strings.Join(strings.Fields(extractUpstreamErrorMessage(body)), " ")
 	if isAsyncImageReferenceNetworkDownloadFailure(message) {
-		if strings.HasSuffix(strings.ToLower(message), "net/http: tls handshake timeout") {
+		if strings.HasSuffix(strings.ToLower(message), "read: connection reset by peer") {
+			message = `Error while downloading https://*** read tcp ***:443: read: connection reset by peer`
+		} else if strings.HasSuffix(strings.ToLower(message), "net/http: tls handshake timeout") {
 			message = `Error while downloading https://*** Get "https://***": net/http: TLS handshake timeout`
 		} else {
 			message = `Error while downloading https://*** Get "https://***": dial tcp ***:443: i/o timeout`

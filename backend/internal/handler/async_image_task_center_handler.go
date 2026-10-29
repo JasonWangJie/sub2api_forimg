@@ -246,9 +246,10 @@ func (h *AsyncImageTaskCenterHandler) globalStats(ctx context.Context, filter se
 			stats.Active++
 		case service.AsyncImageTaskStatusSucceeded:
 			stats.Completed++
+		case service.AsyncImageTaskStatusExpired:
+			stats.Expired++
 		case service.AsyncImageTaskStatusFailed, service.AsyncImageTaskStatusExecutionUnknown,
-			service.AsyncImageTaskStatusStorageFailed, service.AsyncImageTaskStatusBillingFailed,
-			service.AsyncImageTaskStatusExpired:
+			service.AsyncImageTaskStatusStorageFailed, service.AsyncImageTaskStatusBillingFailed:
 			stats.Failed++
 		}
 	}

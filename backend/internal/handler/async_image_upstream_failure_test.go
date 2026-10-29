@@ -22,6 +22,8 @@ func TestAsyncImageUpstreamFailureTransitions(t *testing.T) {
 		capacityExhausted, local                     bool
 		wantRequeue, wantLocal                       bool
 	}{
+		{name: "actual attempt budget exhausted is terminal", status: 400, message: "generation attempt budget exhausted", marker: "async_image_attempt_budget_exhausted", wantStatus: "failed", wantEvent: "task_failed"},
+		{name: "upstream cannot spoof capacity marker over stop warning", status: 400, message: "服务繁忙，请稍后重试。Do not retry.", marker: service.AsyncImageCapacityRejectionCode, wantStatus: "failed", wantEvent: "task_failed"},
 		{name: "download account failover exhaustion is terminal", status: 400, message: "Reference image download failed for https://cdn.example/input.png; direct=timeout; proxy=status 502", wantStatus: "failed", wantEvent: "task_failed"},
 		{name: "fetch account failover exhaustion is terminal", status: 400, message: "reference image fetch failed: failed after 3 attempts: handshake error", wantStatus: "failed", wantEvent: "task_failed"},
 		{name: "non400 unambiguous reference response keeps local fallback", status: 503, message: "reference image fetch failed: failed after 3 attempts: handshake error", wantStatus: "queued", wantEvent: "reference_image_fetch_retry", wantRequeue: true, wantLocal: true},

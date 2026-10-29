@@ -234,6 +234,12 @@ func (h *GatewayHandler) ChatCompletions(c *gin.Context) {
 				historicalExclusionsRetried = true
 				continue
 			}
+			if len(fs.FailedAccountIDs) == 0 && fs.LastFailoverErr != nil {
+				// Circuit filtering can exhaust the pool during a same-account
+				// retry, before FailoverState has excluded any account.
+				h.handleCCFailoverExhausted(c, fs.LastFailoverErr, streamStarted)
+				return
+			}
 			if len(fs.FailedAccountIDs) == 0 {
 				cls := classifyNoAccountErrorFromGin(c, h.gatewayService, apiKey, reqModel, reqModel, groupPlatform)
 				if !cls.ModelNotFound {
@@ -399,9 +405,13 @@ func (h *GatewayHandler) ChatCompletions(c *gin.Context) {
 			accountReleaseFunc()
 		}
 
+		if writeAsyncImageAttemptBudgetError(c, err) {
+			return
+		}
 		if err != nil {
 			var failoverErr *service.UpstreamFailoverError
 			if errors.As(err, &failoverErr) {
+				fs.LastFailoverErr = failoverErr
 				if asyncImageGeneration {
 					service.RecordAsyncImageAccountAttempt(c.Request.Context(), asyncImageFailedAccountAttempt(account, failoverErr))
 				}

@@ -516,7 +516,7 @@ func (s *PricingService) parsePricingData(body []byte) (map[string]*LiteLLMModel
 
 // loadPricingData 从本地文件加载价格数据
 func (s *PricingService) loadPricingData(filePath string) error {
-	data, err := os.ReadFile(filePath)
+	data, err := readFallbackPricingFile(filePath)
 	if err != nil {
 		return fmt.Errorf("read file failed: %w", err)
 	}
@@ -555,7 +555,7 @@ func (s *PricingService) mergeFallbackPricingData(data map[string]*LiteLLMModelP
 	if s == nil || s.cfg == nil || strings.TrimSpace(s.cfg.Pricing.FallbackFile) == "" {
 		return data
 	}
-	fallbackBody, err := os.ReadFile(s.cfg.Pricing.FallbackFile)
+	fallbackBody, err := readFallbackPricingFile(s.cfg.Pricing.FallbackFile)
 	if err != nil {
 		logger.LegacyPrintf("service.pricing", "[Pricing] Fallback merge skipped: %v", err)
 		return data
@@ -583,14 +583,10 @@ func (s *PricingService) mergeFallbackPricingData(data map[string]*LiteLLMModelP
 func (s *PricingService) useFallbackPricing() error {
 	fallbackFile := s.cfg.Pricing.FallbackFile
 
-	if _, err := os.Stat(fallbackFile); os.IsNotExist(err) {
-		return fmt.Errorf("fallback file not found: %s", fallbackFile)
-	}
-
 	logger.LegacyPrintf("service.pricing", "[Pricing] Using fallback file: %s", fallbackFile)
 
 	// 复制到数据目录
-	data, err := os.ReadFile(fallbackFile)
+	data, err := readFallbackPricingFile(fallbackFile)
 	if err != nil {
 		return fmt.Errorf("read fallback failed: %w", err)
 	}

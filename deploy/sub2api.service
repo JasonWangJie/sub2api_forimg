@@ -12,6 +12,8 @@ WorkingDirectory=/opt/sub2api
 ExecStart=/opt/sub2api/sub2api
 Restart=always
 RestartSec=5
+# Allow the bounded async image drain before systemd sends SIGKILL.
+TimeoutStopSec=990
 StandardOutput=journal
 StandardError=journal
 SyslogIdentifier=sub2api
