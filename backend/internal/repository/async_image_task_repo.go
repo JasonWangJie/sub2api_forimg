@@ -592,7 +592,7 @@ UPDATE async_image_tasks SET
     image_count = $6,
     billing_request_id = $7,
     billing_payload = $8::jsonb,
-    upstream_succeeded_at = $9,
+    upstream_succeeded_at = COALESCE(upstream_succeeded_at, $9::timestamptz),
     account_attempts = CASE WHEN $11::boolean THEN $12::jsonb ELSE account_attempts END,
     attempted_account_ids = CASE WHEN $13::boolean THEN $14::jsonb ELSE attempted_account_ids END,
     reconciliation_status = 'none',
@@ -615,18 +615,19 @@ RETURNING `+asyncImageTaskColumns,
 	if err != nil {
 		return nil, err
 	}
-	if err := appendAsyncImageEventWithSQL(ctx, tx, service.AsyncImageEvent{
-		TaskID: params.TaskID, EventType: "upstream_succeeded",
-		FromStatus: stringPointer(currentStatus), ToStatus: stringPointer(service.AsyncImageTaskStatusUpstreamSucceeded),
-		Payload: normalizeJSONPayload(params.EventPayload),
-	}); err != nil {
-		return nil, err
-	}
 	if recoveringResult {
 		if _, err := tx.ExecContext(ctx, `DELETE FROM async_image_result_fetches WHERE task_id=$1`, params.TaskID); err != nil {
 			return nil, err
 		}
 		if err := appendAsyncImageEventWithSQL(ctx, tx, service.AsyncImageEvent{TaskID: params.TaskID, EventType: "result_fetch_completed", Payload: json.RawMessage(`{"stage":"result_fetch"}`)}); err != nil {
+			return nil, err
+		}
+	} else {
+		if err := appendAsyncImageEventWithSQL(ctx, tx, service.AsyncImageEvent{
+			TaskID: params.TaskID, EventType: "upstream_succeeded",
+			FromStatus: stringPointer(currentStatus), ToStatus: stringPointer(service.AsyncImageTaskStatusUpstreamSucceeded),
+			Payload: normalizeJSONPayload(params.EventPayload),
+		}); err != nil {
 			return nil, err
 		}
 	}

@@ -94,3 +94,20 @@ func TestAsyncImageDurableAttemptBudgetAndTaskDeadline(t *testing.T) {
 	task.AccountAttempts = json.RawMessage(`[{"account_id":1,"status":"selected"},{"account_id":1,"status":"failed"},{"account_id":2,"status":"selected"},{"account_id":2,"status":"invocation_started"},{"account_id":2,"status":"invocation_started"}]`)
 	require.Equal(t, 13, asyncImageRemainingUpstreamAttempts(task), "new instrumentation must not erase legacy attempts")
 }
+
+func TestAsyncImageDurableAttemptBudgetIgnoresCopiedAuditRecords(t *testing.T) {
+	now := time.Date(2026, 10, 30, 5, 31, 30, 411942319, time.UTC)
+	first := []service.AsyncImageAccountAttempt{
+		{AccountID: 7, Status: service.AsyncImageAccountAttemptSelected, AttemptedAt: now},
+		{AccountID: 7, Status: service.AsyncImageAccountAttemptInvoked, AttemptedAt: now.Add(time.Nanosecond)},
+		{AccountID: 7, Status: service.AsyncImageAccountAttemptSucceeded, AttemptedAt: now.Add(time.Minute)},
+	}
+	history := append(append([]service.AsyncImageAccountAttempt{}, first...), first...)
+	task := &service.AsyncImageTask{}
+	task.AccountAttempts, _ = json.Marshal(history)
+	require.Equal(t, 15, asyncImageRemainingUpstreamAttempts(task))
+	// A genuine retry on the same account must consume another invocation.
+	history = append(history, service.AsyncImageAccountAttempt{AccountID: 7, Status: service.AsyncImageAccountAttemptInvoked, AttemptedAt: now.Add(2 * time.Minute)})
+	task.AccountAttempts, _ = json.Marshal(history)
+	require.Equal(t, 14, asyncImageRemainingUpstreamAttempts(task))
+}

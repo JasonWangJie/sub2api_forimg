@@ -1,5 +1,22 @@
 # AI 交接文档
 
+## 2026-10-30 当前交接：尝试审计与阶段逻辑已本地修复、不发布
+
+- 用户明确要求“修正这个逻辑，不要发布”。本轮没有连接生产、生产配置/数据/文件/账号操作、部署、重启、生图或重放，未升版、提交、推送、发tag或运行CI。原前轮五份诊断/交接文档全部保留。
+- 实际HEAD仍`cd4590157dc2266b1ba1f9e99edd3103f636f2b9`，main...origin/main，开始及完成describe均`v0.1.173.62-dirty`，源码VERSION=`0.1.173.61`。工作树含保留文档与本轮后端/前端/回归，生产13:40快照是此前诊断，不是本轮上线验收。
+- service.DeduplicateAsyncImageAccountAttempts及Merge实现完整非零时间审计幂等；新Record生成独立event_id，捕获/持久/重复保存沿用该身份，避免Windows时钟同值将紧邻真实重试合并。保留不同时间/诊断及无时间旧记录。Worker预算、任务中心展示和可靠性统计修正重复计数；账号数是唯一有效账号数。统计SQL不使用PG16专属函数/任意时间cast；实际运行验证PG16.14，未测PG14/15。
+- RecordAsyncImageUpstreamSuccess恢复分支只记result_fetch_completed，普通直接成功仍记upstream_succeeded；保留首次upstream_succeeded_at。详情pending按事件语义显示，有completion时隐藏旧同状态重复成功；不删除原始事件或清洗历史。前端分别显示记录条数、账号数和实际请求数，旧无调用标记为未知，空queued为0，状态颜色修正。
+- 同Worker续跑/重启恢复及提交不明确/计费幂等回归已补；最终完整unit Service168.176秒/Handler56.933秒/Repository3.602秒通过，仅skip既有外部token API对照，参考重试连续20次及常规编译通过。前端4文件24测试、ESLint、build含类型检查、真实PG两顶层/22子场景、13Go格式/差异/29链接检查通过，详见[开发台账](开发台账.md)。临时PG仅本机55494，验证后核对PID4176停止并确认无监听，未使用生产。初轮Handler发现断言类型与时钟同值问题均已修正；部分并行首编定向主动中止，不计通过。
+- 机制、兼容旧数据和验证边界见[本地修复](wiki-new/异步生图尝试历史与阶段重复诊断.md#本地修复与验证)。后续若要求上线再单独发布部署并验收；当前生产历史数据保持原样，读取修正只有运行新代码才生效，不要声称已修线上任务或执行任何重放。
+
+## 2026-10-30 当前交接：尝试历史重复诊断，生产已六十二版
+
+- 当前实际本地HEAD和生产运行提交均`cd4590157dc2266b1ba1f9e99edd3103f636f2b9`；开始main...origin/main干净、describe=`v0.1.173.62`，源码VERSION=`0.1.173.61`。本轮完成HEAD/VERSION不变、describe=`v0.1.173.62-dirty`，仅五份诊断/记录文档改动。下方“仍未发布”的六十一版旧记录保留作历史，不能替代当前运行映像核查。
+- 用户提供主机，要求解释`7fcf46cc…`与`d6793104…`尝试历史/阶段重复；本轮只读SSH/PG/journal，无生产变更、部署、重启、生图、重放、提交或发布。生产PID1574653、13:30:50启动，截止北京时间13:40:37仍active；所有SSH关闭，凭据不入库。
+- 两任务各一次实际生图、一次成品GET、一张输出、一条系统usage记录、全部retry0且成功。account_attempts均为两组精确同纳秒的selected/invocation_started/succeeded，即原始6、去重3，真实调用标记去重1。来源持久化保存capture后，resume沿同parent将saved task交complete，asyncImageAttemptState再次append未消费capture，造成重复；不是请求重发。
+- 详情把行数当“次”，AccountAttemptCount也取len(attempts)而非唯一账号数；可靠性SQL原样count invocation_started，两个任务各会虚计成2次。result_fetch_pending的ToStatus先成为upstream_succeeded，最终保存又记同状态成功，详情ToStatus覆盖EventType，产生两次同名阶段。具体证据和文件入口见[诊断](wiki-new/异步生图尝试历史与阶段重复诊断.md)。
+- 下一步若要求修复，应保证capture合并幂等，分开审计条数/实际调用数/唯一账号数，并按事件语义展示时间线；保留来源先持久化与只取同一成品的机制。本轮仅诊断，未修业务代码/历史数据/统计，也未核对上游供应商账单。只读查询、源码与日志交叉核对及文档差异/新增链接检查完成，未运行Go/前端测试或CI。
+
 ## 2026-10-30 当前交接：成品暂存与失联扫描已本地修复、未发布
 
 - 用户最新要求“修正吧，不需要发布”。本轮仅本地后端修复、测试和文档同步，没有连接生产、变更生产数据/文件/配置、发布、部署、重启、生图或历史抢救，没有升版、提交或推送。下方09:01的生产版本/28失败均为历史诊断，不能写成已修线上。

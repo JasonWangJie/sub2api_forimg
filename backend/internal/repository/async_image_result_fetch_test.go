@@ -74,11 +74,34 @@ func TestAsyncImageResultFetchFinalizationRollsBackSourceDeletionOnCommitFailure
 	mock.ExpectExec(`DELETE FROM async_image_staging_objects`).WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectExec(`INSERT INTO async_image_staging_objects`).WillReturnResult(sqlmock.NewResult(1, 1))
 	mock.ExpectQuery(`(?s)UPDATE async_image_tasks SET.*billing_payload.*RETURNING`).WillReturnRows(asyncImageTaskRowsWithPayload(now, "fetch", "hash", "upstream_succeeded", []byte{}))
-	mock.ExpectExec(`INSERT INTO async_image_events`).WillReturnResult(sqlmock.NewResult(1, 1))
 	mock.ExpectExec(`DELETE FROM async_image_result_fetches`).WithArgs("fetch").WillReturnError(errors.New("transient database error"))
 	mock.ExpectRollback()
 	_, err = NewAsyncImageTaskRepository(db).RecordAsyncImageUpstreamSuccess(context.Background(), service.RecordAsyncImageUpstreamSuccessParams{TaskID: "fetch", ExpectedVersion: 2, AccountID: 7, ImageCount: 1, BillingRequestID: "client:async-image:fetch", BillingPayload: []byte(`{"amount":1}`), UpstreamSucceededAt: now, StagingObjects: []service.AsyncImageStagingObject{{ImageIndex: 0, Content: []byte("png"), ContentType: "image/png", ByteSize: 3, Checksum: "sum", ExpiresAt: now.Add(time.Hour)}}})
 	require.Error(t, err)
+	require.NoError(t, mock.ExpectationsWereMet())
+}
+
+func TestAsyncImageResultFetchFinalizationRecordsOnlyFetchCompletion(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	require.NoError(t, err)
+	defer db.Close()
+	now := time.Now().UTC()
+	mock.ExpectBegin()
+	mock.ExpectQuery(`SELECT status, version.*FOR UPDATE`).WillReturnRows(sqlmock.NewRows([]string{"status", "version"}).AddRow("upstream_succeeded", 2))
+	mock.ExpectQuery(`SELECT EXISTS\(SELECT 1 FROM async_image_result_fetches`).WillReturnRows(sqlmock.NewRows([]string{"exists"}).AddRow(true))
+	mock.ExpectExec(`DELETE FROM async_image_staging_objects`).WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec(`INSERT INTO async_image_staging_objects`).WillReturnResult(sqlmock.NewResult(1, 1))
+	mock.ExpectQuery(`(?s)UPDATE async_image_tasks SET.*upstream_succeeded_at = COALESCE\(upstream_succeeded_at, \$9::timestamptz\).*RETURNING`).WillReturnRows(asyncImageTaskRowsWithPayload(now, "fetch", "hash", "upstream_succeeded", []byte{}))
+	mock.ExpectExec(`DELETE FROM async_image_result_fetches`).WithArgs("fetch").WillReturnResult(sqlmock.NewResult(0, 1))
+	// An extra upstream_succeeded event would fail this ordered expectation.
+	mock.ExpectExec(`INSERT INTO async_image_events`).WithArgs("fetch", "result_fetch_completed", nil, nil, sqlmock.AnyArg()).WillReturnResult(sqlmock.NewResult(1, 1))
+	mock.ExpectCommit()
+	_, err = NewAsyncImageTaskRepository(db).RecordAsyncImageUpstreamSuccess(context.Background(), service.RecordAsyncImageUpstreamSuccessParams{
+		TaskID: "fetch", ExpectedVersion: 2, AccountID: 7, ImageCount: 1,
+		BillingRequestID: "client:async-image:fetch", BillingPayload: []byte(`{"amount":1}`), UpstreamSucceededAt: now,
+		StagingObjects: []service.AsyncImageStagingObject{{ImageIndex: 0, Content: []byte("png"), ContentType: "image/png", ByteSize: 3, Checksum: "sum", ExpiresAt: now.Add(time.Hour)}},
+	})
+	require.NoError(t, err)
 	require.NoError(t, mock.ExpectationsWereMet())
 }
 

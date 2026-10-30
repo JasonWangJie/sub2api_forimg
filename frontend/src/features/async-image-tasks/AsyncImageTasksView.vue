@@ -431,6 +431,7 @@
           </div>
           <dl class="mt-3 grid grid-cols-1 gap-x-8 gap-y-3 sm:grid-cols-2 lg:grid-cols-4">
             <DetailRow :label="t('asyncImageTasks.detail.accountAttemptCount')" :value="String(detail.account_attempt_count ?? 0)" />
+            <DetailRow :label="t('asyncImageTasks.detail.generationRequestCount')" :value="String(generationRequestCount ?? '-')" />
             <DetailRow :label="t('asyncImageTasks.detail.reconciliationStatus')" :value="reconciliationLabel(detail.reconciliation_status)" />
             <DetailRow v-if="detail.last_failure_reason" :label="t('asyncImageTasks.detail.lastFailureReason')" :value="detail.last_failure_reason" />
           </dl>
@@ -673,6 +674,21 @@ let listController: AbortController | null = null
 let detailController: AbortController | null = null
 
 const inProgressStatuses = new Set(['queued', 'invoking', 'upstream_succeeded', 'uploading', 'billing_pending'])
+const inProgressAuditStatuses = new Set([
+  'selected', 'invocation_started', 'upstream_image_url_fetch_retry',
+  'result_fetch_pending', 'result_fetch_attempt', 'result_fetch_retry', 'result_finalize_retry',
+])
+const successfulAuditStatuses = new Set(['succeeded', 'result_fetch_completed', 'reference_snapshot_saved'])
+
+const generationRequestCount = computed<number | null>(() => {
+  if (!detail.value) return null
+  const attempts = detail.value.account_attempts || []
+  // The backend returns deduplicated audits; only HTTP-start records count as calls.
+  const calls = attempts.filter((attempt) => attempt.status === 'invocation_started').length
+  if (calls > 0) return calls
+  // Historical tasks may predate HTTP-start auditing, so missing markers are unknown.
+  return detail.value.status === 'queued' && attempts.length === 0 ? 0 : null
+})
 
 const activeTaskCount = computed(() => stats.value.active)
 const completedTaskCount = computed(() => stats.value.completed)
@@ -818,8 +834,8 @@ function providerLabel(value?: string | null): string {
 
 function statusBadgeClass(status: string): string {
   const base = 'inline-flex items-center gap-1.5 rounded-md border px-2 py-1 text-xs font-medium'
-  if (status === 'succeeded') return `${base} border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-900/70 dark:bg-emerald-950/40 dark:text-emerald-300`
-  if (inProgressStatuses.has(status) || status === 'upstream_image_url_fetch_retry' || status === 'selected') {
+  if (successfulAuditStatuses.has(status)) return `${base} border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-900/70 dark:bg-emerald-950/40 dark:text-emerald-300`
+  if (inProgressStatuses.has(status) || inProgressAuditStatuses.has(status)) {
     return `${base} border-amber-200 bg-amber-50 text-amber-700 dark:border-amber-900/70 dark:bg-amber-950/40 dark:text-amber-300`
   }
   if (status === 'execution_unknown') return `${base} border-violet-200 bg-violet-50 text-violet-700 dark:border-violet-900/70 dark:bg-violet-950/40 dark:text-violet-300`
@@ -827,8 +843,8 @@ function statusBadgeClass(status: string): string {
 }
 
 function statusDotClass(status: string): string {
-  if (status === 'succeeded') return 'bg-emerald-500'
-  if (inProgressStatuses.has(status) || status === 'upstream_image_url_fetch_retry' || status === 'selected') return 'bg-amber-500'
+  if (successfulAuditStatuses.has(status)) return 'bg-emerald-500'
+  if (inProgressStatuses.has(status) || inProgressAuditStatuses.has(status)) return 'bg-amber-500'
   if (status === 'execution_unknown') return 'bg-violet-500'
   return 'bg-rose-500'
 }

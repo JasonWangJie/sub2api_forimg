@@ -23,6 +23,58 @@ func TestMergeAsyncImageAccountAttemptsKeepsHistoryAndDistinctIDs(t *testing.T) 
 	require.Equal(t, []int64{2, 7}, attemptedIDs)
 }
 
+func TestMergeAsyncImageAccountAttemptsIsIdempotentAcrossResultRecovery(t *testing.T) {
+	now := time.Date(2026, 10, 30, 5, 31, 30, 411942319, time.UTC)
+	capture := []AsyncImageAccountAttempt{
+		{AccountID: 38, AccountName: "image-account", Status: AsyncImageAccountAttemptSelected, AttemptedAt: now.Add(-time.Millisecond)},
+		{AccountID: 38, Status: AsyncImageAccountAttemptInvoked, AttemptedAt: now},
+		{AccountID: 38, AccountName: "image-account", Status: AsyncImageAccountAttemptSucceeded, AttemptedAt: now.Add(time.Minute)},
+	}
+	// Result URL persistence and finalization both see the same context capture.
+	snapshot, ids := MergeAsyncImageAccountAttempts(nil, capture)
+	final, finalIDs := MergeAsyncImageAccountAttempts(snapshot, capture)
+	require.JSONEq(t, string(snapshot), string(final))
+	require.JSONEq(t, string(ids), string(finalIDs))
+	// Historical duplicated rows are normalized on the next merge as well.
+	duplicated, err := json.Marshal(append(append([]AsyncImageAccountAttempt{}, capture...), capture...))
+	require.NoError(t, err)
+	normalized, _ := MergeAsyncImageAccountAttempts(duplicated, capture)
+	require.JSONEq(t, string(snapshot), string(normalized))
+}
+
+func TestDeduplicateAsyncImageAccountAttemptsPreservesRealRetriesAndDiagnostics(t *testing.T) {
+	now := time.Date(2026, 10, 30, 5, 31, 30, 411942319, time.UTC)
+	first := AsyncImageAccountAttempt{AccountID: 7, Status: AsyncImageAccountAttemptInvoked, AttemptedAt: now}
+	retry := first
+	retry.AttemptedAt = now.Add(time.Nanosecond)
+	diagnostic := first
+	diagnostic.UpstreamRequestID = "distinct-provider-request"
+	legacy := AsyncImageAccountAttempt{AccountID: 7, Status: AsyncImageAccountAttemptInvoked}
+	input := []AsyncImageAccountAttempt{first, first, retry, diagnostic, legacy, legacy}
+	before := append([]AsyncImageAccountAttempt{}, input...)
+	got := DeduplicateAsyncImageAccountAttempts(input)
+	require.Equal(t, []AsyncImageAccountAttempt{first, retry, diagnostic, legacy, legacy}, got)
+	require.Equal(t, before, input, "normalizing a read must not mutate persisted history")
+	require.Empty(t, DeduplicateAsyncImageAccountAttempts(nil))
+}
+
+func TestRecordAsyncImageAccountAttemptDistinguishesCallsAtTheSameClockTime(t *testing.T) {
+	capture := &AsyncImageAccountAttemptCapture{}
+	ctx := WithAsyncImageAccountAttemptCapture(context.Background(), capture)
+	attempt := AsyncImageAccountAttempt{AccountID: 7, Status: AsyncImageAccountAttemptInvoked, AttemptedAt: time.Date(2026, 10, 30, 5, 31, 30, 0, time.UTC)}
+	RecordAsyncImageAccountAttempt(ctx, attempt)
+	RecordAsyncImageAccountAttempt(ctx, attempt)
+	records := capture.Attempts()
+	require.Len(t, records, 2)
+	require.NotEmpty(t, records[0].EventID)
+	require.NotEqual(t, records[0].EventID, records[1].EventID)
+	saved, _ := MergeAsyncImageAccountAttempts(nil, records)
+	final, _ := MergeAsyncImageAccountAttempts(saved, records)
+	var merged []AsyncImageAccountAttempt
+	require.NoError(t, json.Unmarshal(final, &merged))
+	require.Equal(t, records, merged, "two real calls stay distinct, replaying their capture stays idempotent")
+}
+
 func TestAsyncImageAccountAttemptJSONPreservesProviderDiagnostics(t *testing.T) {
 	attempt := AsyncImageAccountAttempt{
 		AccountID: 7, Status: AsyncImageAccountAttemptFailed, StatusCode: 400,

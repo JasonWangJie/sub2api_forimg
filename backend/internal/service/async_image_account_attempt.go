@@ -6,11 +6,14 @@ import (
 	"sort"
 	"sync"
 	"time"
+
+	"github.com/google/uuid"
 )
 
 // AsyncImageAccountAttempt is the durable, non-secret audit record for one
 // account selected while executing an asynchronous image task.
 type AsyncImageAccountAttempt struct {
+	EventID           string    `json:"event_id,omitempty"`
 	AccountID         int64     `json:"account_id"`
 	AccountName       string    `json:"account_name,omitempty"`
 	Status            string    `json:"status"`
@@ -232,6 +235,11 @@ func RecordAsyncImageAccountAttempt(ctx context.Context, attempt AsyncImageAccou
 	if attempt.AttemptedAt.IsZero() {
 		attempt.AttemptedAt = time.Now().UTC()
 	}
+	if attempt.EventID == "" {
+		// Wall clocks can return the same timestamp for separate fast attempts.
+		// Preserve a stable identity when a capture is persisted more than once.
+		attempt.EventID = uuid.NewString()
+	}
 	capture.mu.Lock()
 	capture.attempts = append(capture.attempts, attempt)
 	persist := capture.persist
@@ -259,17 +267,38 @@ func (c *AsyncImageAccountAttemptCapture) Attempts() []AsyncImageAccountAttempt 
 	return append([]AsyncImageAccountAttempt(nil), c.attempts...)
 }
 
-// MergeAsyncImageAccountAttempts appends new attempts and derives a stable,
-// sorted account-id list for API/admin inspection.
+// DeduplicateAsyncImageAccountAttempts keeps the first copy of each complete,
+// timestamped audit record. Reusing a capture after persisting a result snapshot
+// must not append those same records again. Separate calls retain their own
+// event IDs and timestamps; legacy records without timestamps stay intact because they cannot
+// be reliably identified as duplicates.
+func DeduplicateAsyncImageAccountAttempts(attempts []AsyncImageAccountAttempt) []AsyncImageAccountAttempt {
+	unique := make([]AsyncImageAccountAttempt, 0, len(attempts))
+	seen := make(map[string]struct{}, len(attempts))
+	for _, attempt := range attempts {
+		if !attempt.AttemptedAt.IsZero() {
+			key, err := json.Marshal(attempt)
+			if err == nil {
+				if _, exists := seen[string(key)]; exists {
+					continue
+				}
+				seen[string(key)] = struct{}{}
+			}
+		}
+		unique = append(unique, attempt)
+	}
+	return unique
+}
+
+// MergeAsyncImageAccountAttempts merges persisted history and the current
+// capture idempotently, and derives a sorted account-id list for inspection.
 func MergeAsyncImageAccountAttempts(existing json.RawMessage, attempts []AsyncImageAccountAttempt) (json.RawMessage, json.RawMessage) {
 	var merged []AsyncImageAccountAttempt
 	if len(existing) > 0 && json.Valid(existing) {
 		_ = json.Unmarshal(existing, &merged)
 	}
 	merged = append(merged, attempts...)
-	if merged == nil {
-		merged = []AsyncImageAccountAttempt{}
-	}
+	merged = DeduplicateAsyncImageAccountAttempts(merged)
 	idsSet := make(map[int64]struct{}, len(merged))
 	for _, attempt := range merged {
 		if attempt.AccountID > 0 {

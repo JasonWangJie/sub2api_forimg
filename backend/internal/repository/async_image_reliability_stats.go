@@ -12,6 +12,11 @@ func (r *asyncImageTaskRepository) AsyncImageReliabilityStats(ctx context.Contex
 	// Aggregate each task before joining events, so repeated audit rows cannot
 	// multiply task counts, costs or duration samples. Reuse the exact list
 	// filter, including ownership, rather than querying unscoped global totals.
+	// A result-fetch finalization in older versions appended the same captured
+	// attempts twice. Collapse only complete JSON duplicates with a valid,
+	// nonzero RFC3339 timestamp; untimed/invalid legacy rows remain independent.
+	// Validate numeric components behind the shape check: this also works on
+	// supported PostgreSQL 14/15 and never casts malformed data to a timestamp.
 	query := `WITH tasks AS (SELECT task_id,status,error_code,billing_status,actual_cost,
  account_attempts,attempted_account_ids,reference_transport,reference_retry_count,retry_count,
  submitted_at,started_at,upstream_succeeded_at,finished_at FROM async_image_tasks` + where + `),
@@ -30,7 +35,27 @@ facts AS (
  CROSS JOIN LATERAL (
   SELECT COUNT(*) FILTER (WHERE j->>'status'='invocation_started') AS http_count,
          COUNT(*) FILTER (WHERE j->>'status'='selected') AS selections
-  FROM jsonb_array_elements(COALESCE(t.account_attempts,'[]'::jsonb)) j
+  FROM (
+   SELECT DISTINCT j, CASE
+    WHEN jsonb_typeof(j->'attempted_at')='string'
+     AND j->>'attempted_at' ~ '^[0-9]{4}-(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])T([01][0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9](\.[0-9]+)?(Z|[+-]([01][0-9]|2[0-3]):[0-5][0-9])$'
+    THEN CASE WHEN
+     substring(j->>'attempted_at',1,4)::integer > 0
+     AND substring(j->>'attempted_at',9,2)::integer <= CASE substring(j->>'attempted_at',6,2)
+      WHEN '02' THEN 28 + CASE WHEN substring(j->>'attempted_at',1,4)::integer % 4=0
+       AND (substring(j->>'attempted_at',1,4)::integer % 100<>0 OR substring(j->>'attempted_at',1,4)::integer % 400=0) THEN 1 ELSE 0 END
+      WHEN '04' THEN 30 WHEN '06' THEN 30 WHEN '09' THEN 30 WHEN '11' THEN 30 ELSE 31 END
+     AND NOT (
+      left(j->>'attempted_at',10)='0001-01-01' AND substring(j->>'attempted_at',18,2)='00'
+      AND COALESCE(substring(j->>'attempted_at' FROM '\.([0-9]+)'),'0') !~ '[1-9]'
+      AND substring(j->>'attempted_at',12,2)::integer * 60 + substring(j->>'attempted_at',15,2)::integer =
+       CASE WHEN right(j->>'attempted_at',1)='Z' THEN 0 ELSE
+        (CASE WHEN left(right(j->>'attempted_at',6),1)='-' THEN -1 ELSE 1 END) *
+        (substring(right(j->>'attempted_at',6),2,2)::integer * 60 + substring(right(j->>'attempted_at',6),5,2)::integer) END
+     ) THEN 0 ELSE ordinal END
+    ELSE ordinal END AS occurrence
+   FROM jsonb_array_elements(COALESCE(t.account_attempts,'[]'::jsonb)) WITH ORDINALITY AS attempts(j,ordinal)
+  ) distinct_attempts
  ) a
  LEFT JOIN events e ON e.task_id=t.task_id
 )

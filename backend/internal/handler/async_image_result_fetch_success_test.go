@@ -27,6 +27,8 @@ func (r *resultFetchCommitTestRepo) RecordAsyncImageUpstreamSuccess(_ context.Co
 	r.task.BillingRequestID = &p.BillingRequestID
 	r.task.BillingPayload = p.BillingPayload
 	r.task.ImageCount = p.ImageCount
+	r.task.AccountAttempts = p.AccountAttempts
+	r.task.AttemptedAccountIDs = p.AttemptedAccountIDs
 	r.staging = p.StagingObjects
 	r.pending = nil
 	if r.recordErrAfterCommit {
@@ -38,6 +40,15 @@ func (r *resultFetchCommitTestRepo) RecordAsyncImageUpstreamSuccess(_ context.Co
 }
 
 func TestAsyncImageResultFetchRestartCompletesOrderedImagesAndBillsOnce(t *testing.T) {
+	testAsyncImageResultFetchCompletesWithAttemptHistory(t, false)
+}
+
+func TestAsyncImageResultFetchSameWorkerDoesNotDuplicateAttempts(t *testing.T) {
+	testAsyncImageResultFetchCompletesWithAttemptHistory(t, true)
+}
+
+func testAsyncImageResultFetchCompletesWithAttemptHistory(t *testing.T, sameWorker bool) {
+	t.Helper()
 	png, jpeg := generatedWorkerImageFixtures(t)
 	groupID := int64(3)
 	price := 0.04
@@ -61,13 +72,32 @@ func TestAsyncImageResultFetchRestartCompletesOrderedImagesAndBillsOnce(t *testi
 	require.NoError(t, err)
 	cipher, _ := h.encryptor.Encrypt(string(plain))
 	repo.pending = &service.AsyncImageResultFetch{EncryptedPayload: []byte(cipher), Attempts: map[int]int{}, ExpiresAt: time.Now().Add(time.Hour)}
+	// The result-source snapshot already persisted these audits. A continuation
+	// in the same worker still has the original capture, unlike a restart.
+	attemptCapture := &service.AsyncImageAccountAttemptCapture{}
+	attemptCtx := service.WithAsyncImageAccountAttemptCapture(context.Background(), attemptCapture)
+	for i, status := range []string{service.AsyncImageAccountAttemptSelected, service.AsyncImageAccountAttemptInvoked, service.AsyncImageAccountAttemptSucceeded} {
+		service.RecordAsyncImageAccountAttempt(attemptCtx, service.AsyncImageAccountAttempt{
+			AccountID: account.ID, Status: status,
+			AttemptedAt: time.Date(2026, 10, 30, 5, 31, 30, i, time.UTC),
+		})
+	}
+	repo.task.AccountAttempts, repo.task.AttemptedAccountIDs = service.MergeAsyncImageAccountAttempts(nil, attemptCapture.Attempts())
+	parent := context.Background()
+	if sameWorker {
+		parent = attemptCtx
+	}
 	runtime := service.AsyncImageRuntimeConfig{DownloadMaxBytes: 1 << 20, DownloadMaxPixels: 100, StorageRetryAttempts: 3, BillingRetryAttempts: 3, RetryBackoffSeconds: 1}
-	d, handled := h.resumeAsyncImageResultFetch(context.Background(), repo.task, runtime)
+	d, handled := h.resumeAsyncImageResultFetch(parent, repo.task, runtime)
 	require.True(t, handled)
 	require.True(t, d.requeue, "usage log error must retry persisted billing")
 	require.Equal(t, service.AsyncImageTaskStatusBillingFailed, repo.task.Status)
 	require.Nil(t, repo.pending)
 	require.Equal(t, 1, repo.recordCalls, "ambiguous commit must read back before replaying write")
+	var history []service.AsyncImageAccountAttempt
+	require.NoError(t, json.Unmarshal(repo.task.AccountAttempts, &history))
+	require.Equal(t, attemptCapture.Attempts(), history, "result finalization must not append the saved capture twice")
+	require.JSONEq(t, "[12]", string(repo.task.AttemptedAccountIDs))
 	require.Equal(t, 1, billingRepo.charges)
 	require.Len(t, repo.results, 2)
 	require.Equal(t, "image/png", repo.results[0].ContentType)
@@ -79,4 +109,5 @@ func TestAsyncImageResultFetchRestartCompletesOrderedImagesAndBillsOnce(t *testi
 	require.Equal(t, billingRepo.commands[0], billingRepo.commands[1])
 	require.Equal(t, "client:async-image:asyncimg_restart", billingRepo.commands[0].RequestID)
 	require.Len(t, storage.saved, 2, "billing retries must not upload again")
+	require.Nil(t, h.openAI, "postprocessing must not need a generation gateway")
 }

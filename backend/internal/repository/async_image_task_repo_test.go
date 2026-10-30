@@ -352,7 +352,7 @@ func TestAsyncImageTaskRepositoryRecordUpstreamSuccessClearsRequestPayload(t *te
 	mock.ExpectExec("(?s)INSERT INTO async_image_staging_objects .*VALUES \\(\\$1, \\$2, \\$3, \\$4, \\$5, \\$6, \\$7, \\$8, \\$9\\)").
 		WithArgs("asyncimg_success", 0, []byte("image-bytes"), "image/png", int64(11), "checksum", nil, nil, expiresAt).
 		WillReturnResult(sqlmock.NewResult(1, 1))
-	mock.ExpectQuery("(?s)UPDATE async_image_tasks SET.*billing_payload = \\$8::jsonb,\\s*upstream_succeeded_at = \\$9,.*error_code = NULL,\\s*error_message = NULL,\\s*request_payload = ''::bytea,\\s*version = version \\+ 1.*WHERE task_id = \\$1 AND version = \\$10.*RETURNING").
+	mock.ExpectQuery("(?s)UPDATE async_image_tasks SET.*billing_payload = \\$8::jsonb,\\s*upstream_succeeded_at = COALESCE\\(upstream_succeeded_at, \\$9::timestamptz\\),.*error_code = NULL,\\s*error_message = NULL,\\s*request_payload = ''::bytea,\\s*version = version \\+ 1.*WHERE task_id = \\$1 AND version = \\$10.*RETURNING").
 		WillReturnRows(asyncImageTaskRowsWithPayload(now, "asyncimg_success", "hash-success", service.AsyncImageTaskStatusUpstreamSucceeded, []byte{}))
 	mock.ExpectExec("(?s)INSERT INTO async_image_events").
 		WillReturnResult(sqlmock.NewResult(1, 1))

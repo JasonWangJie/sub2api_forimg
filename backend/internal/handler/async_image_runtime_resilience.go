@@ -99,7 +99,7 @@ func asyncImageRemainingUpstreamAttempts(task *service.AsyncImageTask) int {
 	var attempts []service.AsyncImageAccountAttempt
 	_ = json.Unmarshal(task.AccountAttempts, &attempts)
 	started, selectedSegment := 0, false
-	for _, a := range attempts {
+	for _, a := range service.DeduplicateAsyncImageAccountAttempts(attempts) {
 		if a.Status == service.AsyncImageAccountAttemptSelected {
 			if selectedSegment {
 				started++

@@ -175,6 +175,91 @@ describe('AsyncImageTasksView current-page termination', () => {
     expect(wrapper.findComponent(AsyncImageReliabilitySummary).exists()).toBe(false)
   })
 
+  it.each([
+    { name: 'one successful request', status: 'succeeded', statuses: ['selected', 'invocation_started', 'succeeded'], calls: '1' },
+    { name: 'a genuine same-account retry', status: 'succeeded', statuses: ['selected', 'invocation_started', 'failed', 'invocation_started', 'succeeded'], calls: '2' },
+    { name: 'legacy audits without HTTP-start markers', status: 'succeeded', statuses: ['selected', 'succeeded'], calls: '-' },
+    { name: 'an empty queued task', status: 'queued', statuses: [], calls: '0' },
+    { name: 'an executed legacy task without audits', status: 'succeeded', statuses: [], calls: '-' },
+    { name: 'a requeued legacy task with account audits', status: 'queued', statuses: ['selected', 'failed'], calls: '-' },
+  ])('distinguishes audit records, accounts, and generation requests for $name', async ({ status, statuses, calls }) => {
+    mocks.get.mockResolvedValue({
+      id: 'asyncimg_queued',
+      task_id: 'asyncimg_queued',
+      platform: 'openai',
+      request_type: 'text_to_image',
+      model: 'gpt-image-2',
+      status,
+      account_attempt_count: statuses.length ? 1 : 0,
+      attempted_account_ids: statuses.length ? [26] : [],
+      account_attempts: statuses.map((attemptStatus, index) => ({
+        account_id: 26,
+        status: attemptStatus,
+        attempted_at: `2026-10-30T05:31:${String(index).padStart(2, '0')}Z`,
+      })),
+      created_at: '2026-10-30T05:30:00Z',
+      results: [],
+      events: [],
+    })
+
+    const wrapper = mountView(true)
+    await flushPromises()
+    await wrapper.findAll('[data-test="view-task"]')[0].trigger('click')
+    await flushPromises()
+
+    const detail = wrapper.get('[data-test="detail-dialog"]')
+    function detailValue(label: string): string | undefined {
+      return detail.findAll('dt').find((node) => node.text() === `asyncImageTasks.detail.${label}`)
+        ?.element.parentElement?.querySelector('dd')?.textContent || undefined
+    }
+    expect(detailValue('accountAttemptCount')).toBe(statuses.length ? '1' : '0')
+    expect(detailValue('generationRequestCount')).toBe(calls)
+    const history = detail.find('details summary')
+    if (statuses.length) {
+      expect(history.text()).toContain(`asyncImageTasks.detail.accountAttemptHistory:${statuses.length}`)
+      expect(detail.findAll('tbody tr')).toHaveLength(statuses.length)
+    } else {
+      expect(history.exists()).toBe(false)
+    }
+    const startedBadge = detail.findAll('tbody span').find((node) => node.text() === 'asyncImageTasks.accountAttemptStatus.invocation_started')
+    if (statuses.includes('invocation_started')) {
+      expect(startedBadge?.classes()).toContain('text-amber-700')
+      expect(startedBadge?.classes()).not.toContain('text-rose-700')
+    }
+    wrapper.unmount()
+  })
+
+  it('keeps result-fetch timeline labels and uses progress or success colors', async () => {
+    mocks.get.mockResolvedValue({
+      id: 'asyncimg_queued',
+      task_id: 'asyncimg_queued',
+      platform: 'openai',
+      request_type: 'text_to_image',
+      model: 'gpt-image-2',
+      status: 'succeeded',
+      created_at: '2026-10-30T05:30:00Z',
+      results: [],
+      events: ['result_fetch_pending', 'result_fetch_attempt', 'result_fetch_completed'].map((status, index) => ({
+        id: index,
+        status,
+        created_at: `2026-10-30T05:31:0${index}Z`,
+      })),
+    })
+    const wrapper = mountView(true)
+    await flushPromises()
+    await wrapper.findAll('[data-test="view-task"]')[0].trigger('click')
+    await flushPromises()
+
+    const timeline = wrapper.get('[data-test="detail-dialog"] ol')
+    expect(timeline.text()).toContain('asyncImageTasks.status.result_fetch_pending')
+    expect(timeline.text()).not.toContain('asyncImageTasks.status.upstream_succeeded')
+    const events = timeline.findAll('li')
+    expect(events[0].find('.rounded-full').classes()).toContain('bg-amber-500')
+    expect(events[1].find('.rounded-full').classes()).toContain('bg-amber-500')
+    expect(events[2].find('.rounded-full').classes()).toContain('bg-emerald-500')
+    wrapper.unmount()
+  })
+
   it('shows persisted reference image URLs only in the admin detail, copies on link click, and opens via the icon', async () => {
     const writeText = vi.fn().mockResolvedValue(undefined)
     Object.defineProperty(navigator, 'clipboard', {

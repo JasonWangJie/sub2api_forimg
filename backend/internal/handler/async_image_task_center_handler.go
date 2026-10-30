@@ -511,9 +511,24 @@ func (h *AsyncImageTaskCenterHandler) detailView(ctx context.Context, details *s
 	}
 	events := make([]asyncImageTaskEventView, 0, len(details.Events))
 	displayStatus := asyncImageTaskDisplayStatus(details.Task)
+	hasResultFetchCompletion := false
 	for _, event := range details.Events {
+		if event.EventType == "result_fetch_completed" {
+			hasResultFetchCompletion = true
+			break
+		}
+	}
+	for _, event := range details.Events {
+		// Legacy result recovery wrote a second success event when the already
+		// successful task's images and billing command became durable. The fetch
+		// completion describes that step without implying another upstream call.
+		if hasResultFetchCompletion && event.EventType == "upstream_succeeded" &&
+			event.FromStatus != nil && *event.FromStatus == service.AsyncImageTaskStatusUpstreamSucceeded &&
+			event.ToStatus != nil && *event.ToStatus == service.AsyncImageTaskStatusUpstreamSucceeded {
+			continue
+		}
 		status := event.EventType
-		if event.ToStatus != nil && strings.TrimSpace(*event.ToStatus) != "" {
+		if event.EventType != "result_fetch_pending" && event.ToStatus != nil && strings.TrimSpace(*event.ToStatus) != "" {
 			status = *event.ToStatus
 		}
 		// invocation_started records the internal execution lock. Until account
@@ -611,6 +626,7 @@ func asyncImageAccountAuditView(task *service.AsyncImageTask) (*int, []int64, []
 	if len(task.AccountAttempts) > 0 && json.Valid(task.AccountAttempts) {
 		_ = json.Unmarshal(task.AccountAttempts, &attempts)
 	}
+	attempts = service.DeduplicateAsyncImageAccountAttempts(attempts)
 
 	ids := make([]int64, 0)
 	seenIDs := make(map[int64]struct{})
@@ -662,7 +678,7 @@ func asyncImageAccountAuditView(task *service.AsyncImageTask) (*int, []int64, []
 	if lastFailure != "" {
 		lastFailurePtr = &lastFailure
 	}
-	count := len(attempts)
+	count := len(ids)
 	reconciliationStatus := strings.TrimSpace(task.ReconciliationStatus)
 	if reconciliationStatus == "" {
 		reconciliationStatus = "none"

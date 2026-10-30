@@ -419,6 +419,120 @@ func TestAsyncImageTaskCenterTimelineShowsUnassignedInvocationAsQueued(t *testin
 	require.Equal(t, service.AsyncImageTaskStatusInvoking, *view.Events[0].ToStatus)
 }
 
+func TestAsyncImageTaskCenterTimelineDistinguishesResultFetchStages(t *testing.T) {
+	now := time.Now().UTC()
+	upstream := service.AsyncImageTaskStatusUpstreamSucceeded
+	invoking := service.AsyncImageTaskStatusInvoking
+	queued := service.AsyncImageTaskStatusQueued
+	uploading := service.AsyncImageTaskStatusUploading
+	succeeded := service.AsyncImageTaskStatusSucceeded
+	events := []service.AsyncImageEvent{
+		{ID: 1, EventType: "task_created", ToStatus: &queued, CreatedAt: now},
+		{ID: 2, EventType: "invocation_started", FromStatus: &queued, ToStatus: &invoking, CreatedAt: now},
+		{ID: 3, EventType: "result_fetch_pending", FromStatus: &invoking, ToStatus: &upstream, CreatedAt: now},
+		{ID: 4, EventType: "result_fetch_attempt", CreatedAt: now},
+		{ID: 5, EventType: "result_fetch_retry", CreatedAt: now},
+		{ID: 6, EventType: "upstream_succeeded", FromStatus: &upstream, ToStatus: &upstream, CreatedAt: now},
+		{ID: 7, EventType: "result_fetch_completed", CreatedAt: now},
+		{ID: 8, EventType: "storage_started", FromStatus: &upstream, ToStatus: &uploading, CreatedAt: now},
+		{ID: 9, EventType: "task_succeeded", ToStatus: &succeeded, CreatedAt: now},
+	}
+	task := &service.AsyncImageTask{TaskID: "asyncimg_fetch_timeline", Status: succeeded}
+	h := &AsyncImageTaskCenterHandler{}
+	for _, admin := range []bool{false, true} {
+		t.Run(map[bool]string{false: "user", true: "admin"}[admin], func(t *testing.T) {
+			view, err := h.detailView(context.Background(), &service.AsyncImageTaskDetails{Task: task, Events: events}, admin)
+			require.NoError(t, err)
+			require.Len(t, view.Events, 8)
+			statuses := make([]string, 0, len(view.Events))
+			for _, event := range view.Events {
+				statuses = append(statuses, event.Status)
+				require.NotEqual(t, int64(6), event.ID)
+			}
+			require.Equal(t, []string{queued, invoking, "result_fetch_pending", "result_fetch_attempt", "result_fetch_retry", "result_fetch_completed", uploading, succeeded}, statuses)
+			require.Equal(t, "result_fetch_pending", view.Events[2].EventType)
+			require.Equal(t, upstream, *view.Events[2].ToStatus)
+		})
+	}
+	require.Len(t, events, 9, "presentation must not modify stored history")
+}
+
+func TestAsyncImageTaskCenterTimelineRetainsSuccessWithoutFetchCompletion(t *testing.T) {
+	upstream := service.AsyncImageTaskStatusUpstreamSucceeded
+	invoking := service.AsyncImageTaskStatusInvoking
+	for _, tc := range []struct {
+		name   string
+		from   *string
+		events []service.AsyncImageEvent
+	}{
+		{name: "ordinary_generation", from: &invoking},
+		{name: "legacy_event_without_completion", from: &upstream},
+		{name: "legacy_event_without_from_status"},
+		{name: "ordinary_generation_with_fetch_completion", from: &invoking, events: []service.AsyncImageEvent{{EventType: "result_fetch_completed"}}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			events := append([]service.AsyncImageEvent{{ID: 1, EventType: "upstream_succeeded", FromStatus: tc.from, ToStatus: &upstream}}, tc.events...)
+			h := &AsyncImageTaskCenterHandler{}
+			view, err := h.detailView(context.Background(), &service.AsyncImageTaskDetails{Task: &service.AsyncImageTask{Status: upstream}, Events: events}, false)
+			require.NoError(t, err)
+			require.Len(t, view.Events, len(events))
+			require.Equal(t, int64(1), view.Events[0].ID)
+			require.Equal(t, upstream, view.Events[0].Status)
+		})
+	}
+}
+
+func TestAsyncImageTaskCenterAccountAuditDeduplicatesHistoryAndCountsAccounts(t *testing.T) {
+	now := time.Date(2026, 10, 30, 5, 31, 30, 411942319, time.UTC)
+	selected := service.AsyncImageAccountAttempt{AccountID: 38, Status: service.AsyncImageAccountAttemptSelected, AttemptedAt: now}
+	invoked := service.AsyncImageAccountAttempt{AccountID: 38, Status: service.AsyncImageAccountAttemptInvoked, AttemptedAt: now.Add(time.Nanosecond)}
+	success := service.AsyncImageAccountAttempt{AccountID: 38, Status: service.AsyncImageAccountAttemptSucceeded, UpstreamRequestID: "upstream-one", AttemptedAt: now.Add(time.Second)}
+	retry := invoked
+	retry.AttemptedAt = retry.AttemptedAt.Add(time.Nanosecond)
+	legacy := service.AsyncImageAccountAttempt{AccountID: 26, Status: service.AsyncImageAccountAttemptInvoked}
+	stored, err := json.Marshal([]service.AsyncImageAccountAttempt{selected, invoked, success, selected, invoked, success, retry, legacy, legacy})
+	require.NoError(t, err)
+	task := &service.AsyncImageTask{
+		TaskID: "asyncimg_duplicate_audit", Status: service.AsyncImageTaskStatusSucceeded,
+		AccountAttempts: stored, AttemptedAccountIDs: json.RawMessage(`[38,26,38,0,-1]`),
+	}
+	h := &AsyncImageTaskCenterHandler{tasks: &asyncImageTaskCenterServiceStub{}}
+	detail, err := h.detailView(context.Background(), &service.AsyncImageTaskDetails{Task: task}, true)
+	require.NoError(t, err)
+	require.Equal(t, 2, *detail.Task.AccountAttemptCount)
+	require.Equal(t, []int64{26, 38}, detail.Task.AttemptedAccountIDs)
+	require.Len(t, detail.Task.AccountAttempts, 6)
+	require.Equal(t, []time.Time{selected.AttemptedAt, invoked.AttemptedAt, success.AttemptedAt, retry.AttemptedAt, {}, {}}, []time.Time{
+		detail.Task.AccountAttempts[0].AttemptedAt, detail.Task.AccountAttempts[1].AttemptedAt,
+		detail.Task.AccountAttempts[2].AttemptedAt, detail.Task.AccountAttempts[3].AttemptedAt,
+		detail.Task.AccountAttempts[4].AttemptedAt, detail.Task.AccountAttempts[5].AttemptedAt,
+	})
+
+	list, err := h.listViews(context.Background(), []*service.AsyncImageTask{task}, true)
+	require.NoError(t, err)
+	require.Len(t, list, 1)
+	require.Equal(t, 2, *list[0].AccountAttemptCount)
+	require.Equal(t, detail.Task.AttemptedAccountIDs, list[0].AttemptedAccountIDs)
+	require.Empty(t, list[0].AccountAttempts, "list payloads still omit detailed history")
+	require.Equal(t, json.RawMessage(stored), task.AccountAttempts, "presentation must not rewrite persisted history")
+
+	for _, tc := range []struct {
+		name string
+		task service.AsyncImageTask
+		want int
+	}{
+		{name: "single_account_three_stages", task: service.AsyncImageTask{AccountAttempts: json.RawMessage(`[{"account_id":38,"status":"selected"},{"account_id":38,"status":"invocation_started"},{"account_id":38,"status":"succeeded"}]`)}, want: 1},
+		{name: "ids_without_history", task: service.AsyncImageTask{AttemptedAccountIDs: json.RawMessage(`[38,26,38,0,-1]`)}, want: 2},
+		{name: "invalid_ids", task: service.AsyncImageTask{AccountAttempts: json.RawMessage(`[{"account_id":0,"status":"selected"},{"account_id":-1,"status":"failed"}]`), AttemptedAccountIDs: json.RawMessage(`[0,-1]`)}},
+		{name: "no_history"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			count, _, _, _, _ := asyncImageAccountAuditView(&tc.task)
+			require.Equal(t, tc.want, *count)
+		})
+	}
+}
+
 func TestAsyncImageTaskCenterAccountAuditIsAdminOnlyAndRedacted(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	now := time.Now().UTC()
