@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises, mount } from '@vue/test-utils'
 
 import AsyncImageTasksView from '../AsyncImageTasksView.vue'
+import AsyncImageReliabilitySummary from '../AsyncImageReliabilitySummary.vue'
 
 const mocks = vi.hoisted(() => ({
   list: vi.fn(),
@@ -149,6 +150,8 @@ describe('AsyncImageTasksView current-page termination', () => {
     const wrapper = mountView()
     await flushPromises()
 
+    expect(wrapper.findComponent(AsyncImageReliabilitySummary).exists()).toBe(true)
+
     const action = wrapper.get('[data-test="batch-terminate-current-page"]')
     expect(action.text()).toContain(':2')
     await action.trigger('click')
@@ -164,11 +167,12 @@ describe('AsyncImageTasksView current-page termination', () => {
     expect(wrapper.find('[data-test="confirm"]').exists()).toBe(false)
   })
 
-  it('does not expose the batch action in the user task center', async () => {
+  it('does not expose admin actions or reliability metrics in the user task center', async () => {
     const wrapper = mountView(false)
     await flushPromises()
 
     expect(wrapper.find('[data-test="batch-terminate-current-page"]').exists()).toBe(false)
+    expect(wrapper.findComponent(AsyncImageReliabilitySummary).exists()).toBe(false)
   })
 
   it('shows persisted reference image URLs only in the admin detail, copies on link click, and opens via the icon', async () => {

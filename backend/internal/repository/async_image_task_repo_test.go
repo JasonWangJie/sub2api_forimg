@@ -412,6 +412,40 @@ func TestAsyncImageTaskRepositoryRecoverableQueryEnforcesRetryCaps(t *testing.T)
 	require.NoError(t, mock.ExpectationsWereMet())
 }
 
+func TestAsyncImageTaskRepositoryRecoverableQueryUnlimitedAndWideRetryCaps(t *testing.T) {
+	for _, tc := range []struct {
+		name                     string
+		storage, billing         int
+		wantStorage, wantBilling int
+	}{
+		{name: "zero means unlimited", storage: 0, billing: 0, wantStorage: 0, wantBilling: 0},
+		{name: "negative remains unlimited", storage: -1, billing: -20, wantStorage: 0, wantBilling: 0},
+		{name: "storage cap only", storage: 5, billing: 0, wantStorage: 5, wantBilling: 0},
+		{name: "billing cap only", storage: -1, billing: 10, wantStorage: 0, wantBilling: 10},
+		{name: "platform maximum remains a cap", storage: int(^uint(0) >> 1), billing: int(^uint(0) >> 1), wantStorage: int(^uint(0) >> 1), wantBilling: int(^uint(0) >> 1)},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			db, mock, err := sqlmock.New()
+			require.NoError(t, err)
+			defer func() { _ = db.Close() }()
+
+			before := time.Now().UTC()
+			// The explicit unlimited guards and bigint parameter types are
+			// required: PostgreSQL otherwise infers int4 from the retry columns.
+			mock.ExpectQuery(`(?s)FROM async_image_tasks.*\$3::bigint <= 0 OR storage_retry_count < \$3::bigint.*\$4::bigint <= 0 OR billing_retry_count < \$4::bigint.*LIMIT \$5`).
+				WithArgs(sqlmock.AnyArg(), before, tc.wantStorage, tc.wantBilling, 20).
+				WillReturnRows(sqlmock.NewRows([]string{"id"}))
+
+			tasks, err := NewAsyncImageTaskRepository(db).ListRecoverableAsyncImageTasks(context.Background(), []string{
+				service.AsyncImageTaskStatusInvoking, service.AsyncImageTaskStatusStorageFailed, service.AsyncImageTaskStatusBillingFailed,
+			}, before, tc.storage, tc.billing, 20)
+			require.NoError(t, err)
+			require.Empty(t, tasks)
+			require.NoError(t, mock.ExpectationsWereMet())
+		})
+	}
+}
+
 func TestAsyncImageTaskRepositoryClaimOutboxUsesSkipLocked(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	require.NoError(t, err)

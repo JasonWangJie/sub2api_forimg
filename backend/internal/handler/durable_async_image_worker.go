@@ -261,6 +261,8 @@ func (h *DurableAsyncImageHandler) recoverAsyncImageTasks(ctx context.Context, c
 				logger.L().Warn("async_image.mark_execution_unknown_failed", zap.String("task_id", task.TaskID), zap.Error(transitionErr))
 			}
 		}
+	} else if ctx.Err() == nil {
+		logger.L().Warn("async_image.stale_invocation_scan_failed", zap.Error(err))
 	}
 
 	recoverable := []string{

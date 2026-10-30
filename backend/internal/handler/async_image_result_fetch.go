@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"bytes"
 	"context"
 	"encoding/base64"
 	"encoding/json"
@@ -12,7 +13,9 @@ import (
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/ctxkey"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
 	"github.com/Wei-Shaw/sub2api/internal/service"
+	"go.uber.org/zap"
 )
 
 const asyncImageResultFetchMaxAttempts = 3 // initial GET plus two retries
@@ -453,8 +456,16 @@ func (h *DurableAsyncImageHandler) resumeAsyncImageResultFetch(parent context.Co
 		out := outputs[index]
 		totalBytes += int64(len(out.Data))
 		w, height := out.Width, out.Height
-		if err = repo.SaveAsyncImageFetchedObject(ctx, service.AsyncImageStagingObject{TaskID: task.TaskID, ImageIndex: index, Content: out.Data, ContentType: out.ContentType, ByteSize: int64(len(out.Data)), Checksum: out.Checksum, Width: &w, Height: &height, ExpiresAt: pending.ExpiresAt}); err != nil {
-			return asyncImageWorkerDisposition{requeue: true, delay: 5 * time.Second}, true
+		object := service.AsyncImageStagingObject{TaskID: task.TaskID, ImageIndex: index, Content: out.Data, ContentType: out.ContentType, ByteSize: int64(len(out.Data)), Checksum: out.Checksum, Width: &w, Height: &height, ExpiresAt: pending.ExpiresAt}
+		if err = h.saveAsyncImageFetchedObjectWithRetry(parent, repo, object, attempt); err != nil {
+			// The GET succeeded. Requeueing here would discard its bytes and
+			// spend another download attempt on a database failure.
+			message := "generated image could not be staged: " + asyncImageSafeError(err) + "; do not regenerate automatically"
+			persistCtx, persistCancel := asyncImageTerminalTransitionContext(parent)
+			h.resultFetchEvent(persistCtx, task.TaskID, "result_staging_failed", index, attempt, message)
+			h.failAsyncImageTask(persistCtx, task, "result_staging_failed", message, false)
+			persistCancel()
+			return asyncImageWorkerDisposition{}, true
 		}
 	}
 	capture := &AsyncImageUsageCapture{}
@@ -489,6 +500,42 @@ func (h *DurableAsyncImageHandler) resumeAsyncImageResultFetch(parent context.Co
 	finalCtx = context.WithValue(finalCtx, asyncImageResolvedOutputsKey{}, outputs)
 	finalCtx = context.WithValue(finalCtx, asyncImageResultFinalizeAttemptKey{}, finalAttempt)
 	return h.completeAsyncImageInvocation(parent, finalCtx, task, nil, capture, nil, cfg), true
+}
+
+// Keep completed bytes in memory while retrying persistence, with a fresh
+// bounded context even if downloading used the last of its deadline. The
+// repository's idempotent save also makes an ambiguous write safe to retry.
+func (h *DurableAsyncImageHandler) saveAsyncImageFetchedObjectWithRetry(parent context.Context, repo service.AsyncImageResultFetchRepository, object service.AsyncImageStagingObject, downloadAttempt int) error {
+	ctx, cancel := asyncImageTerminalTransitionContext(parent)
+	defer cancel()
+	var err error
+	for i := 0; i < 3; i++ {
+		err = repo.SaveAsyncImageFetchedObject(ctx, object)
+		if err == nil {
+			return nil
+		}
+		message := asyncImageSafeError(err)
+		logger.L().Warn("async_image.result_staging_save_failed", zap.String("task_id", object.TaskID), zap.Int("image_index", object.ImageIndex), zap.Int("save_attempt", i+1), zap.String("error", message))
+		payload, _ := json.Marshal(map[string]any{"stage": "result_fetch", "image_index": object.ImageIndex, "download_attempt": downloadAttempt, "save_attempt": i + 1, "message": message})
+		_ = h.tasks.Repository().AppendAsyncImageEvent(ctx, service.AsyncImageEvent{TaskID: object.TaskID, EventType: "result_staging_save_failed", Payload: payload})
+		// A COMMIT may have succeeded even when its acknowledgement was lost.
+		// Reconcile the final attempt too, before marking the task failed.
+		if staged, readErr := h.tasks.Repository().ListAsyncImageStagingObjects(ctx, object.TaskID); readErr == nil {
+			for _, saved := range staged {
+				if saved.ImageIndex == object.ImageIndex && saved.Checksum == object.Checksum && saved.ByteSize == object.ByteSize && saved.ContentType == object.ContentType && bytes.Equal(saved.Content, object.Content) && asyncImageStagingDimensionEqual(saved.Width, object.Width) && asyncImageStagingDimensionEqual(saved.Height, object.Height) {
+					return nil
+				}
+			}
+		}
+		if errors.Is(err, service.ErrAsyncImageInvalidTransition) || i == 2 || !waitAsyncImageResultPersist(ctx, i) {
+			break
+		}
+	}
+	return err
+}
+
+func asyncImageStagingDimensionEqual(a, b *int) bool {
+	return (a == nil && b == nil) || (a != nil && b != nil && *a == *b)
 }
 
 func asyncImageFailureEvent(code, message, status string) json.RawMessage {

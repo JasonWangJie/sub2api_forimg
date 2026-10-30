@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"regexp"
 	"testing"
 	"time"
 
@@ -91,5 +92,61 @@ func TestAsyncImageResultFetchCleanupRetainsExpiredActiveRecoveryPhase(t *testin
 	n, err := NewAsyncImageTaskRepository(db).DeleteExpiredAsyncImageStagingObjects(context.Background(), now, 10)
 	require.NoError(t, err)
 	require.EqualValues(t, 2, n)
+	require.NoError(t, mock.ExpectationsWereMet())
+}
+
+func TestSaveAsyncImageFetchedObject(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		rows int64
+		err  error
+	}{
+		{name: "saved", rows: 1},
+		{name: "same object saved again", rows: 1},
+		{name: "ineligible task or conflicting object", rows: 0, err: service.ErrAsyncImageInvalidTransition},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			db, mock, err := sqlmock.New()
+			require.NoError(t, err)
+			defer db.Close()
+			width, height := 2, 3
+			o := service.AsyncImageStagingObject{TaskID: "fetch", ImageIndex: 0, Content: []byte("image"), ContentType: "image/png", ByteSize: 5, Checksum: "sha", Width: &width, Height: &height, ExpiresAt: time.Now().UTC().Add(time.Hour)}
+			mock.ExpectExec(regexp.QuoteMeta(saveAsyncImageFetchedObjectSQL)).
+				WithArgs(o.TaskID, o.ImageIndex, o.Content, o.ContentType, o.ByteSize, o.Checksum, width, height, o.ExpiresAt).
+				WillReturnResult(sqlmock.NewResult(0, tc.rows))
+			err = NewAsyncImageTaskRepository(db).(service.AsyncImageResultFetchRepository).SaveAsyncImageFetchedObject(context.Background(), o)
+			require.ErrorIs(t, err, tc.err)
+			require.NoError(t, mock.ExpectationsWereMet())
+		})
+	}
+}
+
+func TestSaveAsyncImageFetchedObjectPropagatesDatabaseErrors(t *testing.T) {
+	for _, kind := range []string{"execute", "rows affected"} {
+		t.Run(kind, func(t *testing.T) {
+			db, mock, err := sqlmock.New()
+			require.NoError(t, err)
+			defer db.Close()
+			failure := errors.New("temporary database failure")
+			expect := mock.ExpectExec(regexp.QuoteMeta(saveAsyncImageFetchedObjectSQL))
+			if kind == "execute" {
+				expect.WillReturnError(failure)
+			} else {
+				expect.WillReturnResult(sqlmock.NewErrorResult(failure))
+			}
+			o := service.AsyncImageStagingObject{TaskID: "fetch", Content: []byte("image"), ContentType: "image/png", ByteSize: 5, Checksum: "sha", ExpiresAt: time.Now().Add(time.Hour)}
+			err = NewAsyncImageTaskRepository(db).(service.AsyncImageResultFetchRepository).SaveAsyncImageFetchedObject(context.Background(), o)
+			require.ErrorIs(t, err, failure)
+			require.NoError(t, mock.ExpectationsWereMet())
+		})
+	}
+}
+
+func TestSaveAsyncImageFetchedObjectRejectsInvalidObjectBeforeSQL(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	require.NoError(t, err)
+	defer db.Close()
+	err = NewAsyncImageTaskRepository(db).(service.AsyncImageResultFetchRepository).SaveAsyncImageFetchedObject(context.Background(), service.AsyncImageStagingObject{TaskID: "fetch"})
+	require.ErrorIs(t, err, service.ErrAsyncImageInvalidInput)
 	require.NoError(t, mock.ExpectationsWereMet())
 }

@@ -22,11 +22,17 @@ const stats: AsyncImageReliabilityStats = {
 
 describe('Async image reliability summary', () => {
   it('does not invent reliability data for an old API response', () => {
-    expect(mount(AsyncImageReliabilitySummary).find('section').exists()).toBe(false)
+    expect(mount(AsyncImageReliabilitySummary).find('details').exists()).toBe(false)
   })
 
-  it('separates unknown historical measurements, selections, and recovery outcomes', () => {
+  it('starts collapsed and reveals recovery measurements only after opening', async () => {
     const wrapper = mount(AsyncImageReliabilitySummary, { props: { stats } })
+    const disclosure = wrapper.get('details').element as HTMLDetailsElement
+    expect(disclosure.open).toBe(false)
+
+    await wrapper.get('summary').trigger('click')
+    expect(disclosure.open).toBe(true)
+
     const values = wrapper.findAll('dd').map(cell => cell.text())
     expect(values[0]).toBe('—')
     expect(values[1]).toBe('3 / 4 · 75.0%')
@@ -37,5 +43,8 @@ describe('Async image reliability summary', () => {
     expect(values[6]).toBe('1.3 s / 2.0 s')
     expect(values[7]).toBe('—')
     expect(values[11]).toBe('5 / 2 / 3')
+
+    await wrapper.get('summary').trigger('click')
+    expect(disclosure.open).toBe(false)
   })
 })

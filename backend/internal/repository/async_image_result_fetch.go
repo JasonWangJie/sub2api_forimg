@@ -75,13 +75,28 @@ func (r *asyncImageTaskRepository) BeginAsyncImageResultFetchAttempt(ctx context
 	return n, err
 }
 
+// Explicit types are required here: INSERT ... SELECT otherwise infers the
+// repeated task parameter as both text and varchar on PostgreSQL. Locking the
+// eligible task also serializes this write with terminal state transitions.
+const saveAsyncImageFetchedObjectSQL = `INSERT INTO async_image_staging_objects AS saved
+ (task_id,image_index,content,content_type,byte_size,checksum,width,height,expires_at)
+ SELECT $1::varchar,$2::integer,$3::bytea,$4::varchar,$5::bigint,$6::varchar,$7::integer,$8::integer,$9::timestamptz
+ FROM async_image_tasks AS t
+ WHERE t.task_id=$1::varchar AND t.status IN ('upstream_succeeded','uploading','storage_failed')
+ FOR UPDATE OF t
+ ON CONFLICT(task_id,image_index) DO UPDATE SET checksum=saved.checksum
+ WHERE saved.checksum=EXCLUDED.checksum AND saved.byte_size=EXCLUDED.byte_size AND saved.content=EXCLUDED.content
+ AND saved.content_type=EXCLUDED.content_type
+ AND saved.width IS NOT DISTINCT FROM EXCLUDED.width AND saved.height IS NOT DISTINCT FROM EXCLUDED.height`
+
 func (r *asyncImageTaskRepository) SaveAsyncImageFetchedObject(ctx context.Context, o service.AsyncImageStagingObject) error {
 	if err := validateAsyncImageStagingObjects(o.TaskID, []service.AsyncImageStagingObject{o}); err != nil {
 		return err
 	}
-	result, err := r.sql.ExecContext(ctx, `INSERT INTO async_image_staging_objects(task_id,image_index,content,content_type,byte_size,checksum,width,height,expires_at)
- SELECT $1,$2,$3,$4,$5,$6,$7,$8,$9 WHERE EXISTS(SELECT 1 FROM async_image_tasks WHERE task_id=$1 AND status IN ('upstream_succeeded','uploading','storage_failed'))
- ON CONFLICT(task_id,image_index) DO NOTHING`, o.TaskID, o.ImageIndex, o.Content, o.ContentType, o.ByteSize, o.Checksum, o.Width, o.Height, o.ExpiresAt)
+	// A repeated save after an ambiguous database result succeeds for the same
+	// validated object. The no-op conflict action preserves its bytes and TTL;
+	// an attempt to replace an existing image remains an invalid transition.
+	result, err := r.sql.ExecContext(ctx, saveAsyncImageFetchedObjectSQL, o.TaskID, o.ImageIndex, o.Content, o.ContentType, o.ByteSize, o.Checksum, o.Width, o.Height, o.ExpiresAt)
 	if err != nil {
 		return err
 	}

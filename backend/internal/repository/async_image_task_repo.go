@@ -316,17 +316,20 @@ func (r *asyncImageTaskRepository) ListRecoverableAsyncImageTasks(
 	if limit <= 0 || limit > 1000 {
 		limit = 100
 	}
-	if storageRetryLimit <= 0 {
-		storageRetryLimit = int(^uint(0) >> 1)
+	// Zero means no retry cap, including the legacy negative-limit input.
+	// Keep this explicit in SQL instead of passing a platform-sized MaxInt to
+	// PostgreSQL's INTEGER retry counters.
+	if storageRetryLimit < 0 {
+		storageRetryLimit = 0
 	}
-	if billingRetryLimit <= 0 {
-		billingRetryLimit = int(^uint(0) >> 1)
+	if billingRetryLimit < 0 {
+		billingRetryLimit = 0
 	}
 	rows, err := r.sql.QueryContext(ctx, `SELECT `+asyncImageTaskSummaryColumns+`
 FROM async_image_tasks
 WHERE status = ANY($1) AND updated_at <= $2
-	AND (status <> 'storage_failed' OR storage_retry_count < $3)
-	AND (status <> 'billing_failed' OR billing_retry_count < $4)
+	AND (status <> 'storage_failed' OR $3::bigint <= 0 OR storage_retry_count < $3::bigint)
+	AND (status <> 'billing_failed' OR $4::bigint <= 0 OR billing_retry_count < $4::bigint)
 ORDER BY updated_at, id
 LIMIT $5`, pq.Array(statuses), updatedBefore, storageRetryLimit, billingRetryLimit, limit)
 	if err != nil {

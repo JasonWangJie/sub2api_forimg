@@ -56,7 +56,7 @@
             </button>
           </div>
         </div>
-        <AsyncImageReliabilitySummary :stats="stats.reliability" />
+        <AsyncImageReliabilitySummary v-if="admin" :stats="stats.reliability" />
       </template>
 
       <template #filters>
