@@ -422,7 +422,7 @@
           </dl>
         </section>
 
-        <section v-if="admin && (detail.account_attempt_count !== undefined || detail.reconciliation_status)">
+        <section v-if="admin && (detail.account_attempt_count !== undefined || detail.account_attempts?.length || detail.reconciliation_status)">
           <div class="flex flex-wrap items-end justify-between gap-2">
             <h4 class="section-title">{{ t('asyncImageTasks.detail.accountAudit') }}</h4>
             <span :class="reconciliationBadgeClass(detail.reconciliation_status)">
@@ -431,50 +431,13 @@
           </div>
           <dl class="mt-3 grid grid-cols-1 gap-x-8 gap-y-3 sm:grid-cols-2 lg:grid-cols-4">
             <DetailRow :label="t('asyncImageTasks.detail.accountAttemptCount')" :value="String(detail.account_attempt_count ?? 0)" />
-            <DetailRow :label="t('asyncImageTasks.detail.generationRequestCount')" :value="String(generationRequestCount ?? '-')" />
+            <DetailRow :label="t('asyncImageTasks.detail.generationRequestCount')" :value="generationRequestCount === null ? t('asyncImageTasks.attemptHistory.unknownCount') : String(generationRequestCount)" />
+            <DetailRow :label="t('asyncImageTasks.detail.completedImageCount')" :value="String(resultCount(detail))" />
             <DetailRow :label="t('asyncImageTasks.detail.reconciliationStatus')" :value="reconciliationLabel(detail.reconciliation_status)" />
             <DetailRow v-if="detail.last_failure_reason" :label="t('asyncImageTasks.detail.lastFailureReason')" :value="detail.last_failure_reason" />
           </dl>
 
-          <details v-if="detail.account_attempts?.length" class="mt-4 rounded-md border border-gray-200 bg-gray-50/70 dark:border-dark-700 dark:bg-dark-900/60">
-            <summary class="cursor-pointer list-none px-4 py-3 text-sm font-medium text-gray-700 outline-none focus-visible:ring-2 focus-visible:ring-primary-500 dark:text-gray-200">
-              <span class="inline-flex items-center gap-2">
-                <Icon name="chevronDown" size="sm" />
-                {{ t('asyncImageTasks.detail.accountAttemptHistory', { count: detail.account_attempts.length }) }}
-              </span>
-            </summary>
-            <div class="overflow-x-auto border-t border-gray-200 dark:border-dark-700">
-              <table class="min-w-full text-left text-xs">
-                <thead class="bg-white text-[11px] uppercase text-gray-400 dark:bg-dark-800">
-                  <tr>
-                    <th class="whitespace-nowrap px-4 py-2 font-medium">{{ t('asyncImageTasks.detail.attemptedAt') }}</th>
-                    <th class="whitespace-nowrap px-4 py-2 font-medium">{{ t('asyncImageTasks.detail.attemptStatus') }}</th>
-                    <th class="whitespace-nowrap px-4 py-2 font-medium">{{ t('asyncImageTasks.detail.httpStatus') }}</th>
-                    <th class="whitespace-nowrap px-4 py-2 font-medium">{{ t('asyncImageTasks.detail.providerErrorCode') }}</th>
-                    <th class="whitespace-nowrap px-4 py-2 font-medium">{{ t('asyncImageTasks.detail.account') }}</th>
-                    <th class="whitespace-nowrap px-4 py-2 font-medium">{{ t('asyncImageTasks.detail.upstreamRequestId') }}</th>
-                    <th class="min-w-[220px] px-4 py-2 font-medium">{{ t('asyncImageTasks.detail.failureReason') }}</th>
-                  </tr>
-                </thead>
-                <tbody class="divide-y divide-gray-200 dark:divide-dark-700">
-                  <tr v-for="(attempt, index) in detail.account_attempts" :key="`${attempt.account_id}-${attempt.attempted_at}-${index}`">
-                    <td class="whitespace-nowrap px-4 py-3 text-gray-500 dark:text-gray-400">{{ formatTime(attempt.attempted_at) }}</td>
-                    <td class="whitespace-nowrap px-4 py-3">
-                      <span :class="statusBadgeClass(attempt.status)">{{ attemptStatusLabel(attempt.status) }}</span>
-                    </td>
-                    <td class="whitespace-nowrap px-4 py-3 font-mono text-gray-600 dark:text-gray-300">{{ attempt.status_code ?? '-' }}</td>
-                    <td class="max-w-[180px] break-all px-4 py-3 font-mono text-[11px] text-gray-600 dark:text-gray-300">{{ attempt.provider_error_code || '-' }}</td>
-                    <td class="max-w-[180px] px-4 py-3 text-gray-700 dark:text-gray-200">
-                      <div class="truncate" :title="attempt.account_name || idFallback(attempt.account_id)">{{ attempt.account_name || idFallback(attempt.account_id) }}</div>
-                      <div class="mt-0.5 font-mono text-[11px] text-gray-400">#{{ attempt.account_id }}</div>
-                    </td>
-                    <td class="max-w-[220px] px-4 py-3 font-mono text-[11px] text-gray-600 break-all dark:text-gray-300">{{ attempt.upstream_request_id || '-' }}</td>
-                    <td class="max-w-[320px] break-words px-4 py-3 text-gray-500 dark:text-gray-400">{{ attempt.error || '-' }}</td>
-                  </tr>
-                </tbody>
-              </table>
-            </div>
-          </details>
+          <AsyncImageAttemptHistory :attempts="detail.account_attempts || []" />
         </section>
 
         <section v-if="detail.error_message" class="rounded-md border border-rose-200 bg-rose-50 p-4 dark:border-rose-900/60 dark:bg-rose-950/30">
@@ -582,6 +545,7 @@
 
 <script setup lang="ts">
 import AsyncImageReliabilitySummary from './AsyncImageReliabilitySummary.vue'
+import AsyncImageAttemptHistory from './AsyncImageAttemptHistory.vue'
 import { computed, defineComponent, h, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 
@@ -606,6 +570,7 @@ import { sanitizeUrl } from '@/utils/url'
 
 import asyncImageTasksAPI from './api'
 import { defaultAsyncImageTaskDateFilters } from './dateFilters'
+import { countGenerationRequests } from './attemptHistory'
 import type {
   AsyncImageTask,
   AsyncImageTaskEvent,
@@ -682,12 +647,7 @@ const successfulAuditStatuses = new Set(['succeeded', 'result_fetch_completed', 
 
 const generationRequestCount = computed<number | null>(() => {
   if (!detail.value) return null
-  const attempts = detail.value.account_attempts || []
-  // The backend returns deduplicated audits; only HTTP-start records count as calls.
-  const calls = attempts.filter((attempt) => attempt.status === 'invocation_started').length
-  if (calls > 0) return calls
-  // Historical tasks may predate HTTP-start auditing, so missing markers are unknown.
-  return detail.value.status === 'queued' && attempts.length === 0 ? 0 : null
+  return countGenerationRequests(detail.value.account_attempts || [], detail.value.status)
 })
 
 const activeTaskCount = computed(() => stats.value.active)
@@ -805,11 +765,6 @@ function requestTypeLabel(value: string): string {
 function statusLabel(value: string): string {
   const key = `asyncImageTasks.status.${value}`
   return te(key) ? t(key) : value || '-'
-}
-
-function attemptStatusLabel(value: string): string {
-  const key = `asyncImageTasks.accountAttemptStatus.${value}`
-  return te(key) ? t(key) : statusLabel(value)
 }
 
 function reconciliationLabel(value?: string | null): string {

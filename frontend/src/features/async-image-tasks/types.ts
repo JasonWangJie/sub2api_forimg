@@ -42,6 +42,8 @@ export interface AsyncImageTaskEvent {
 }
 
 export interface AsyncImageAccountAttempt {
+  attempt_id?: string | null
+  event_id?: string | null
   account_id: number
   account_name?: string | null
   status: string
@@ -49,6 +51,7 @@ export interface AsyncImageAccountAttempt {
   provider_error_code?: string | null
   upstream_request_id?: string | null
   error?: string | null
+  failure_reason?: string | null
   attempted_at: string
 }
 

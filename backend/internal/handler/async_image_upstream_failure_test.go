@@ -15,6 +15,24 @@ import (
 
 const referenceBudgetTestMessage = "Reference image download exceeded its total time budget for https://cdn.example/input.png (budgetMs=35000; reason=timeout)"
 
+func TestAsyncImageReferenceFetchFailureKeepsCompletedAttemptIdentity(t *testing.T) {
+	capture := &service.AsyncImageAccountAttemptCapture{}
+	ctx := service.WithAsyncImageAccountAttemptCapture(context.Background(), capture)
+	for _, status := range []string{service.AsyncImageAccountAttemptSelected, service.AsyncImageAccountAttemptInvoked, service.AsyncImageAccountAttemptSucceeded} {
+		service.RecordAsyncImageAccountAttempt(ctx, service.AsyncImageAccountAttempt{AccountID: 7, Status: status})
+	}
+	recordAsyncImageReferenceFetchFailure(ctx, referenceBudgetTestMessage)
+	history := capture.Attempts()
+	require.Len(t, history, 4)
+	for _, phase := range history[1:] {
+		require.Equal(t, history[0].AttemptID, phase.AttemptID, "a later fetch diagnostic must not imply another generation call")
+	}
+	require.Equal(t, service.AsyncImageAccountAttemptFailed, history[3].Status)
+	require.NotEqual(t, history[2].EventID, history[3].EventID)
+	recordAsyncImageReferenceFetchFailure(ctx, referenceBudgetTestMessage)
+	require.Equal(t, history, capture.Attempts(), "the existing helper still avoids adding the same failure twice")
+}
+
 func TestAsyncImageUpstreamFailureTransitions(t *testing.T) {
 	for _, tt := range []struct {
 		name, message, marker, wantStatus, wantEvent string

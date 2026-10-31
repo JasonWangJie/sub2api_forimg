@@ -428,11 +428,14 @@ type asyncImageTaskCenterView struct {
 }
 
 type asyncImageAccountAttemptView struct {
+	EventID           string    `json:"event_id,omitempty"`
+	AttemptID         string    `json:"attempt_id,omitempty"`
 	AccountID         int64     `json:"account_id"`
 	AccountName       string    `json:"account_name,omitempty"`
 	Status            string    `json:"status"`
 	StatusCode        int       `json:"status_code,omitempty"`
 	ProviderErrorCode string    `json:"provider_error_code,omitempty"`
+	FailureReason     string    `json:"failure_reason,omitempty"`
 	UpstreamRequestID string    `json:"upstream_request_id,omitempty"`
 	Error             string    `json:"error,omitempty"`
 	AttemptedAt       time.Time `json:"attempted_at"`
@@ -654,12 +657,16 @@ func asyncImageAccountAuditView(task *service.AsyncImageTask) (*int, []int64, []
 	lastFailure := ""
 	for _, attempt := range attempts {
 		attemptView := asyncImageAccountAttemptView{
+			EventID: attempt.EventID, AttemptID: attempt.AttemptID,
 			AccountID: attempt.AccountID, AccountName: strings.TrimSpace(attempt.AccountName),
 			Status: strings.TrimSpace(attempt.Status), StatusCode: attempt.StatusCode,
 			UpstreamRequestID: strings.TrimSpace(attempt.UpstreamRequestID), AttemptedAt: attempt.AttemptedAt,
 		}
 		if safeProviderCode := redactAsyncImageTaskText(&attempt.ProviderErrorCode); safeProviderCode != nil {
 			attemptView.ProviderErrorCode = truncateAsyncImageTaskText(*safeProviderCode, 64)
+		}
+		if safeFailureReason := redactAsyncImageTaskText(&attempt.FailureReason); safeFailureReason != nil {
+			attemptView.FailureReason = truncateAsyncImageTaskText(*safeFailureReason, 128)
 		}
 		if safeError := redactAsyncImageTaskText(&attempt.Error); safeError != nil {
 			attemptView.Error = *safeError

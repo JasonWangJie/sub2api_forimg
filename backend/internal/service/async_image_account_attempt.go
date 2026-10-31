@@ -14,6 +14,7 @@ import (
 // account selected while executing an asynchronous image task.
 type AsyncImageAccountAttempt struct {
 	EventID           string    `json:"event_id,omitempty"`
+	AttemptID         string    `json:"attempt_id,omitempty"`
 	AccountID         int64     `json:"account_id"`
 	AccountName       string    `json:"account_name,omitempty"`
 	Status            string    `json:"status"`
@@ -200,7 +201,56 @@ func AsyncImageAccountAttemptTimeout(ctx context.Context) (time.Duration, bool) 
 type AsyncImageAccountAttemptCapture struct {
 	mu       sync.RWMutex
 	attempts []AsyncImageAccountAttempt
+	current  map[int64]asyncImageAccountAttemptState
 	persist  func(context.Context, AsyncImageAccountAttempt)
+}
+
+// One account selection can fail before sending, or issue multiple HTTP calls
+// inside the gateway. Keep the correlation separate from each event's identity.
+// Gateway calls for a single account are sequential within a worker capture.
+type asyncImageAccountAttemptState struct {
+	id       string
+	selected bool
+	invoked  bool
+	finished bool
+}
+
+func (c *AsyncImageAccountAttemptCapture) correlateAttempt(attempt *AsyncImageAccountAttempt) {
+	if c.current == nil {
+		c.current = make(map[int64]asyncImageAccountAttemptState)
+	}
+	state := c.current[attempt.AccountID]
+	if attempt.AttemptID != "" {
+		if state.id != attempt.AttemptID {
+			state = asyncImageAccountAttemptState{id: attempt.AttemptID}
+		}
+	} else {
+		switch attempt.Status {
+		case AsyncImageAccountAttemptSelected:
+			state = asyncImageAccountAttemptState{}
+		case AsyncImageAccountAttemptInvoked:
+			// Only the first send belongs to a still-pending selection. A real
+			// same-account retry must get its own ID even without a new selected.
+			if !state.selected || state.invoked || state.finished {
+				state = asyncImageAccountAttemptState{}
+			}
+		}
+		if state.id == "" {
+			state.id = uuid.NewString()
+		}
+		attempt.AttemptID = state.id
+	}
+	switch attempt.Status {
+	case AsyncImageAccountAttemptSelected:
+		state.selected = true
+	case AsyncImageAccountAttemptInvoked:
+		state.invoked = true
+	case AsyncImageAccountAttemptSucceeded, AsyncImageAccountAttemptFailed:
+		// Retain the identity for later result-processing diagnostics. A failure
+		// appended after upstream success is not another generation request.
+		state.finished = true
+	}
+	c.current[attempt.AccountID] = state
 }
 
 func (c *AsyncImageAccountAttemptCapture) SetPersistor(fn func(context.Context, AsyncImageAccountAttempt)) {
@@ -241,6 +291,7 @@ func RecordAsyncImageAccountAttempt(ctx context.Context, attempt AsyncImageAccou
 		attempt.EventID = uuid.NewString()
 	}
 	capture.mu.Lock()
+	capture.correlateAttempt(&attempt)
 	capture.attempts = append(capture.attempts, attempt)
 	persist := capture.persist
 	capture.mu.Unlock()

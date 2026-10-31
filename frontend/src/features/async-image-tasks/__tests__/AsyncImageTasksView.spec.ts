@@ -178,10 +178,10 @@ describe('AsyncImageTasksView current-page termination', () => {
   it.each([
     { name: 'one successful request', status: 'succeeded', statuses: ['selected', 'invocation_started', 'succeeded'], calls: '1' },
     { name: 'a genuine same-account retry', status: 'succeeded', statuses: ['selected', 'invocation_started', 'failed', 'invocation_started', 'succeeded'], calls: '2' },
-    { name: 'legacy audits without HTTP-start markers', status: 'succeeded', statuses: ['selected', 'succeeded'], calls: '-' },
+    { name: 'legacy audits without HTTP-start markers', status: 'succeeded', statuses: ['selected', 'succeeded'], calls: 'asyncImageTasks.attemptHistory.unknownCount' },
     { name: 'an empty queued task', status: 'queued', statuses: [], calls: '0' },
-    { name: 'an executed legacy task without audits', status: 'succeeded', statuses: [], calls: '-' },
-    { name: 'a requeued legacy task with account audits', status: 'queued', statuses: ['selected', 'failed'], calls: '-' },
+    { name: 'an executed legacy task without audits', status: 'succeeded', statuses: [], calls: 'asyncImageTasks.attemptHistory.unknownCount' },
+    { name: 'a requeued legacy task with account audits', status: 'queued', statuses: ['selected', 'failed'], calls: 'asyncImageTasks.attemptHistory.unknownCount' },
   ])('distinguishes audit records, accounts, and generation requests for $name', async ({ status, statuses, calls }) => {
     mocks.get.mockResolvedValue({
       id: 'asyncimg_queued',
@@ -257,6 +257,49 @@ describe('AsyncImageTasksView current-page termination', () => {
     expect(events[0].find('.rounded-full').classes()).toContain('bg-amber-500')
     expect(events[1].find('.rounded-full').classes()).toContain('bg-amber-500')
     expect(events[2].find('.rounded-full').classes()).toContain('bg-emerald-500')
+    wrapper.unmount()
+  })
+
+  it('separates grouped send attempts, result count, billing status, and final task status', async () => {
+    mocks.get.mockResolvedValue({
+      id: 'asyncimg_queued', platform: 'openai', request_type: 'text_to_image', model: 'gpt-image-2',
+      status: 'storage_failed', billing_status: 'prepared', account_attempt_count: 1,
+      image_count: 3, result_count: 0, results: [], created_at: '2026-10-31T10:00:00Z',
+      account_attempts: ['selected', 'invocation_started', 'succeeded'].map((status, index) => ({
+        account_id: 2, attempt_id: 'one-call', status, attempted_at: `2026-10-31T10:00:0${index}Z`,
+      })),
+    })
+    const wrapper = mountView(true)
+    await flushPromises()
+    await wrapper.findAll('[data-test="view-task"]')[0].trigger('click')
+    await flushPromises()
+    const detail = wrapper.get('[data-test="detail-dialog"]')
+    const value = (label: string) => detail.findAll('dt').find(node => node.text() === `asyncImageTasks.detail.${label}`)?.element.parentElement?.querySelector('dd')?.textContent
+    expect(value('generationRequestCount')).toBe('1')
+    expect(value('completedImageCount')).toBe('0')
+    expect(value('billingStatus')).toBe('prepared')
+    expect(detail.text()).toContain('asyncImageTasks.status.storage_failed')
+    expect(detail.findAll('[data-test="call-attempt"]')).toHaveLength(1)
+    expect(detail.get('[data-test="call-outcome"]').text()).toBe('asyncImageTasks.attemptHistory.outcome.upstream_success')
+    expect(detail.find('[data-test="ungrouped-attempts"]').exists()).toBe(false)
+    wrapper.unmount()
+  })
+
+  it('does not expose attempt IDs or raw routing diagnostics in user detail', async () => {
+    mocks.get.mockResolvedValue({
+      id: 'asyncimg_queued', platform: 'openai', request_type: 'text_to_image', model: 'gpt-image-2', status: 'failed',
+      account_attempt_count: 1, created_at: '2026-10-31T10:00:00Z',
+      account_attempts: [{ account_id: 2, attempt_id: 'admin-call-id', event_id: 'admin-event-id', status: 'failed', error: 'Admin diagnostic', attempted_at: '2026-10-31T10:00:01Z' }],
+    })
+    const wrapper = mountView(false)
+    await flushPromises()
+    await wrapper.findAll('[data-test="view-task"]')[0].trigger('click')
+    await flushPromises()
+    const detail = wrapper.get('[data-test="detail-dialog"]')
+    expect(detail.find('[data-test="attempt-history"]').exists()).toBe(false)
+    expect(detail.text()).not.toContain('admin-call-id')
+    expect(detail.text()).not.toContain('admin-event-id')
+    expect(detail.text()).not.toContain('Admin diagnostic')
     wrapper.unmount()
   })
 

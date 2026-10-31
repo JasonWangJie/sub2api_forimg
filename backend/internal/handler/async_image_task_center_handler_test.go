@@ -542,7 +542,7 @@ func TestAsyncImageTaskCenterAccountAuditIsAdminOnlyAndRedacted(t *testing.T) {
 		UpstreamRequestID:    stringPointerForAsyncImageTaskTest("upstream-task-full"),
 		ReconciliationStatus: "confirmed_failure",
 		AccountAttempts: json.RawMessage(`[
-			{"account_id":8,"account_name":"prod-account","status":"failed","status_code":429,"provider_error_code":"RESOURCE_EXHAUSTED","upstream_request_id":"upstream-attempt-1","error":"{\"authorization\":\"Bearer secret-token\",\"api-key\":\"raw-api-key\"}","attempted_at":"2026-08-25T00:00:00Z"},
+			{"account_id":8,"account_name":"prod-account","attempt_id":"call-one","event_id":"event-one","status":"failed","status_code":429,"provider_error_code":"RESOURCE_EXHAUSTED","failure_reason":"{\"authorization\":\"Bearer reason-secret\"}","upstream_request_id":"upstream-attempt-1","error":"{\"authorization\":\"Bearer secret-token\",\"api-key\":\"raw-api-key\"}","attempted_at":"2026-08-25T00:00:00Z"},
 			{"account_id":9,"account_name":"backup-account","status":"succeeded","status_code":200,"upstream_request_id":"upstream-attempt-2","attempted_at":"2026-08-25T00:00:01Z"}
 		]`),
 		AttemptedAccountIDs: json.RawMessage(`[9,8,8]`),
@@ -570,6 +570,15 @@ func TestAsyncImageTaskCenterAccountAuditIsAdminOnlyAndRedacted(t *testing.T) {
 	require.Contains(t, adminTask["last_failure_reason"], `"authorization":"***"`)
 	require.NotContains(t, adminRecorder.Body.String(), "secret-token")
 	require.NotContains(t, adminRecorder.Body.String(), "raw-api-key")
+	require.NotContains(t, adminRecorder.Body.String(), "reason-secret")
+	audits := adminTask["account_attempts"].([]any)
+	firstAudit := audits[0].(map[string]any)
+	require.Equal(t, "call-one", firstAudit["attempt_id"])
+	require.Equal(t, "event-one", firstAudit["event_id"])
+	require.Equal(t, `{"authorization":"***"}`, firstAudit["failure_reason"])
+	legacyAudit := audits[1].(map[string]any)
+	require.NotContains(t, legacyAudit, "attempt_id", "legacy records keep their unknown call boundaries")
+	require.NotContains(t, legacyAudit, "event_id")
 	require.Contains(t, adminRecorder.Body.String(), "prod-account")
 	require.Contains(t, adminRecorder.Body.String(), "RESOURCE_EXHAUSTED")
 	require.Contains(t, adminRecorder.Body.String(), "upstream-attempt-1")
@@ -592,6 +601,9 @@ func TestAsyncImageTaskCenterAccountAuditIsAdminOnlyAndRedacted(t *testing.T) {
 	require.NotContains(t, userBody, "upstream-task-full")
 	require.NotContains(t, userBody, "prod-account")
 	require.NotContains(t, userBody, "RESOURCE_EXHAUSTED")
+	require.NotContains(t, userBody, "attempt_id")
+	require.NotContains(t, userBody, "event_id")
+	require.NotContains(t, userBody, "failure_reason")
 }
 
 func TestAsyncImageTaskCenterAdminResumeRejectsNonPostProcessingState(t *testing.T) {

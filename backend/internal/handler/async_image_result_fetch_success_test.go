@@ -97,6 +97,12 @@ func testAsyncImageResultFetchCompletesWithAttemptHistory(t *testing.T, sameWork
 	var history []service.AsyncImageAccountAttempt
 	require.NoError(t, json.Unmarshal(repo.task.AccountAttempts, &history))
 	require.Equal(t, attemptCapture.Attempts(), history, "result finalization must not append the saved capture twice")
+	require.Len(t, history, 3)
+	require.NotEmpty(t, history[0].AttemptID)
+	require.Equal(t, history[0].AttemptID, history[1].AttemptID)
+	require.Equal(t, history[0].AttemptID, history[2].AttemptID)
+	require.NotEqual(t, history[0].EventID, history[1].EventID)
+	require.NotEqual(t, history[1].EventID, history[2].EventID)
 	require.JSONEq(t, "[12]", string(repo.task.AttemptedAccountIDs))
 	require.Equal(t, 1, billingRepo.charges)
 	require.Len(t, repo.results, 2)
