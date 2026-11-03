@@ -4,6 +4,8 @@ import (
 	"net/http"
 	"regexp"
 	"strings"
+
+	"github.com/tidwall/gjson"
 )
 
 const (
@@ -15,6 +17,40 @@ const (
 
 func normalizeAsyncImageOperationalMessage(message string) string {
 	return strings.TrimRight(strings.ToLower(strings.Join(strings.Fields(message), " ")), ".。")
+}
+
+// Limit this generic failure to the observed complete provider response.
+func isAsyncImageRequestFailedRejection(status int, providerCode, message string) bool {
+	return status == http.StatusBadRequest && strings.EqualFold(strings.TrimSpace(providerCode), "upstream_error") &&
+		normalizeAsyncImageOperationalMessage(message) == "request failed"
+}
+
+func isAsyncImageRequestFailedRejectionFamily(message string) bool {
+	return strings.Contains(normalizeAsyncImageOperationalMessage(message), "request failed")
+}
+
+// Inspect decoded strings as stop details may contain JSON escapes or newlines.
+func hasAsyncImageTerminalRejectionDetail(value gjson.Result) bool {
+	if value.Type == gjson.String {
+		if isAsyncImageTerminalRejection("", value.Str) {
+			return true
+		}
+		// Some providers wrap another error JSON document inside message.
+		inner := strings.TrimSpace(value.Str)
+		if (strings.HasPrefix(inner, "{") || strings.HasPrefix(inner, "[")) && gjson.Valid(inner) {
+			return hasAsyncImageTerminalRejectionDetail(gjson.Parse(inner))
+		}
+		return false
+	}
+	if !value.IsObject() && !value.IsArray() {
+		return false
+	}
+	terminal := false
+	value.ForEach(func(key, child gjson.Result) bool {
+		terminal = isAsyncImageTerminalRejection("", key.String()) || hasAsyncImageTerminalRejectionDetail(child)
+		return !terminal
+	})
+	return terminal
 }
 
 // IsAsyncImageCapacityRejection accepts the complete provider response, never

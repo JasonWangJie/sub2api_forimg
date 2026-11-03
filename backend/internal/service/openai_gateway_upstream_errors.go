@@ -240,7 +240,7 @@ func isOpenAIAsyncAccountFailover400(message string) bool {
 	if isAsyncImageTerminalRejection("", message) {
 		return false
 	}
-	if isAsyncImageOperationalRejectionFamily(message) {
+	if isAsyncImageOperationalRejectionFamily(message) || isAsyncImageRequestFailedRejectionFamily(message) {
 		return false
 	}
 	lower := strings.ToLower(strings.TrimSpace(message))

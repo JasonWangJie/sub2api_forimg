@@ -30,8 +30,13 @@ func TestAsyncImageRetryableRejectionFourServicePaths(t *testing.T) {
 				"I wasn't able to generate the image due to an error on my side.",
 				"Provider API error: fileData requires a user YouTube reference or a gateway file_id (request id: changing)",
 				"The prompt or input images could not be processed. Adjust the request and try again.",
+				"request failed",
 			} {
-				for _, mode := range []string{"async", "sync", "admin", "stop"} {
+				modes := []string{"async", "sync", "admin", "stop"}
+				if message == "request failed" {
+					modes = append(modes, "hidden detail stop")
+				}
+				for _, mode := range modes {
 					t.Run(platform+"/"+accountType+"/"+message+"/"+mode, func(t *testing.T) {
 						ctx := context.Background()
 						if mode != "sync" {
@@ -43,9 +48,20 @@ func TestAsyncImageRetryableRejectionFourServicePaths(t *testing.T) {
 						if mode == "stop" {
 							text += " Do not automatically regenerate."
 						}
-						errorBody, marshalErr := json.Marshal(map[string]any{"error": map[string]any{
-							"type": "invalid_request_error", "code": "invalid_image_request", "message": text,
-						}})
+						providerCode, errorType := "invalid_image_request", "invalid_request_error"
+						if message == "request failed" {
+							providerCode, errorType = "upstream_error", "upstream_error"
+						}
+						if mode == "hidden detail stop" {
+							errorType = "invalid_request_error"
+						}
+						providerError := map[string]any{
+							"type": errorType, "code": providerCode, "message": text,
+						}
+						if mode == "hidden detail stop" {
+							providerError["details"] = []any{map[string]any{"cause": "Do\nnot\nretry"}}
+						}
+						errorBody, marshalErr := json.Marshal(map[string]any{"error": providerError})
 						require.NoError(t, marshalErr)
 						body := []byte(`{"model":"gpt-image-2","prompt":"draw","size":"1024x1024"}`)
 						path := "/v1/images/generations"
@@ -95,7 +111,7 @@ func TestAsyncImageRetryableRejectionFourServicePaths(t *testing.T) {
 							require.ErrorAs(t, err, &failure)
 							require.True(t, failure.IsAsyncImageRetryableRejection())
 							require.False(t, failure.RetryableOnSameAccount)
-							require.Equal(t, "invalid_image_request", failure.ProviderErrorCode)
+							require.Equal(t, providerCode, failure.ProviderErrorCode)
 							require.Equal(t, "req-rejection", failure.UpstreamRequestID)
 							require.Equal(t, "19", failure.ResponseHeaders.Get("Retry-After"))
 							require.Empty(t, recorder.Body.Bytes())

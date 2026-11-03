@@ -4,6 +4,8 @@ import (
 	"context"
 	"net/http"
 	"strings"
+
+	"github.com/tidwall/gjson"
 )
 
 const (
@@ -47,6 +49,9 @@ func AsyncImageRetryableRejectionKind(status int, providerCode, message string, 
 	}
 	if isAsyncImageTerminalRejection(providerCode, message) {
 		return ""
+	}
+	if isAsyncImageRequestFailedRejection(status, providerCode, message) {
+		return "processing"
 	}
 	if kind := asyncImageOperationalRejectionKind(status, message); kind != "" {
 		return kind
@@ -118,9 +123,15 @@ func newAsyncImageRetryableRejectionForContext(ctx context.Context, status int, 
 		return nil
 	}
 	message, code, requestID := geminiAsyncUpstreamDiagnostics(body, geminiRequestIDFromHeaders(headers))
+	upstreamMessage := extractUpstreamErrorMessage(body)
+	// A generic message can hide an explicit stop or unknown outcome in other
+	// error fields. Keep those responses outside this narrowly added retry rule.
+	if isAsyncImageRequestFailedRejection(status, code, upstreamMessage) && hasAsyncImageTerminalRejectionDetail(gjson.ParseBytes(body)) {
+		return nil
+	}
 	// Classify the original message before diagnostic truncation/redaction can
 	// remove the meaningful suffix of a long provider error.
-	kind := AsyncImageRetryableRejectionKind(status, code, extractUpstreamErrorMessage(body), IsAsyncImageInputReferenceTask(ctx))
+	kind := AsyncImageRetryableRejectionKind(status, code, upstreamMessage, IsAsyncImageInputReferenceTask(ctx))
 	if kind == "" {
 		return nil
 	}
