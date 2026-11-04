@@ -224,6 +224,9 @@ func (h *DurableAsyncImageHandler) submit(c *gin.Context, protocol, expectedPlat
 			err = errors.New("stream must be false for asynchronous image generation")
 		}
 		if err == nil {
+			err = parsed.ValidateAsyncDimensions()
+		}
+		if err == nil {
 			payload.Body = append([]byte(nil), body...)
 			model, prompt, imageCount = parsed.Model, parsed.Prompt, parsed.N
 			requestedSize = service.OpenAIImagesBillingInputSize(parsed)

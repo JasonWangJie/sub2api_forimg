@@ -60,6 +60,109 @@ func TestMapOpenAIImageDimensions(t *testing.T) {
 	require.Error(t, err)
 }
 
+func TestOpenAIImagesGPTImage2FourKPresets(t *testing.T) {
+	for _, tt := range []struct {
+		aspect string
+		want   string
+	}{
+		{"1:1", "2880x2880"},
+		{"3:2", "3504x2336"},
+		{"2:3", "2336x3504"},
+		{"16:9", "3840x2160"},
+		{"9:16", "2160x3840"},
+		{"5:4", "3200x2560"},
+		{"4:5", "2560x3200"},
+		{"4:3", "3264x2448"},
+		{"3:4", "2448x3264"},
+		{"21:9", "3808x1632"},
+		{"9:21", "1632x3808"},
+		{"2:1", "3840x1920"},
+		{"1:2", "1920x3840"},
+		{"", "2880x2880"},
+	} {
+		t.Run("aspect="+tt.aspect, func(t *testing.T) {
+			req := &OpenAIImagesRequest{Model: "gpt-image-2", Resolution: "4K", AspectRatio: tt.aspect}
+			require.NoError(t, normalizeOpenAIImagesDimensions(req))
+			require.NoError(t, req.ValidateAsyncDimensions())
+			require.Equal(t, tt.want, req.Size)
+			require.Equal(t, ImageBillingSize4K, req.SizeTier)
+			require.Equal(t, ImageBillingSize4K, OpenAIImagesBillingInputSize(req))
+		})
+	}
+}
+
+func TestParseOpenAIImagesRequest_ModelScopedFourKAliases(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	svc := &OpenAIGatewayService{}
+	for _, tt := range []struct {
+		model string
+		want  string
+	}{
+		{"gpt-image-2", "3504x2336"},
+		{"gpt-image-2-2026-04-21", "3504x2336"},
+		{"gpt-image-2.5-flare", "3504x2336"},
+		{"gpt-image-2.5-flare-2026-09-08", "3504x2336"},
+		{"gpt-image-2.5-sunburst", "3504x2336"},
+		{"gpt-image-2.5-sunburst-2026-09-08", "3504x2336"},
+		{"", "3504x2336"}, // Omitted model defaults to gpt-image-2.
+		{"gpt-image-1.5", "4096x2304"},
+		{"gpt-image-2-custom", "4096x2304"},
+	} {
+		t.Run("model="+tt.model, func(t *testing.T) {
+			fields := `"prompt":"draw","size":"4K","aspect_ratio":"3:2"`
+			if tt.model != "" {
+				fields = `"model":"` + tt.model + `",` + fields
+			}
+			body := []byte(`{` + fields + `}`)
+			c, _ := gin.CreateTestContext(httptest.NewRecorder())
+			c.Request = httptest.NewRequest(http.MethodPost, "/v1/images/generations", bytes.NewReader(body))
+			c.Request.Header.Set("Content-Type", "application/json")
+
+			parsed, err := svc.ParseOpenAIImagesRequest(c, body)
+			require.NoError(t, err)
+			require.NoError(t, parsed.ValidateAsyncDimensions())
+			require.Equal(t, "3:2", parsed.AspectRatio)
+			rewritten, _, err := rewriteOpenAIImagesDimensions(body, "application/json", parsed)
+			require.NoError(t, err)
+			require.Equal(t, tt.want, gjson.GetBytes(rewritten, "size").String())
+			require.False(t, gjson.GetBytes(rewritten, "aspect_ratio").Exists())
+		})
+	}
+}
+
+func TestOpenAIImagesRequest_ValidateAsyncDimensions(t *testing.T) {
+	for _, tt := range []struct {
+		size       string
+		wantReason string
+	}{
+		{size: ""},
+		{size: "auto"},
+		{size: "3504x2336"},
+		{size: "2160x3840"},
+		{size: "2880x2880"},
+		{size: "1024x640"},
+		{size: "3072x1024"},
+		{size: "4096x2304", wantReason: "longest edge must be at most 3840 pixels"},
+		{size: "3504x2335", wantReason: "both edges must be multiples of 16 pixels"},
+		{size: "3840x1024", wantReason: "short edge must be at most 3:1"},
+		{size: "3840x3840", wantReason: "total pixel count"},
+		{size: "1024x624", wantReason: "total pixel count"},
+		{size: "not-a-size", wantReason: "size must be WIDTHxHEIGHT or auto"},
+	} {
+		t.Run(tt.size, func(t *testing.T) {
+			req := &OpenAIImagesRequest{Model: "gpt-image-2.5-sunburst", Size: tt.size}
+			err := req.ValidateAsyncDimensions()
+			if tt.wantReason == "" {
+				require.NoError(t, err)
+				return
+			}
+			require.ErrorContains(t, err, "unsupported_image_dimensions")
+			require.ErrorContains(t, err, tt.wantReason)
+			require.ErrorContains(t, err, "3504x2336")
+		})
+	}
+}
+
 func TestParseOpenAIImagesRequest_WideAspectRatioKeepsExplicitBillingTier(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	svc := &OpenAIGatewayService{}

@@ -64,6 +64,35 @@ var openAIImageSizeByResolutionAspect = map[string]map[string]string{
 	},
 }
 
+// Each preset is the largest exact ratio with 16-pixel alignment within the
+// GPT Image 2 family's edge and total pixel limits.
+var gptImage2Size4KByAspect = map[string]string{
+	"1:1":  "2880x2880",
+	"3:2":  "3504x2336",
+	"2:3":  "2336x3504",
+	"16:9": "3840x2160",
+	"9:16": "2160x3840",
+	"5:4":  "3200x2560",
+	"4:5":  "2560x3200",
+	"4:3":  "3264x2448",
+	"3:4":  "2448x3264",
+	"21:9": "3808x1632",
+	"9:21": "1632x3808",
+	"2:1":  "3840x1920",
+	"1:2":  "1920x3840",
+}
+
+func usesGPTImage2SizeLimits(model string) bool {
+	switch strings.ToLower(strings.TrimSpace(model)) {
+	case "gpt-image-2", "gpt-image-2-2026-04-21",
+		"gpt-image-2.5-flare", "gpt-image-2.5-flare-2026-09-08",
+		"gpt-image-2.5-sunburst", "gpt-image-2.5-sunburst-2026-09-08":
+		return true
+	default:
+		return false
+	}
+}
+
 func openAIImageWorkbenchResolutions() []string {
 	return []string{"1K", "2K", "4K"}
 }
@@ -120,9 +149,13 @@ func normalizeOpenAIImageWxHSize(raw string) (string, bool) {
 	return fmt.Sprintf("%dx%d", width, height), true
 }
 
-// MapOpenAIImageDimensions converts resolution + aspect_ratio into the upstream
-// OpenAI Images `size` value.
+// MapOpenAIImageDimensions converts resolution + aspect_ratio using the legacy
+// OpenAI Images presets, without model-specific overrides.
 func MapOpenAIImageDimensions(resolution, aspectRatio string) (string, error) {
+	return mapOpenAIImageDimensions("", resolution, aspectRatio)
+}
+
+func mapOpenAIImageDimensions(model, resolution, aspectRatio string) (string, error) {
 	rawResolution := strings.TrimSpace(resolution)
 	rawAspect := strings.TrimSpace(aspectRatio)
 	resolution = normalizeOpenAIImageResolution(rawResolution)
@@ -146,6 +179,9 @@ func MapOpenAIImageDimensions(resolution, aspectRatio string) (string, error) {
 	byRatio, ok := openAIImageSizeByResolutionAspect[resolution]
 	if !ok {
 		return "", fmt.Errorf("unsupported_image_dimensions: unsupported resolution %q", rawResolution)
+	}
+	if resolution == ImageBillingSize4K && usesGPTImage2SizeLimits(model) {
+		byRatio = gptImage2Size4KByAspect
 	}
 	size, ok := byRatio[aspectRatio]
 	if !ok {
@@ -247,7 +283,7 @@ func normalizeOpenAIImagesDimensions(req *OpenAIImagesRequest) error {
 		return fmt.Errorf("unsupported_image_dimensions: resolution is required when aspect_ratio is set")
 	}
 
-	mapped, err := MapOpenAIImageDimensions(req.Resolution, req.AspectRatio)
+	mapped, err := mapOpenAIImageDimensions(req.Model, req.Resolution, req.AspectRatio)
 	if err != nil {
 		return err
 	}
@@ -261,6 +297,31 @@ func normalizeOpenAIImagesDimensions(req *OpenAIImagesRequest) error {
 		req.SizeTier = NormalizeImageBillingTierOrDefault(req.Resolution)
 	}
 	return nil
+}
+
+// ValidateAsyncDimensions checks the resolved size before an async image task
+// is created. Synchronous image requests retain their upstream passthrough.
+func (req *OpenAIImagesRequest) ValidateAsyncDimensions() error {
+	if req == nil || !usesGPTImage2SizeLimits(req.Model) || req.Size == "" || strings.EqualFold(req.Size, "auto") {
+		return nil
+	}
+	width, height, ok := parseImageBillingDimensions(req.Size)
+	var reason string
+	switch {
+	case !ok:
+		reason = "size must be WIDTHxHEIGHT or auto"
+	case max(width, height) > 3840:
+		reason = "the longest edge must be at most 3840 pixels"
+	case width%16 != 0 || height%16 != 0:
+		reason = "both edges must be multiples of 16 pixels"
+	case max(width, height) > 3*min(width, height):
+		reason = "the ratio of the long edge to the short edge must be at most 3:1"
+	case width*height < 655_360 || width*height > 8_294_400:
+		reason = "the total pixel count must be between 655,360 and 8,294,400"
+	default:
+		return nil
+	}
+	return fmt.Errorf("unsupported_image_dimensions: invalid size %q for %s: %s. Use a supported size such as 3504x2336 (3:2), 3840x2160 (16:9), or auto", req.Size, req.Model, reason)
 }
 
 func OpenAIImagesBillingInputSize(req *OpenAIImagesRequest) string {

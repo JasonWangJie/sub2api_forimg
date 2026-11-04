@@ -130,7 +130,9 @@ OpenAI 图生图自动重试：若上游返回 `image_url fetch failed` 且为�
 - `size` 为 `WxH` / `auto` 时按像素尺寸处理。
 - 仅有 `resolution` + `size:"9:16"` 时，等价于 `resolution` + `aspect_ratio:"9:16"`。
 
-`resolution` + `aspect_ratio` → 上游 OpenAI `size`（WxH）映射：
+`gpt-image-2`、`gpt-image-2.5-flare`、`gpt-image-2.5-sunburst` 及其官方日期快照按等比尺寸表解析 4K。异步入口在建任务前检查长边、16 像素对齐、宽高比和总像素。显式尺寸超限返回 HTTP 400 `unsupported_image_dimensions`。见 [GPT Image 4K 比例表](wiki-new/图片渠道错误与换号重试诊断.md#2026-11-05-gpt-image-4k-等比映射本地实现)。
+
+下表为通用 `resolution` + `aspect_ratio` 到上游 OpenAI `size`（WxH）的映射。三个 GPT Image 模型的 4K 档按上面的专用表执行。
 
 | resolution | aspect_ratio | 上游 size |
 |---|---|---|

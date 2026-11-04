@@ -1,5 +1,11 @@
 # Sub2API Fork 二次开发总览
 
+## 2026-11-05 GPT Image 4K 等比尺寸本地实现
+
+- `gpt-image-2`、`gpt-image-2.5-flare`、`gpt-image-2.5-sunburst` 及官方日期快照使用合法的 4K 比例表。3:2 转发 `3504x2336`，16:9 转发 `3840x2160`，1:1 转发 `2880x2880`。两套异步提交在创建任务前拒绝非法尺寸，原 4K 档位用于选号和计费输入。
+- 本地转发代码生成请求后，在原 34 号渠道分别试单。`gpt-image-2` 返回 HTTP 200 和 `3504x2336` 成品。两款 2.5 同名直发收到 404。用户调整后，两款 2.5 经别名映射到 `gpt-image-2`，复测均返回 HTTP 200 和 `3504x2336` 成品。详见 [尺寸表及实测记录](wiki-new/图片渠道错误与换号重试诊断.md#2026-11-05-gpt-image-4k-等比映射本地实现)。
+- Service 和 Handler 的定向及完整单测通过。实际 HEAD=`6f3f05519b05f53f559c9d495c21a06c88996aa4`，`main...origin/main`，完成 describe=`v0.1.173.66-2-g6f3f055-dirty`，源码 VERSION=`0.1.173.66`。本轮未发布，验证与试单范围见 [开发台账](开发台账.md)。
+
 ## 2026-11-04 Gemini 换渠道本地修复与 GPT Image 尺寸建议
 
 - 生产实际运行 `0.1.173.66 / ac2ae0ec542bc590462b44b37fc9755e605127a5` 且 active。指定 Gemini 任务只在 17 号渠道发送一次，收到 HTTP 400 / `INVALID_ARGUMENT` / `Upstream request failed. Please retry later.`，未重试。本地新增精确异步匹配，先试其他合格渠道，池耗尽走现有有限退避；普通坏参数、停止与未知执行不纳入。
