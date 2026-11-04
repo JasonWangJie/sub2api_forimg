@@ -25,6 +25,13 @@ func isAsyncImageRequestFailedRejection(status int, providerCode, message string
 		normalizeAsyncImageOperationalMessage(message) == "request failed"
 }
 
+// Gemini can use INVALID_ARGUMENT for ordinary bad input too. Only the exact
+// upstream rejection warrants retrying the unchanged request on another route.
+func isAsyncGeminiUpstreamRequestFailedRejection(status int, providerCode, message string) bool {
+	return status == http.StatusBadRequest && strings.EqualFold(strings.TrimSpace(providerCode), "INVALID_ARGUMENT") &&
+		normalizeAsyncImageOperationalMessage(message) == "upstream request failed. please retry later"
+}
+
 func isAsyncImageRequestFailedRejectionFamily(message string) bool {
 	return strings.Contains(normalizeAsyncImageOperationalMessage(message), "request failed")
 }

@@ -124,14 +124,21 @@ func newAsyncImageRetryableRejectionForContext(ctx context.Context, status int, 
 	}
 	message, code, requestID := geminiAsyncUpstreamDiagnostics(body, geminiRequestIDFromHeaders(headers))
 	upstreamMessage := extractUpstreamErrorMessage(body)
-	// A generic message can hide an explicit stop or unknown outcome in other
-	// error fields. Keep those responses outside this narrowly added retry rule.
-	if isAsyncImageRequestFailedRejection(status, code, upstreamMessage) && hasAsyncImageTerminalRejectionDetail(gjson.ParseBytes(body)) {
-		return nil
+	requestFailed := isAsyncImageRequestFailedRejection(status, code, upstreamMessage) ||
+		(IsGeminiAsyncImageGeneration(ctx) && isAsyncGeminiUpstreamRequestFailedRejection(status, code, upstreamMessage))
+	var kind string
+	if requestFailed {
+		// Generic messages can hide an explicit stop or unknown outcome in
+		// other error fields. Keep those responses out of this retry rule.
+		if hasAsyncImageTerminalRejectionDetail(gjson.ParseBytes(body)) {
+			return nil
+		}
+		kind = "processing"
+	} else {
+		// Classify the original message before diagnostic truncation/redaction
+		// can remove the meaningful suffix of a long provider error.
+		kind = AsyncImageRetryableRejectionKind(status, code, upstreamMessage, IsAsyncImageInputReferenceTask(ctx))
 	}
-	// Classify the original message before diagnostic truncation/redaction can
-	// remove the meaningful suffix of a long provider error.
-	kind := AsyncImageRetryableRejectionKind(status, code, upstreamMessage, IsAsyncImageInputReferenceTask(ctx))
 	if kind == "" {
 		return nil
 	}

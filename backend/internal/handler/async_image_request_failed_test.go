@@ -89,6 +89,49 @@ func TestAsyncImageRequestFailedSwitchesAccountsAndPreservesRequest(t *testing.T
 	}
 }
 
+func TestAsyncGeminiUpstreamRequestFailedSwitchesBeforeWorkerRetry(t *testing.T) {
+	const message = "Upstream request failed. Please retry later."
+	const body = `{"error":{"code":400,"status":"INVALID_ARGUMENT","message":"Upstream request failed. Please retry later."}}`
+	for _, accounts := range []int{2, 1} {
+		t.Run(fmt.Sprintf("%d accounts", accounts), func(t *testing.T) {
+			h := newReferenceDownloadGatewayHarness(t, service.PlatformGemini, accounts, 3, map[int64]referenceDownloadGatewayFailure{1: {400, message}})
+			h.upstream.rawErrorBodies = map[int64]string{1: body}
+			task := referenceLocalFallbackTask(h.platform, h.model, service.AsyncImageReferenceTransportPassthroughFallbackLocal)
+			cfg := referenceLocalFallbackConfig()
+			cfg.UpstreamTransientMaxRetries = 1
+			repo := &referenceLocalFallbackRepo{&generatedWorkerResultRepo{task: task}}
+			h.worker.tasks = service.NewAsyncImageTaskService(repo)
+			c, response, capture := invokeProviderRejectionGateway(t, h, task, cfg, requestFailedAttemptBudget(16))
+			var failures []service.AsyncImageAccountAttempt
+			for _, attempt := range capture.Attempts() {
+				if attempt.Status == service.AsyncImageAccountAttemptFailed {
+					failures = append(failures, attempt)
+				}
+			}
+			require.Len(t, failures, 1)
+			require.Equal(t, "INVALID_ARGUMENT", failures[0].ProviderErrorCode)
+			require.Equal(t, message, failures[0].Error)
+			require.Equal(t, string(service.AsyncImageRetryableRejectionReason), failures[0].FailureReason)
+			assertReferenceDownloadGatewayRequest(t, h)
+			if accounts == 2 {
+				require.Equal(t, http.StatusOK, response.Code, response.Body.String())
+				require.Equal(t, []int64{1, 2}, h.upstream.calls)
+				require.Zero(t, task.RetryCount)
+				return
+			}
+			require.Equal(t, []int64{1}, h.upstream.calls)
+			require.Equal(t, http.StatusBadRequest, response.Code, response.Body.String())
+			require.Equal(t, service.AsyncImageRetryableRejectionCode, gjson.GetBytes(response.Body.Bytes(), "error.code").String())
+			disposition := h.worker.handleAsyncImageUpstreamFailure(c.Request.Context(), c.Request.Context(), task, cfg, response.Code, response.Body.Bytes(), response.Header())
+			require.True(t, disposition.requeue)
+			require.Greater(t, disposition.delay, time.Duration(0))
+			require.Equal(t, 1, repo.task.UpstreamRetryCount)
+			require.Zero(t, repo.task.ReferenceRetryCount)
+			require.Equal(t, service.AsyncImageReferenceTransportPassthroughFallbackLocal, *repo.task.ReferenceTransport)
+		})
+	}
+}
+
 func TestAsyncImageRequestFailedWorkerRetriesArePersistedAndBounded(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	for _, platform := range []string{service.PlatformGemini, service.PlatformOpenAI} {

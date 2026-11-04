@@ -78,3 +78,33 @@ func TestAsyncImageRequestFailedPreservesDiagnosticsAndStopDetails(t *testing.T)
 	require.Equal(t, "request failed", extractUpstreamErrorMessage(wrapped))
 	require.Nil(t, newAsyncImageRetryableRejectionForContext(ctx, 400, wrapped, headers))
 }
+
+func TestAsyncGeminiUpstreamRequestFailedRequiresExactRejection(t *testing.T) {
+	body := []byte(`{"error":{"code":400,"status":"INVALID_ARGUMENT","message":"Upstream request failed. Please retry later."}}`)
+	headers := http.Header{"X-Request-Id": {"req-sc"}, "Retry-After": {"17"}}
+	openAI := WithAsyncImageAccountAttemptCapture(context.Background(), &AsyncImageAccountAttemptCapture{})
+	gemini := WithGeminiAsyncImageGeneration(openAI)
+	require.Nil(t, newAsyncImageRetryableRejectionForContext(context.Background(), 400, body, headers))
+	require.Nil(t, newAsyncImageRetryableRejectionForContext(openAI, 400, body, headers))
+	require.Nil(t, newAsyncImageRetryableRejectionForContext(gemini, 422, body, headers))
+	failure := newAsyncImageRetryableRejectionForContext(gemini, 400, body, headers)
+	require.NotNil(t, failure)
+	require.True(t, failure.IsAsyncImageRetryableRejection())
+	require.True(t, failure.ShouldRetryNextAccount())
+	require.False(t, failure.RetryableOnSameAccount)
+	require.Equal(t, "INVALID_ARGUMENT", failure.ProviderErrorCode)
+	require.Equal(t, "Upstream request failed. Please retry later.", failure.ProviderErrorMessage)
+	require.Equal(t, "req-sc", failure.UpstreamRequestID)
+	require.Equal(t, "17", failure.ResponseHeaders.Get("Retry-After"))
+	for _, body := range []string{
+		`{"error":{"status":"INVALID_ARGUMENT","message":"Invalid size: expected 1024x1024"}}`,
+		`{"error":{"message":"Upstream request failed. Please retry later."}}`,
+		`{"error":{"status":"FAILED_PRECONDITION","message":"Upstream request failed. Please retry later."}}`,
+		`{"error":{"status":"INVALID_ARGUMENT","message":"Upstream request failed. Please retry later. Invalid request."}}`,
+		`{"error":{"type":"invalid_request_error","status":"INVALID_ARGUMENT","message":"Upstream request failed. Please retry later.","details":[{"cause":"execution_unknown"}]}}`,
+		`{"error":{"status":"INVALID_ARGUMENT","message":"Upstream request failed. Please retry later.","details":"Do\nnot\nretry"}}`,
+	} {
+		require.Nil(t, newAsyncImageRetryableRejectionForContext(gemini, 400, []byte(body), headers), body)
+		require.False(t, isGeminiAsyncAccountFailover400([]byte(body)), body)
+	}
+}
