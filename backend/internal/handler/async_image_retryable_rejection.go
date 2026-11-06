@@ -18,6 +18,9 @@ func asyncImageRetryableRejectionErrorDetails(c *gin.Context, err *service.Upstr
 	if service.AsyncImageAccountAttemptCaptureFromContext(ctx) == nil {
 		return 0, "", "", false
 	}
+	if err.IsAsyncImageOpenAIReferenceURLTimeout() {
+		return err.StatusCode, service.AsyncImageOpenAIReferenceURLTimeoutCode, err.ProviderErrorMessage, true
+	}
 	if !err.IsAsyncImageRetryableRejection() {
 		if !service.AsyncImageProviderRetryPolicyEnabled(ctx) || !err.IsAsyncImageBoundedRetryFailure() {
 			return 0, "", "", false

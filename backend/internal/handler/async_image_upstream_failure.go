@@ -34,6 +34,18 @@ func (h *DurableAsyncImageHandler) handleAsyncImageUpstreamFailure(parent, attem
 		zap.Int("status_code", statusCode),
 		zap.String("message", message),
 	)
+	if statusCode == http.StatusBadRequest &&
+		gjson.GetBytes(body, "error.code").String() == service.AsyncImageOpenAIReferenceURLTimeoutCode {
+		attempts, _ := asyncImageAttemptState(task, attemptCtx)
+		if _, pending := asyncImageOpenAIReferenceRetryAccount(attempts); pending &&
+			task.Platform == service.PlatformOpenAI && canFallbackAsyncImageReferenceLocally(task, cfg) &&
+			time.Now().Before(asyncImageTaskDeadline(task)) &&
+			service.AsyncImageUpstreamAttemptCount(attemptCtx) < asyncImageRemainingUpstreamAttempts(task) {
+			return h.scheduleAsyncImageReferenceRetry(parent, task, cfg, message, retryAfter, true, false)
+		}
+		h.failAsyncImageTask(parent, task, "upstream_failed", message, false)
+		return asyncImageWorkerDisposition{}
+	}
 	if (statusCode == http.StatusBadRequest || statusCode == http.StatusUnprocessableEntity) &&
 		gjson.GetBytes(body, "error.code").String() == service.AsyncImageFixedCapabilityCode {
 		h.failAsyncImageTask(parent, task, "upstream_capability_exhausted", message, false)

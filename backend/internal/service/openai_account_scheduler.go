@@ -2090,22 +2090,41 @@ func (s *OpenAIGatewayService) SelectAccountWithSchedulerForImages(
 	requiredCapability OpenAIImagesCapability,
 	sizeTier ...string,
 ) (*AccountSelectionResult, OpenAIAccountScheduleDecision, error) {
-	tryWithCapabilityFallback := func(selectCtx context.Context) (*AccountSelectionResult, OpenAIAccountScheduleDecision, error) {
-		selection, decision, err := s.selectAccountWithScheduler(selectCtx, groupID, "", sessionHash, requestedModel, excludedIDs, OpenAIUpstreamTransportHTTPSSE, "", requiredCapability, false, PlatformOpenAI, false, false)
-		if err == nil && selection != nil && selection.Account != nil {
-			return selection, decision, nil
-		}
-		// 如果要求 native 能力（如指定了模型）但没有可用的 APIKey 账号，回退到 basic（OAuth 账号）
-		if requiredCapability == OpenAIImagesCapabilityNative {
-			return s.selectAccountWithScheduler(selectCtx, groupID, "", sessionHash, requestedModel, excludedIDs, OpenAIUpstreamTransportHTTPSSE, "", OpenAIImagesCapabilityBasic, false, PlatformOpenAI, false, false)
-		}
-		return selection, decision, err
-	}
-
 	tier := ""
 	if len(sizeTier) > 0 {
-		tier = strings.TrimSpace(sizeTier[0])
+		tier = sizeTier[0]
 	}
+	return s.selectOpenAIImagesAccount(ctx, groupID, sessionHash, requestedModel, excludedIDs, requiredCapability, tier, 0)
+}
+
+// SelectSpecificAccountWithSchedulerForImages tries the original API key
+// account for a durable multipart retry within the same eligible image pool.
+func (s *OpenAIGatewayService) SelectSpecificAccountWithSchedulerForImages(
+	ctx context.Context,
+	groupID *int64,
+	sessionHash string,
+	requestedModel string,
+	accountID int64,
+	requiredCapability OpenAIImagesCapability,
+	sizeTier string,
+) (*AccountSelectionResult, OpenAIAccountScheduleDecision, error) {
+	if accountID <= 0 {
+		return nil, OpenAIAccountScheduleDecision{}, ErrNoAvailableAccounts
+	}
+	return s.selectOpenAIImagesAccount(ctx, groupID, sessionHash, requestedModel, nil, requiredCapability, sizeTier, accountID)
+}
+
+func (s *OpenAIGatewayService) selectOpenAIImagesAccount(
+	ctx context.Context,
+	groupID *int64,
+	sessionHash string,
+	requestedModel string,
+	excludedIDs map[int64]struct{},
+	requiredCapability OpenAIImagesCapability,
+	sizeTier string,
+	onlyAccountID int64,
+) (*AccountSelectionResult, OpenAIAccountScheduleDecision, error) {
+	tier := strings.TrimSpace(sizeTier)
 	if tier == "" {
 		if ctxTier, ok := ImageSizeAccountPoolTierFromContext(ctx); ok {
 			tier = ctxTier
@@ -2125,11 +2144,53 @@ func (s *OpenAIGatewayService) SelectAccountWithSchedulerForImages(
 			if len(poolAccounts) == 0 {
 				return nil, OpenAIAccountScheduleDecision{}, ErrNoAvailableAccounts
 			}
-			return tryWithCapabilityFallback(withForcedSchedulableAccounts(ctx, poolAccounts))
+			ctx = withForcedSchedulableAccounts(ctx, poolAccounts)
 		}
 	}
 
-	return tryWithCapabilityFallback(ctx)
+	selectCtx := ctx
+	selectAccount := s.selectAccountWithScheduler
+	if onlyAccountID > 0 {
+		accounts, err := s.listSchedulableAccounts(ctx, groupID, PlatformOpenAI)
+		if err != nil {
+			return nil, OpenAIAccountScheduleDecision{}, err
+		}
+		var target []Account
+		for _, account := range accounts {
+			if account.ID == onlyAccountID && account.Type == AccountTypeAPIKey {
+				target = []Account{account}
+				break
+			}
+		}
+		if len(target) == 0 {
+			return nil, OpenAIAccountScheduleDecision{}, ErrNoAvailableAccounts
+		}
+		selectCtx = withForcedSchedulableAccounts(ctx, target)
+		// A preferred account must not bypass its proxy quarantine just because
+		// this pass is scoped to one account.
+		selectAccount = s.selectAccountWithSchedulerOnce
+	}
+
+	try := func(capability OpenAIImagesCapability) (*AccountSelectionResult, OpenAIAccountScheduleDecision, error) {
+		return selectAccount(selectCtx, groupID, "", sessionHash, requestedModel, excludedIDs, OpenAIUpstreamTransportHTTPSSE, "", capability, false, PlatformOpenAI, false, false)
+	}
+	selection, decision, err := try(requiredCapability)
+	// Keep the normal native -> basic fallback for general Images scheduling.
+	if onlyAccountID == 0 && requiredCapability == OpenAIImagesCapabilityNative &&
+		(err != nil || selection == nil || selection.Account == nil) {
+		return try(OpenAIImagesCapabilityBasic)
+	}
+	if onlyAccountID > 0 && err == nil && selection != nil && selection.Account != nil &&
+		(selection.Account.ID != onlyAccountID || selection.Account.Type != AccountTypeAPIKey ||
+			!s.openAIAccountMatchesSchedulingScope(ctx, selection.Account, groupID)) {
+		// The scheduler may have reloaded the account after listing the group.
+		// Recheck membership against the original scope, not the singleton.
+		if selection.ReleaseFunc != nil {
+			selection.ReleaseFunc()
+		}
+		return nil, decision, ErrNoAvailableAccounts
+	}
+	return selection, decision, err
 }
 
 // selectAccountWithScheduler wraps selectAccountWithSchedulerOnce with a

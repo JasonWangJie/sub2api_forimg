@@ -568,7 +568,22 @@ func (h *DurableAsyncImageHandler) invokeAsyncImageTask(parent context.Context, 
 	referenceRetryState := asyncImageReferenceAccountRetryState(task)
 	referenceRetryState.switchPending = asyncImageReferenceAccountSwitchRetryAllowed(task, cfg)
 	parent = service.WithAsyncImageExcludedAccountIDs(parent, asyncImageReferenceRetryExcludedAccountIDs(task, cfg))
-	parent = service.WithAsyncImageNonRetryableAccountIDs(parent, asyncImageFixedCapabilityAccountIDs(task))
+	nonRetryableIDs := asyncImageFixedCapabilityAccountIDs(task)
+	var originalReferenceAccountID int64
+	var preferOriginalReferenceAccount bool
+	if task.Platform == service.PlatformOpenAI && asyncImageReferenceTransport(task, cfg) == service.AsyncImageReferenceTransportLocal {
+		originalReferenceAccountID, preferOriginalReferenceAccount = asyncImageOpenAIReferenceRetryAccount(task.AccountAttempts)
+		if originalReferenceAccountID > 0 {
+			_, alreadyExcluded := nonRetryableIDs[originalReferenceAccountID]
+			preferOriginalReferenceAccount = preferOriginalReferenceAccount && !alreadyExcluded
+			if nonRetryableIDs == nil {
+				nonRetryableIDs = make(map[int64]struct{}, 1)
+			}
+			// The dedicated selection pass is the sole exception for this task.
+			nonRetryableIDs[originalReferenceAccountID] = struct{}{}
+		}
+	}
+	parent = service.WithAsyncImageNonRetryableAccountIDs(parent, nonRetryableIDs)
 	if task != nil && task.RequestType == service.AsyncImageRequestTypeImageToImage {
 		parent = service.WithAsyncImageRoutingSessionHash(parent, "async-image:"+task.TaskID)
 	}
@@ -596,6 +611,13 @@ func (h *DurableAsyncImageHandler) invokeAsyncImageTask(parent context.Context, 
 		h.failAsyncImageTask(parent, task, "request_decryption_failed", "stored image request could not be decrypted", false)
 		return asyncImageWorkerDisposition{}
 	}
+	if originalReferenceAccountID > 0 && payload.Prepared == nil {
+		payload.Body, err = service.NormalizeOpenAIImageEditReferencesForLocalFallback(payload.Body)
+		if err != nil {
+			h.failAsyncImageTask(parent, task, "invalid_reference_image", asyncImageSafeError(err), false)
+			return asyncImageWorkerDisposition{}
+		}
+	}
 
 	executionTimeout := asyncImageExecutionTimeout(cfg)
 	if remaining := time.Until(asyncImageTaskDeadline(task)); remaining < executionTimeout {
@@ -616,6 +638,10 @@ func (h *DurableAsyncImageHandler) invokeAsyncImageTask(parent context.Context, 
 		h.failAsyncImageTask(parent, task, "invalid_reference_image", asyncImageSafeError(err), false)
 		return asyncImageWorkerDisposition{}
 	}
+	if originalReferenceAccountID > 0 && !isMultipartContentType(contentType) {
+		h.failAsyncImageTask(parent, task, "invalid_reference_image", "reference images could not be converted to a multipart request", false)
+		return asyncImageWorkerDisposition{}
+	}
 	if disposition, stop := h.persistAsyncImagePreparedRequest(executionCtx, parent, task, payload, body, path, contentType, cfg); stop {
 		return disposition
 	}
@@ -625,6 +651,9 @@ func (h *DurableAsyncImageHandler) invokeAsyncImageTask(parent context.Context, 
 	request.Header.Set("Content-Type", contentType)
 	request.Header.Set("User-Agent", "sub2api-async-image-worker/1")
 	ctx := request.WithContext(executionCtx).Context()
+	if preferOriginalReferenceAccount {
+		ctx = withAsyncImageOpenAIReferenceRetryAccount(ctx, originalReferenceAccountID)
+	}
 	ctx = service.WithImageInputCapabilities(ctx, asyncImageInputCapabilities(body, contentType))
 	ctx = context.WithValue(ctx, ctxkey.ClientRequestID, "async-image:"+task.TaskID)
 	ctx = context.WithValue(ctx, ctxkey.RequestID, "async-image:"+task.TaskID)

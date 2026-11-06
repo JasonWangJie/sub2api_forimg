@@ -2055,6 +2055,81 @@ func TestOpenAIGatewayService_RecheckSelectedOpenAIAccountFromDB_SimpleModeUsesF
 	require.NotNil(t, standardSvc.recheckSelectedOpenAIAccountFromDB(context.Background(), &ungrouped, nil, PlatformOpenAI, "gpt-5.1", false, ""))
 }
 
+func TestOpenAIImagesSelectSpecificAccountWithinPool(t *testing.T) {
+	const requestedModel = "gpt-image-2"
+	groupID := int64(204)
+	ctx, err := WithImageAccountPoolRoute(context.Background(), requestedModel, "4K")
+	require.NoError(t, err)
+
+	primary := Account{ID: 45, Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Status: StatusActive, Schedulable: true, Concurrency: 1, Priority: 10}
+	alternate := primary
+	alternate.ID, alternate.Priority = 46, 0
+	alternate.GroupIDs = []int64{groupID}
+	for _, advanced := range []bool{false, true} {
+		t.Run(fmt.Sprintf("advanced scheduler %t", advanced), func(t *testing.T) {
+			resetOpenAIAdvancedSchedulerSettingCacheForTest()
+			t.Cleanup(resetOpenAIAdvancedSchedulerSettingCacheForTest)
+			repo := &imageAccountPoolRepositoryStub{
+				AccountRepository: schedulerGroupAwareOpenAIAccountRepo{schedulerTestOpenAIAccountRepo{accounts: []Account{primary, alternate}}},
+				mode:              ImageAccountPoolModeModelResolution,
+				configured:        true,
+				accounts:          []Account{primary, alternate},
+			}
+			svc := &OpenAIGatewayService{accountRepo: repo, cfg: &config.Config{RunMode: config.RunModeStandard}}
+			if advanced {
+				svc.rateLimitService = newOpenAIAdvancedSchedulerRateLimitService("true")
+			}
+			selection, _, err := svc.SelectSpecificAccountWithSchedulerForImages(ctx, &groupID, "", requestedModel, primary.ID, OpenAIImagesCapabilityNative, "4K")
+			require.NoError(t, err)
+			require.NotNil(t, selection)
+			require.Equal(t, primary.ID, selection.Account.ID)
+			require.Equal(t, requestedModel, repo.gotModel)
+			require.Equal(t, "4K", repo.gotTier)
+
+			repo.accounts[0].Schedulable = false
+			selection, _, err = svc.SelectSpecificAccountWithSchedulerForImages(ctx, &groupID, "", requestedModel, primary.ID, OpenAIImagesCapabilityNative, "4K")
+			require.ErrorIs(t, err, ErrNoAvailableAccounts)
+			require.Nil(t, selection)
+
+			repo.accounts[0].Schedulable = true
+			repo.accounts[0].Type = AccountTypeOAuth
+			selection, _, err = svc.SelectSpecificAccountWithSchedulerForImages(ctx, &groupID, "", requestedModel, primary.ID, OpenAIImagesCapabilityNative, "4K")
+			require.ErrorIs(t, err, ErrNoAvailableAccounts)
+			require.Nil(t, selection)
+
+			repo.accounts = []Account{alternate}
+			selection, _, err = svc.SelectSpecificAccountWithSchedulerForImages(ctx, &groupID, "", requestedModel, primary.ID, OpenAIImagesCapabilityNative, "4K")
+			require.ErrorIs(t, err, ErrNoAvailableAccounts)
+			require.Nil(t, selection)
+		})
+	}
+}
+
+func TestOpenAIImagesSelectSpecificAccountRechecksMembershipAndType(t *testing.T) {
+	groupID := int64(204)
+	stale := Account{ID: 45, Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Status: StatusActive, Schedulable: true, Concurrency: 1, GroupIDs: []int64{groupID}}
+	for name, update := range map[string]func(*Account){
+		"group removed": func(account *Account) { account.GroupIDs = []int64{205} },
+		"type changed":  func(account *Account) { account.Type = AccountTypeOAuth },
+	} {
+		t.Run(name, func(t *testing.T) {
+			fresh := stale
+			update(&fresh)
+			svc := &OpenAIGatewayService{
+				accountRepo: schedulerTestOpenAIAccountRepo{accounts: []Account{fresh}},
+				cfg:         &config.Config{RunMode: config.RunModeStandard},
+				schedulerSnapshot: &SchedulerSnapshotService{cache: &openAISnapshotCacheStub{
+					snapshotAccounts: []*Account{&stale},
+					accountsByID:     map[int64]*Account{stale.ID: &stale},
+				}},
+			}
+			selection, _, err := svc.SelectSpecificAccountWithSchedulerForImages(context.Background(), &groupID, "", "gpt-image-2", stale.ID, OpenAIImagesCapabilityNative, "4K")
+			require.ErrorIs(t, err, ErrNoAvailableAccounts)
+			require.Nil(t, selection)
+		})
+	}
+}
+
 func TestOpenAIGatewayService_SelectAccountWithScheduler_PreviousResponseSticky(t *testing.T) {
 	ctx := context.Background()
 	groupID := int64(9)

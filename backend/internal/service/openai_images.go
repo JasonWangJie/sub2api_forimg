@@ -838,9 +838,10 @@ func (s *OpenAIGatewayService) forwardOpenAIImagesAPIKey(
 		}
 		asyncSizeMismatch := AsyncImageAccountAttemptCaptureFromContext(ctx) != nil && isAsyncImageSizeCapabilityMismatch(resp.StatusCode, respBody)
 		asyncReferenceBudget := AsyncImageAccountAttemptCaptureFromContext(ctx) != nil && isAsyncImageReferenceAccountFailoverForContext(ctx, resp.StatusCode, respBody)
+		asyncReferenceURLTimeout := newAsyncImageOpenAIReferenceURLTimeout(ctx, parsed, resp.StatusCode, respBody, resp.Header)
 		asyncInternal422 := AsyncImageAccountAttemptCaptureFromContext(ctx) != nil && isAsyncImageInternalError422(resp.StatusCode, respBody)
 		asyncServiceTimeout := AsyncImageAccountAttemptCaptureFromContext(ctx) != nil && isAsyncImageServiceTimeout400(resp.StatusCode, respBody)
-		if asyncSizeMismatch || asyncReferenceBudget || asyncInternal422 || asyncServiceTimeout {
+		if asyncSizeMismatch || asyncReferenceBudget || asyncReferenceURLTimeout != nil || asyncInternal422 || asyncServiceTimeout {
 			if rules := getBoundErrorPassthroughService(c); rules != nil && rules.MatchRule(account.Platform, resp.StatusCode, respBody) != nil {
 				return s.handleOpenAIImagesErrorResponse(upstreamCtx, resp, c, account, upstreamModel)
 			}
@@ -849,7 +850,7 @@ func (s *OpenAIGatewayService) forwardOpenAIImagesAPIKey(
 		if !shouldFailover && resp.StatusCode == http.StatusBadRequest && AsyncImageAccountAttemptCaptureFromContext(ctx) != nil {
 			shouldFailover = isOpenAIAsyncAccountFailover400(upstreamMsg)
 		}
-		if shouldFailover || asyncSizeMismatch || asyncReferenceBudget || asyncInternal422 || asyncServiceTimeout {
+		if shouldFailover || asyncSizeMismatch || asyncReferenceBudget || asyncReferenceURLTimeout != nil || asyncInternal422 || asyncServiceTimeout {
 			var referenceBudgetErr *UpstreamFailoverError
 			if asyncReferenceBudget {
 				referenceBudgetErr = newAsyncImageReferenceAccountFailoverError(respBody, resp.Header)
@@ -868,6 +869,10 @@ func (s *OpenAIGatewayService) forwardOpenAIImagesAPIKey(
 			if referenceBudgetErr != nil {
 				s.handleOpenAIAccountUpstreamError(upstreamCtx, account, resp.StatusCode, resp.Header, respBody, upstreamModel)
 				return nil, referenceBudgetErr
+			}
+			if asyncReferenceURLTimeout != nil {
+				s.handleOpenAIAccountUpstreamError(upstreamCtx, account, resp.StatusCode, resp.Header, respBody, upstreamModel)
+				return nil, asyncReferenceURLTimeout
 			}
 			if asyncSizeMismatch {
 				// A fixed size capability cannot improve on the same account and

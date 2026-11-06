@@ -150,6 +150,8 @@ func (h *OpenAIGatewayHandler) Images(c *gin.Context) {
 		return
 	}
 	asyncImageGeneration := asyncImageUsageCaptureFromContext(c.Request.Context()) != nil
+	referenceRetryAccountID := asyncImageOpenAIReferenceRetryAccountFromContext(requestCtx)
+	preferReferenceRetryAccount := referenceRetryAccountID > 0 && parsed.IsEdits() && parsed.Multipart
 	// Durable reference-image retries use a task-scoped sticky hash so the
 	// selected account is reused until the retry policy explicitly switches it.
 	sessionHash := service.AsyncImageRoutingSessionHash(requestCtx)
@@ -180,15 +182,19 @@ func (h *OpenAIGatewayHandler) Images(c *gin.Context) {
 		for id := range service.AsyncImageNonRetryableAccountIDs(requestCtx) {
 			selectionExcludedIDs[id] = struct{}{}
 		}
-		selection, scheduleDecision, err := h.gatewayService.SelectAccountWithSchedulerForImages(
-			requestCtx,
-			apiKey.GroupID,
-			sessionHash,
-			routingModel,
-			selectionExcludedIDs,
-			parsed.RequiredCapability,
-			parsed.SizeTier,
-		)
+		var selection *service.AccountSelectionResult
+		var scheduleDecision service.OpenAIAccountScheduleDecision
+		if preferReferenceRetryAccount {
+			preferReferenceRetryAccount = false
+			selection, scheduleDecision, err = h.gatewayService.SelectSpecificAccountWithSchedulerForImages(
+				requestCtx, apiKey.GroupID, sessionHash, routingModel, referenceRetryAccountID, service.OpenAIImagesCapabilityNative, parsed.SizeTier,
+			)
+		}
+		if err != nil || selection == nil || selection.Account == nil {
+			selection, scheduleDecision, err = h.gatewayService.SelectAccountWithSchedulerForImages(
+				requestCtx, apiKey.GroupID, sessionHash, routingModel, selectionExcludedIDs, parsed.RequiredCapability, parsed.SizeTier,
+			)
+		}
 		if err != nil {
 			if len(failedAccountIDs) == 0 && len(service.AsyncImageExcludedAccountIDs(requestCtx)) > 0 && !historicalExclusionsRetried &&
 				!service.AsyncImageReferenceAccountSwitchActive(requestCtx) {
@@ -356,7 +362,9 @@ func (h *OpenAIGatewayHandler) Images(c *gin.Context) {
 							AccountID: account.ID, AccountName: account.Name, Status: service.AsyncImageAccountAttemptFailed,
 							StatusCode: failoverErr.StatusCode, UpstreamRequestID: upstreamRequestIDFromFailover(failoverErr), Error: failoverErr.Error(),
 						}
-						if failoverErr.IsAsyncImageSizeCapabilityMismatch() || failoverErr.IsAsyncImageReferenceAccountFailover() || failoverErr.IsAsyncImageInternalError422() || failoverErr.IsAsyncImageServiceTimeout400() || failoverErr.IsAsyncImageRetryableRejection() {
+						if failoverErr.IsAsyncImageSizeCapabilityMismatch() || failoverErr.IsAsyncImageReferenceAccountFailover() ||
+							failoverErr.IsAsyncImageInternalError422() || failoverErr.IsAsyncImageServiceTimeout400() ||
+							failoverErr.IsAsyncImageRetryableRejection() || failoverErr.IsAsyncImageOpenAIReferenceURLTimeout() {
 							attempt = asyncImageFailedAccountAttempt(account, failoverErr)
 						}
 						service.RecordAsyncImageAccountAttempt(c.Request.Context(), attempt)
@@ -377,11 +385,11 @@ func (h *OpenAIGatewayHandler) Images(c *gin.Context) {
 						)
 						return
 					}
-					if asyncImageReferenceLocalFallbackRequested(c, failoverErr) {
+					if failoverErr.IsAsyncImageOpenAIReferenceURLTimeout() || asyncImageReferenceLocalFallbackRequested(c, failoverErr) {
 						h.handleFailoverExhausted(c, failoverErr, streamStarted)
 						return
 					}
-					if failoverErr.RetryableOnSameAccount {
+					if failoverErr.RetryableOnSameAccount && account.ID != referenceRetryAccountID {
 						retryLimit := account.GetPoolModeRetryCount()
 						if sameAccountRetryCount[account.ID] < retryLimit {
 							sameAccountRetryCount[account.ID]++
