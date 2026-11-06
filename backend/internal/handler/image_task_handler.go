@@ -92,10 +92,12 @@ func (h *AsyncImageHandler) Submit(c *gin.Context) {
 		imageTaskJSONError(c, http.StatusBadRequest, "invalid_request_error", "streaming image requests cannot be submitted as asynchronous tasks")
 		return
 	}
-	if err := h.validateRequest(c, platform, body); err != nil {
+	body, contentType, err := h.prepareRequest(c, platform, body)
+	if err != nil {
 		imageTaskJSONError(c, http.StatusBadRequest, "invalid_request_error", err.Error())
 		return
 	}
+	c.Request.Header.Set("Content-Type", contentType)
 	if !h.checkSecurityAuditBeforeSubmit(c, apiKey, platform, body) {
 		return
 	}
@@ -187,25 +189,29 @@ func (h *AsyncImageHandler) Get(c *gin.Context) {
 	c.JSON(http.StatusOK, task)
 }
 
-func (h *AsyncImageHandler) validateRequest(c *gin.Context, platform string, body []byte) error {
+func (h *AsyncImageHandler) prepareRequest(c *gin.Context, platform string, body []byte) ([]byte, string, error) {
+	contentType := c.GetHeader("Content-Type")
 	if h.openAI == nil || h.openAI.gatewayService == nil {
-		return nil
+		return body, contentType, nil
 	}
 	if platform == service.PlatformGrok {
 		parsed := service.ParseGrokMediaRequest(c.GetHeader("Content-Type"), body)
 		if strings.TrimSpace(parsed.Model) == "" {
-			return errors.New("model is required")
+			return nil, "", errors.New("model is required")
 		}
-		return nil
+		return body, contentType, nil
 	}
 	parsed, err := h.openAI.gatewayService.ParseOpenAIImagesRequest(c, body)
 	if err != nil {
-		return err
+		return nil, "", err
 	}
 	if parsed.Stream {
-		return errors.New("streaming image requests cannot be submitted as asynchronous tasks")
+		return nil, "", errors.New("streaming image requests cannot be submitted as asynchronous tasks")
 	}
-	return parsed.ValidateAsyncDimensions()
+	if err := parsed.ValidateAsyncDimensions(); err != nil {
+		return nil, "", err
+	}
+	return parsed.NormalizeAsyncOutputOptions()
 }
 
 func (h *AsyncImageHandler) executeWithGateway(platform string, c *gin.Context) {

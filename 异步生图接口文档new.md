@@ -1,343 +1,168 @@
 # 异步生图接口文档（新）
 
-面向下游对接的持久化异步生图说明。**只覆盖当前在用、推荐对接**的能力：
-Base URL: `https://api.tokensfree.xyz`
+本文按当前代码说明持久化异步生图接口。OpenAI 与 Gemini 使用各自的请求参数，共用受理、查询和失败响应。图片请求示例统一分为**文生图**和**图生图**两类；格式、尺寸等变化在参数表中说明。
 
-| 平台 | 场景 | 方法 | 路径 | 受理 HTTP |
-|---|---|---|---|---|
-| OpenAI | 文生图 / 图生图 | `POST` | `/v1/images/generations_oa` | `202` |
-| Gemini | 文生图 / 图生图 | `POST` | `/v1/images/generations_sc` | `202` |
-| OpenAI / Gemini | 查询任务 | `GET` | `/v1/images/tasks_async/{task_id}` | `200` |
+示例以 `https://api.example.com` 表示服务地址，`YOUR_API_KEY` 表示调用密钥，`https://cdn.example.com/reference.png` 表示可访问的参考图。接入时替换为实际值。
 
-要点：
+## 1. 接口与鉴权
 
-- 任务 ID 前缀均为 `asyncimg_*`。
-- OpenAI 与 Gemini 的**请求体**方言不同，按平台选用对应提交路径；**受理 / 查询 / 错误响应体**格式一致。
-- **查询任务统一**走 `GET /v1/images/tasks_async/{task_id}`（与平台无关）。
-- 实际走哪家上游，由 API Key 所属分组决定：`_oa` → OpenAI 分组；`_sc` → Gemini 分组。
-- OpenAI / Gemini 均在**同一提交路径**上用 `image_urls` 区分文生图与图生图（见下）。
-
----
-
-## 1. 启用条件
-
-须同时满足：
-
-1. 有效 API Key，且已分配分组。
-2. 平台匹配：OpenAI 用 `_oa`；Gemini 用 `_sc`。
-3. 分组同时开启「图片生成」与「异步生图」（`allow_image_generation`、`allow_async_image_generation`）。后者默认关闭。
-4. 全站对象存储已启用且可用。
-5. 余额 / 订阅 / 额度 / 并发等既有检查通过。
-
-未开启异步生图时，提交接口返回 **`403`**，不会回退到同步接口。
-
----
-
-## 2. 通用约定
-
-### 2.1 鉴权
-
-```http
-Authorization: Bearer <API_KEY>
-Content-Type: application/json
-```
-
-查询任务必须使用**提交该任务的同一个 API Key**；换 Key 一律 `404`。
-
-### 2.2 轮询
-
-提交成功或任务查询响应可能包含 `Retry-After: 3`。客户端应优先遵守该响应头：首次查询可在 3 秒后发起，之后按 3～30 秒退避轮询，避免高频请求。
-
-```http
-Cache-Control: no-store
-Location: <查询地址>
-Retry-After: 3
-```
-
-是否成功以响应体中的 **`status`** 为准，不要仅凭 HTTP `200` 判断成功。
-
-### 2.3 幂等（可选，强烈建议）
-
-```http
-Idempotency-Key: <最多 255 字节的客户端唯一值>
-```
-
-| 情况 | 结果 |
-|---|---|
-| 同 Key + 同幂等键 + 同路径 + 同请求体哈希 | 返回首次创建的任务，不重复生成、不计费 |
-| 同键但路径或请求体不同 | `409 Conflict` |
-| 未带该头 | 每次提交都新建任务（网络重试可能重复计费） |
-
-重试时请原样重发请求体（含空白与字段顺序）。
-
-### 2.4 结果链接
-
-成功后返回的图片 URL 为对象存储（OSS/CDN）链接，**有效期约 24 小时**，请及时下载或转存。签名 URL 过期作废。
-
----
-
-## 3. OpenAI · 文生图 / 图生图
-
-文生图与图生图共用同一路径 `POST /v1/images/generations_oa`，按 `image_urls` **是否有有效值**分流：
-
-| `image_urls` | 走法 |
-|---|---|
-| 不传 | 文生图 |
-| 传了但无有效值：`null` / `[]` / 全为空字符串 | 文生图 |
-| 至少 1 个非空 HTTPS URL | 图生图 |
-| multipart 上传了 `image` 文件 | 图生图（即使未带 `image_urls`） |
-
-### 3.1 请求
-
-```http
-POST /v1/images/generations_oa
-Authorization: Bearer <OPENAI_GROUP_API_KEY>
-Content-Type: application/json
-Idempotency-Key: oa-img-20260727-001
-```
-
-也支持 `multipart/form-data` 直接上传参考图（图生图）。
-
-### 3.2 请求体字段说明
-
-| 字段 | 类型 | 必填 | 说明（注释） |
+| 用途 | 方法 | 路径 | 正常响应 |
 |---|---|---|---|
-| `model` | string | 是 | 分组可用的图片模型名，例如 `gpt-image-2` |
-| `prompt` | string | 是 | 画面描述（文生图）或改图 / 重绘指令（图生图） |
-| `image_urls` | string[] | 否* | 参考图 HTTPS URL 数组（**字符串数组**，不要传对象数组）。有有效值 → 图生图；不传或无有效值 → 文生图 |
-| `n` | number | 否 | 生成张数，受模型能力限制；默认按上游规则 |
-| `resolution` | string | 否 | 清晰度档位：`1K` / `2K` / `4K`（推荐写法） |
-| `aspect_ratio` | string | 否 | 画面比例：`auto`、`1:1`、`2:3`、`3:2`、`4:5`、`5:4`、`4:3`、`3:4`、`16:9`、`9:16`、`21:9`、`9:21`、`2:1`、`1:2`；省略时默认 `1:1`；`auto` 时上游 `size` 为 `auto`。计费按显式 `resolution` 档位，不因宽比例 WxH 抬档 |
-| `size` | string | 否 | 可写三类值：① 比例（如 `9:16`，等同 `aspect_ratio`）；② 像素尺寸（如 `1024x1024`）或 `auto`；③ 档位（如 `2K`，等同 `resolution`） |
-| `quality` | string | 否 | 画质，如 `high` / `medium` / `low`（视模型支持） |
-| `background` | string | 否 | 背景相关参数（视模型支持） |
-| `output_format` | string | 否 | 输出格式：`png` / `jpeg` / `webp`（视模型支持） |
-| `mask.image_url` | string | 否 | 可选遮罩图 URL（局部编辑，仅图生图有意义） |
-| `response_format` | string | 否 | 透传上游；异步结果最终以 OSS URL 返回 |
-| `stream` | boolean | 否 | **必须为 `false` 或省略**；异步接口不支持流式 |
+| OpenAI 文生图 / 图生图 | `POST` | `/v1/images/generations_oa` | `202 Accepted` |
+| OpenAI 显式图生图 | `POST` | `/v1/images/edits_oa` | `202 Accepted` |
+| Gemini 文生图 / 图生图 | `POST` | `/v1/images/generations_sc` | `202 Accepted` |
+| 查询上述任务 | `GET` | `/v1/images/tasks_async/{task_id}` | `200 OK`，检查 `status` |
 
-\* JSON 图生图依赖 `image_urls` 有有效值；multipart 图生图改为上传 `image` 文件字段。参考图建议格式：PNG / JPG / WEBP。
+请求使用以下头部；multipart 上传时让客户端自动设置带 boundary 的 `Content-Type`。
 
-OpenAI 图生图自动重试：若上游返回 `image_url fetch failed` 且为连接超时（如 `curl: (28) Connection timed out`），系统会**自动重试 1 次**。任务详情中：
-
-- `retry_count` 递增；
-- 时间线出现事件 `upstream_image_url_fetch_retry`（文案含「已安排自动重试（1/1）」）；
-- 重试期间 `error_message` 会暂时保留超时说明；若重试仍失败，最终 `fail_reason` / `error_message` 会注明「已自动重试 1 次仍失败」。
-
-尺寸优先级：
-
-- 同时有 `aspect_ratio` 与比例形式的 `size` 时，以 `aspect_ratio` 为准。
-- `size` 为 `WxH` / `auto` 时按像素尺寸处理。
-- 仅有 `resolution` + `size:"9:16"` 时，等价于 `resolution` + `aspect_ratio:"9:16"`。
-
-`gpt-image-2`、`gpt-image-2.5-flare`、`gpt-image-2.5-sunburst` 及其官方日期快照按等比尺寸表解析 4K。异步入口在建任务前检查长边、16 像素对齐、宽高比和总像素。显式尺寸超限返回 HTTP 400 `unsupported_image_dimensions`。见 [GPT Image 4K 比例表](wiki-new/图片渠道错误与换号重试诊断.md#2026-11-05-gpt-image-4k-等比映射本地实现)。
-
-下表为通用 `resolution` + `aspect_ratio` 到上游 OpenAI `size`（WxH）的映射。三个 GPT Image 模型的 4K 档按上面的专用表执行。
-
-| resolution | aspect_ratio | 上游 size |
-|---|---|---|
-| any / `auto` | `auto` | `auto` |
-| `1K` | `1:1` | `1024x1024` |
-| `1K` | `3:2` / `16:9` | `1536x1024` |
-| `1K` | `2:3` / `9:16` | `1024x1536` |
-| `1K` | `5:4` | `1280x1024` |
-| `1K` | `4:5` | `1024x1280` |
-| `1K` | `4:3` | `1360x1024` |
-| `1K` | `3:4` | `1024x1360` |
-| `1K` | `21:9` | `2384x1024` |
-| `1K` | `9:21` | `1024x2384` |
-| `1K` | `2:1` | `2048x1024` |
-| `1K` | `1:2` | `1024x2048` |
-| `2K` | `1:1` | `2048x2048` |
-| `2K` | `3:2` / `16:9` | `2048x1152` |
-| `2K` | `2:3` / `9:16` | `1152x2048` |
-| `2K` | `5:4` | `2048x1632` |
-| `2K` | `4:5` | `1632x2048` |
-| `2K` | `4:3` | `2048x1536` |
-| `2K` | `3:4` | `1536x2048` |
-| `2K` | `21:9` | `2048x880` |
-| `2K` | `9:21` | `880x2048` |
-| `2K` | `2:1` | `2048x1024` |
-| `2K` | `1:2` | `1024x2048` |
-| `4K` | `1:1` | `4096x4096` |
-| `4K` | `3:2` / `16:9` | `4096x2304` |
-| `4K` | `2:3` / `9:16` | `2304x4096` |
-| `4K` | `5:4` | `4096x3272` |
-| `4K` | `4:5` | `3272x4096` |
-| `4K` | `4:3` | `4096x3072` |
-| `4K` | `3:4` | `3072x4096` |
-| `4K` | `21:9` | `4096x1752` |
-| `4K` | `9:21` | `1752x4096` |
-| `4K` | `2:1` | `4096x2048` |
-| `4K` | `1:2` | `2048x4096` |
-
-### 3.3 文生图请求示例
-
-```json
-{
-  "model": "gpt-image-2",          // 模型名
-  "prompt": "一只在沙滩上的猫，写实风格", // 提示词
-  "n": 1,                          // 张数
-  "resolution": "1K",              // 清晰度档位
-  "aspect_ratio": "3:2",           // 画面比例
-  "quality": "high"                // 画质（可选）
-  // 不传 image_urls，或传 null / []，均为文生图
-}
+```http
+Authorization: Bearer YOUR_API_KEY
+Content-Type: application/json
+Idempotency-Key: YOUR_REQUEST_ID
 ```
 
-也可用 `size` 传比例：
+启用条件：有效 API Key、对应平台的计费分组、分组同时开启图片生成与异步生图，以及可用的结果存储。平台由提交路径决定：`_oa` 对应 OpenAI，`_sc` 对应 Gemini；Key 的平台生图分组映射优先于主分组，详见[双平台生图映射](wiki-new/API密钥双平台生图映射.md)。异步生图未开启时返回 `403`，不会自动改为同步调用。余额、订阅、额度与并发检查仍然生效。
+
+`Idempotency-Key` 可选，最长 255 字节，建议为每个新请求生成唯一值。同 API Key、同幂等键、同平台/路径和相同原始请求体返回原任务；不同请求体或路径返回 `409`。重试提交时保留请求字节，包括空白、字段顺序及 multipart boundary。修改格式、尺寸或帧参数后使用新幂等键；省略此头会新建任务，网络重发可能重复生成。
+
+查询必须使用提交任务的同一个 API Key；其他有效 Key 查询返回 `404`。不要在 URL 中传密钥。
+
+## 2. 图片请求示例
+
+以下四个 JSON 都是完整请求体，按平台选用对应路径。静态图示例统一使用 `1K`、`1:1`；OpenAI 显式请求 PNG，Gemini 使用其原生图片输出，不传 OpenAI 格式参数。
+
+### 2.1 文生图
+
+OpenAI：`POST https://api.example.com/v1/images/generations_oa`
 
 ```json
 {
   "model": "gpt-image-2",
-  "prompt": "竖屏建筑工艺长镜头",
-  "resolution": "2K",
-  "size": "9:16"                   // 等同 aspect_ratio: "9:16"
+  "prompt": "窗边的一只橘猫，柔和自然光",
+  "n": 1,
+  "resolution": "1K",
+  "aspect_ratio": "1:1",
+  "output_format": "png"
 }
 ```
 
-### 3.4 图生图 JSON 请求示例
+Gemini：`POST https://api.example.com/v1/images/generations_sc`
 
 ```json
 {
-  "model": "gpt-image-2",          // 模型名
-  "prompt": "保留主体，把背景换成夜景", // 改图指令
-  "image_urls": [                  // 有有效 URL → 自动走图生图
-    "https://cdn.example.com/reference.png"
-  ],
-  "resolution": "1K",              // 清晰度
-  "aspect_ratio": "1:1"            // 比例
-}
-```
-
-### 3.5 图生图 multipart 请求示例
-
-```bash
-curl -X POST 'https://api.example.com/v1/images/generations_oa' \
-  -H 'Authorization: Bearer sk-...' \
-  -H 'Idempotency-Key: oa-i2i-multipart-001' \
-  -F 'model=gpt-image-2' \          # 模型名
-  -F 'prompt=把背景换成夜景' \        # 改图指令
-  -F 'resolution=1K' \              # 清晰度
-  -F 'aspect_ratio=1:1' \           # 比例
-  -F 'image=@reference.png'         # 参考图文件（字段名必须是 image）→ 自动走图生图
-```
-
-| 表单字段 | 必填 | 说明 |
-|---|---|---|
-| `model` | 是 | 模型名 |
-| `prompt` | 是 | 提示词 / 改图指令 |
-| `image` | 图生图时是 | 参考图文件；上传后即按图生图处理 |
-| `resolution` / `aspect_ratio` / `size` 等 | 否 | 同 JSON 模式 |
-
-### 3.6 受理响应 `202 Accepted`
-
-```json
-{
-  "task_id": "asyncimg_0123456789abcdef",  // 任务 ID，后续查询用
-  "query_url": "https://api.example.com/v1/images/tasks_async/asyncimg_0123456789abcdef"
-  // query_url：查询地址（由 async_image.public_base_url 拼接）
-}
-```
-
----
-
-## 4. Gemini · 文生图
-
-文生图与图生图共用同一路径 `POST /v1/images/generations_sc`：文生图**不传** `image_urls`。
-
-### 4.1 请求
-
-```http
-POST /v1/images/generations_sc
-Authorization: Bearer <GEMINI_GROUP_API_KEY>
-Content-Type: application/json
-Idempotency-Key: sc-t2i-20260727-001
-```
-
-### 4.2 请求体字段说明
-
-| 字段 | 类型 | 必填 | 说明（注释） |
-|---|---|---|---|
-| `model` | string | 是 | 分组映射的 Gemini 图片模型，例如 `gemini-3-pro-image-preview` |
-| `prompt` | string | 是 | 图片描述提示词 |
-| `resolution` | string | 否 | 清晰度：`1K` / `2K` / `4K`（`0.5K` 默认拒绝） |
-| `size` | string | 否 | 宽高比别名，如 `auto`、`1:1`、`2:3`、`3:2`、`4:5`、`5:4`、`4:3`、`3:4`、`16:9`、`9:16`、`21:9`、`9:21`；也可传像素尺寸，如 `1080x1350`（约分为 `4:5`）；未传 `resolution` 时也可写 `2K` 表示清晰度 |
-| `aspect_ratio` | string | 否 | 与 `size` 同义的比例字段；显式传入时优先于 `size` 的比例别名；可用 `auto` / `自动`（省略上游比例，由模型决定） |
-
-### 4.3 请求示例
-
-```json
-{
-  "model": "gemini-3-pro-image-preview", // 模型名
-  "prompt": "现代客厅，北欧风，自然光",   // 提示词
-  "resolution": "2K",                    // 清晰度
-  "size": "16:9"                         // 宽高比（也可用 aspect_ratio）
-}
-```
-
-### 4.4 受理响应 `202 Accepted`
-
-与 OpenAI 异步受理格式一致：
-
-```json
-{
-  "task_id": "asyncimg_0123456789abcdef",  // 任务 ID，后续查询用
-  "query_url": "https://api.example.com/v1/images/tasks_async/asyncimg_0123456789abcdef"
-}
-```
-
----
-
-## 5. Gemini · 图生图
-
-与文生图同一路径；通过 `image_urls` 传入一张或多张参考图。
-
-### 5.1 请求
-
-```http
-POST /v1/images/generations_sc
-Authorization: Bearer <GEMINI_GROUP_API_KEY>
-Content-Type: application/json
-Idempotency-Key: sc-i2i-20260727-001
-```
-
-### 5.2 请求体字段说明
-
-| 字段 | 类型 | 必填 | 说明（注释） |
-|---|---|---|---|
-| `model` | string | 是 | Gemini 图片模型 |
-| `prompt` | string | 是 | 编辑说明；可按「图1、图2…」引用 `image_urls` 顺序 |
-| `image_urls` | string[] | 是 | 参考图公网 HTTPS URL 数组（PNG / JPG / WEBP）；顺序对应提示词中的图1、图2… |
-| `resolution` | string | 否 | `1K` / `2K` / `4K` |
-| `size` | string | 否 | 宽高比，例如 `3:2`；也可传像素尺寸，如 `1080x1350`（约分为 `4:5`）；与 `aspect_ratio` 等价；不传则用上游默认比例 |
-| `aspect_ratio` | string | 否 | 可选；多数客户端优先用 `size`；可用 `auto` / `自动`（由上游自动决定比例） |
-
-参考图要求：
-
-- 仅允许 HTTPS 公网 URL（上游 Gemini 按 URL 拉取，本机不下载转 base64）。
-- 禁止内网地址（防 SSRF）。
-- 建议格式：JPEG / PNG / GIF / WebP；体积受上游拉取限制。
-
-### 5.3 请求示例
-
-```json
-{
-  "image_urls": [                      // 参考图列表：图1、图2…
-    "https://cdn.example.com/ref-1.jpg",
-    "https://cdn.example.com/ref-2.jpg"
-  ],
   "model": "gemini-3-pro-image-preview",
-  "prompt": "画面通透干净，哑光高级展厅室内色调，完整保留竹编、实木、陶瓷、布艺全部原生肌理，光影柔和温润，视觉氛围与参考图二商业茶室柔和质感完全统一。",
-  "resolution": "4K"                   // 清晰度；size/aspect_ratio 可选
+  "prompt": "窗边的一只橘猫，柔和自然光",
+  "resolution": "1K",
+  "aspect_ratio": "1:1"
 }
 ```
 
-需要指定宽高比时可加 `"size": "3:2"` 或 `"aspect_ratio": "3:2"`。也可用 `"size": "1080x1350"` 指定 `4:5` 比例；Gemini 上游按比例和 `resolution` 生成，不保证返回精确像素尺寸。
+文生图不传 `image_urls`。OpenAI 的统一入口也将 `null`、空数组或全空字符串视为没有参考图；Gemini 不接受数组内的空字符串。
 
-### 5.4 受理响应 `202 Accepted`
+### 2.2 图生图
 
-与文生图 / OpenAI 相同：
+OpenAI：`POST https://api.example.com/v1/images/edits_oa`，必须提供有效参考图。也可使用统一入口 `/v1/images/generations_oa`，有参考图时自动进入编辑流程。
+
+```json
+{
+  "model": "gpt-image-2",
+  "prompt": "保留主体，将背景改为夜景",
+  "image_urls": ["https://cdn.example.com/reference.png"],
+  "n": 1,
+  "resolution": "1K",
+  "aspect_ratio": "1:1",
+  "output_format": "png"
+}
+```
+
+Gemini：`POST https://api.example.com/v1/images/generations_sc`
+
+```json
+{
+  "model": "gemini-3-pro-image-preview",
+  "prompt": "保留主体，将背景改为夜景",
+  "image_urls": ["https://cdn.example.com/reference.png"],
+  "resolution": "1K",
+  "aspect_ratio": "1:1"
+}
+```
+
+`image_urls` 是字符串数组，多张参考图按数组顺序对应提示词中的图 1、图 2。支持公网 HTTPS URL、可校验的图片 data URI，以及同 API Key 上传且仍有效的本站参考图 URL。参考图使用 PNG、JPEG 或 WebP；GIF/SVG 输出能力不会扩展输入格式。图片数量、字节、像素及下载限制受模型和运行配置约束。
+
+远程参考图可以由上游拉取，也可以按平台的运行配置由本站下载后转发；指定错误还可能触发本地文件回退。不要假设参考图永远不经过本站下载，也不要依赖固定重试次数。
+
+OpenAI 还支持 multipart 图生图：把同一请求的标量参数写为同名表单字段，并以 `image=@reference.png` 上传文件，替代 JSON 的 `image_urls`。多图可使用 `image[]` 文件字段；不需要手工填写 boundary。GIF/SVG 扩展的表单字段见下表。
+
+## 3. 参数说明
+
+### 3.1 公共字段与平台差异
+
+| 字段 | 类型 | 必填 | OpenAI | Gemini |
+|---|---|---|---|---|
+| `model` | string | Gemini 必填；OpenAI 建议显式提供 | 使用分组支持的图片模型；省略时本站默认 `gpt-image-2` | 使用分组支持的 Gemini 图片模型 |
+| `prompt` | string | 是 | 画面描述或编辑指令 | 非空画面描述或编辑指令 |
+| `image_urls` | string[] | 图生图需要 | 有有效值进入编辑流程；multipart 可改用文件 | 有参考图时进入图生图；空值元素无效 |
+| `resolution` | string | 否 | `1K` / `2K` / `4K` 清晰度档位 | `1K` / `2K` / `4K`；`0.5K` 仅对运行配置明确开启的模型可用 |
+| `aspect_ratio` | string | 否 | 比例或 `auto`，与 `resolution` 一起解析上游尺寸 | 比例或 `auto` / `自动`；省略时不指定上游比例 |
+| `size` | string | 否 | 像素 `WIDTHxHEIGHT`、`auto`、比例或清晰度档位别名 | 比例、可约分为支持比例的像素尺寸，或清晰度档位别名；像素写法不保证成品精确像素 |
+| `n` | integer | 否 | 默认 `1`，表示结果文件数量，仍受上游限制 | 此 SC 请求方言不提供多图数量控制 |
+| `quality` | string | 否 | 例如 `low` / `medium` / `high`，以模型支持为准 | 不属于此 SC 请求方言 |
+| `background` | string | 否 | 以模型及输出格式支持为准 | 不属于此 SC 请求方言 |
+| `mask.image_url` | string | 否 | 编辑遮罩；multipart 可上传 `mask` 文件，支持范围取决于上游 | 不属于此 SC 请求方言 |
+| `response_format` | string | 否 | 按上游协议处理；本站异步成功结果仍返回 URL | 不属于此 SC 请求方言 |
+| `stream` | boolean | 否 | 省略或 `false`；`true` 在入队前拒绝 | SC 接口不提供流式结果，请省略 |
+
+OpenAI 与 Gemini 的 `size` 语义不同，建议每次只选一组尺寸写法。OpenAI 未提供显式 `WIDTHxHEIGHT` / `auto`、需要用比例（`aspect_ratio` 或 `size` 比例别名）计算尺寸时，必须同时提供 `resolution`；仅有 `resolution` 时按方图解析。显式 `WIDTHxHEIGHT` / `auto` 优先于比例字段；像素尺寸与冲突的 `resolution` 会被拒绝，`size:auto` 则交由上游决定尺寸。比例别名与 `aspect_ratio` 同时存在时以显式比例字段为准。Gemini 显式 `resolution` / `aspect_ratio` 优先于 `size` 别名。
+
+常用比例为 `1:1`、`2:3`、`3:2`、`3:4`、`4:3`、`4:5`、`5:4`、`9:16`、`16:9`、`21:9`、`9:21`。OpenAI 还接受 `2:1`、`1:2`；实际尺寸与模型限制需要匹配。GPT Image 2 / 2.5 的 4K 映射与校验见[尺寸专题](wiki-new/图片渠道错误与换号重试诊断.md#2026-11-05-gpt-image-4k-等比映射本地实现)，不要将静态图尺寸表直接套用于多帧 GIF。
+
+### 3.2 OpenAI GPT Image 2.6+ 格式扩展
+
+**新增 GIF、SVG 输出及帧参数仅属于 OpenAI GPT Image 2.6+ 系列能力。当前版本明确开放 `gpt-image-2.6-flare`、`gpt-image-2.6-sunburst`；后续型号仍需网关明确支持，不能仅凭名称或版本号推断。** 这组扩展不适用于 Gemini。旧 OpenAI 模型保留既有 PNG/WebP/JPEG 等静态格式能力，本轮不为其开放 GIF/SVG。
+
+| 字段 | JSON 类型 | 必填 | 默认值与规则 | multipart 字段 |
+|---|---|---|---|---|
+| `output_format` | string | 否 | 两款已开放模型支持 `png`（默认）/ `webp` / `jpeg` / `gif` / `svg` | `output_format` |
+| `frame_count` | integer | 否 | 仅 GIF；默认 `9`，范围 `2`～`16`（含端点） | `frame_count`，十进制整数文本 |
+| `frame_duration_ms` | integer | 否 | 仅 GIF；默认 `200` 毫秒，范围 `20`～`2000`；官方编码按最近的 10 毫秒取整 | `frame_duration_ms`，十进制整数文本 |
+| `svg.model` | string | 条件需要 | 仅 SVG；启用作者模型选择的上游要求提供受支持的作者模型名，其余上游按要求省略。本站不设默认，也不把顶层图片模型当作作者 | `svg[model]` |
+| `svg.reasoning.effort` | string / null | 否 | 仅 SVG；`none` / `minimal` / `low` / `medium` / `high` / `xhigh` / `max`，具体档位须作者模型支持；省略或 `null` 不指定 | `svg[reasoning][effort]`；不指定时省略表单字段 |
+
+在第 2 节对应图片请求上修改参数即可，无需换接口或查询方式：
+
+| 目标 | 参数变化 |
+|---|---|
+| PNG / WebP / JPEG 静态图 | 将 `output_format` 设为所需格式，不传帧参数或 `svg` 对象 |
+| GIF | 使用当前开放的 2.6 模型；设 `output_format=gif`、`size=512x512` 或 `size=auto`，删除示例中的 `resolution` / `aspect_ratio`；按需设置帧数和间隔，提示词描述动作及循环 |
+| SVG | 使用当前开放的 2.6 模型；设 `output_format=svg`、`n=1`，删除帧参数；仅在上游要求时加入 `svg` 对象，并先确认可用作者模型 |
+
+JSON 的 SVG 字段为嵌套对象，例如以下**参数片段**；`SVG_AUTHOR_MODEL` 是待替换占位符，不是可用模型名。
+
+```json
+{
+  "svg": {
+    "model": "SVG_AUTHOR_MODEL",
+    "reasoning": {"effort": "low"}
+  }
+}
+```
+
+注意以下边界：
+
+- OpenAI 异步入口的帧参数不能使用 JSON 数字字符串、小数、布尔值或 `null`；使用默认值时省略字段。非 GIF 带帧参数、非 SVG 带 `svg` 对象、旧模型请求新格式/帧参数、非法枚举或范围会在建任务前返回 `400`。Gemini SC 不解析这些扩展字段，传入它们不会获得对应格式能力。
+- `frame_count` 是每份 GIF 的帧数，`n` 是结果文件数。GIF 的 `size` 表示单帧尺寸；帧数、尺寸和 `n` 共同受上游拼图长边及总像素预算约束。建议从 `512x512` 或 `auto` 开始，超限时降低尺寸、帧数或 `n`。
+- 官方 GIF 不支持遮罩、部分图流式输出或自定义压缩；SVG 使用 `n=1`，不应搭配流式、部分图或输出压缩。其他供应商的能力以其协议为准。
+- SVG 作者模型是否可用取决于上游及项目权限；目前 SVG 真实产出和编辑能力尚未验证通过，参数可透传不代表账号具备能力。确认可用作者模型后再使用，边界与验证记录见[结果格式专题](wiki-new/异步生图结果转存与格式兼容.md)。
+
+### 3.3 输出文件与参考图限制
+
+成功查询统一通过 `data[].url` 返回完整文件，不内联 SVG，也不逐帧返回 GIF。按实际文件格式保留扩展名和 MIME：GIF 为 `.gif` / `image/gif`，SVG 为 `.svg` / `image/svg+xml`；不要统一另存为 PNG。
+
+结果受字节和像素限制。GIF 最多 16 帧，画布和所有帧矩形的累计像素均受现有下载像素上限约束。SVG 仅接受有有效尺寸或 `viewBox` 的静态、自包含内容；脚本、事件、外部资源、嵌入栅格图、动画及 DTD/实体等会被拒绝。参考图与普通上传仍仅使用 PNG、JPEG、WebP。完整说明见[结果转存与格式兼容](wiki-new/异步生图结果转存与格式兼容.md)。
+
+## 4. 受理、查询与下载
+
+提交成功返回 `202`：
 
 ```json
 {
@@ -346,137 +171,50 @@ Idempotency-Key: sc-i2i-20260727-001
 }
 ```
 
----
-
-## 6. 查询任务（OpenAI / Gemini 共用）
+返回头包含 `Cache-Control: no-store`、`Location` 和 `Retry-After: 3`。`query_url` 按部署的公共地址设置生成；未配置绝对地址时可能返回相对路径。客户端优先使用该地址，携带同一 API Key 轮询。
 
 ```http
-GET /v1/images/tasks_async/{task_id}
-Authorization: Bearer <提交任务的同一个 API_KEY>
+GET /v1/images/tasks_async/asyncimg_0123456789abcdef
+Authorization: Bearer YOUR_API_KEY
 ```
 
-OpenAI 与 Gemini 异步任务均使用此路径；受理响应里的 `query_url` 也指向此处。
-
-### 6.1 状态字段说明
-
-| `status` | 含义 | 建议 |
+| `status` | 含义 | 客户端处理 |
 |---|---|---|
-| `queued` | 已入队，等待执行 | 继续轮询 |
-| `processing` | 上游生成 / 上传 OSS / 计费确认中 | 继续轮询 |
-| `succeeded` | 成功终态 | 读取 `data[].url` |
-| `failed` | 失败终态 | 读取 `error_code` 和 `fail_reason` |
+| `queued` | 等待执行或重新排队 | 继续轮询 |
+| `processing` | 生成、结果转存或计费确认中 | 继续轮询 |
+| `succeeded` | 成功终态 | 下载 `data[].url` |
+| `failed` | 失败终态 | 展示 `error_code` 与 `fail_reason` |
 
-成功与失败查询均返回 HTTP `200`。仅当 `status === "succeeded"` 时可消费图片 URL。
+未完成时响应为 `status` 和 `task_id`；排队/处理中会提供 `Retry-After: 3`。建议首次等待 3 秒，再按 3～30 秒退避查询。HTTP `200` 只表示查询成功，不能作为图片生成成功的依据。
 
-### 6.2 响应示例
-
-排队中：
-
-```json
-{
-  "status": "queued",
-  "task_id": "asyncimg_0123456789abcdef"
-}
-```
-
-处理中：
-
-```json
-{
-  "status": "processing",
-  "task_id": "asyncimg_0123456789abcdef"
-}
-```
-
-成功：
+成功查询：
 
 ```json
 {
   "status": "succeeded",
   "task_id": "asyncimg_0123456789abcdef",
-  "data": [
-    {
-      "url": "https://cdn.example.com/images/results/output-1.png"  // OSS 结果链接，约 1 天有效
-    }
-  ]
+  "data": [{"url": "https://cdn.example.com/images/results/output-1.png"}]
 }
 ```
 
-失败：
+结果 URL 可能是公开地址或带有效期的签名地址。URL 有效期与文件保留期不同，均由部署配置决定；及时下载或转存。未结束的任务可能正在结果上传或计费确认，请继续查询原任务，不要再次提交相同生成请求。
 
-```json
-{
-  "status": "failed",
-  "task_id": "asyncimg_0123456789abcdef",
-  "error_code": 601,                         // 应用层失败对照码，非 HTTP 6xx
-  "fail_reason": "上游生图失败（HTTP 400）：非常抱歉，生成的图片可能违反了关于与第三方内容相似性的防护限制。如果你认为此判断有误，请重试或修改提示语。"  // 上游失败时保留脱敏后的完整提示
-}
-```
+## 5. 失败处理
 
-失败查询仍返回 HTTP `200`，请同时读取 `error_code` 和 `fail_reason`。应用层失败对照码如下：
+### 5.1 提交或查询接口错误
 
-| `error_code` | 含义 | 建议 |
-|---:|---|---|
-| `601` | 内容安全、内容政策或第三方相似性拦截 | 修改提示词后重试，并原样展示 `fail_reason` |
-| `602` | 参考图 URL 拉取失败（DNS、TLS、超时、连接重置等） | 检查 HTTPS/CDN，或先上传参考图 |
-| `603` | 账号或上游容量耗尽 | 稍后重试并检查账号容量 |
-| `604` | 请求参数、提示词、尺寸、格式或参考图无效 | 按原文修正请求 |
-| `605` | 上游限流（HTTP 429） | 按 `Retry-After` 退避 |
-| `606` | 上游暂时不可用（网关/服务端 5xx） | 稍后重试 |
-| `607` | 上游图片输出无法解析 | 检查模型和响应格式 |
-| `608` | 生图超时或执行结果未知 | 避免自动重复提交，等待对账 |
-| `609` | 存储或计费后处理失败 | 继续查询；不会重新调用上游 |
-| `610` | 未分类上游错误（容错码） | 保留并展示 `fail_reason` 原文，携带任务 ID 联系排查；不要据此重复提交 |
-| `611` | 参考图数量超过上游限制（当前最多 8 张） | 将参考图减少到 8 张以内后重新提交 |
-| `612` | 缺少、未检测到或无法使用所需参考图 | 重新上传清晰、完整且与提示要求一致的参考图 |
-| `613` | 提示词或输入图片无法被上游处理 | 简化提示词，检查图片格式和内容后重试 |
-
-`611`、`612`、`613` 只细分失败原因；`fail_reason` 仍保留脱敏后的上游原文，便于客户端展示和排查。
-
-内容安全 601 也包括上游以 HTTP 400 返回的真实人物露骨亲密、性化、情色/色情、裸露等拦截。例如：
-
-```text
-上游生图失败（HTTP 400）：抱歉，我不能帮助制作或编辑包含真实人物的露骨亲密/性化场景图像（例如让真实人物进行特写接吻、只穿泳裤等情色化描绘）。
-```
-
-`error_code` 不是 HTTP 状态码；任务查询的 HTTP 状态仍按协议固定为 `200`。
-
----
-
-## 7. 状态说明
-
-| 阶段 | `status` |
+| HTTP | 典型原因 |
 |---|---|
-| 已入队 | `queued` |
-| 调用上游 / 上传 / 计费等中间态 | `processing` |
-| 成功 | `succeeded` |
-| 失败 | `failed` |
-
-注意：`processing` 可能表示图片已生成但仍在上传或结算，须继续轮询直到成功或失败终态。Worker 会在账号路由前先抢占内部执行锁；若此时尚未分配并落库最终账号，公共查询仍返回 `queued`，不会把未调用上游的调度窗口显示为 `processing`。容量、上游临时错误或参考图失败重试回队列时会清除旧的当前账号字段，但保留账号尝试审计；下一次重新抢占也会先按未分配账号窗口展示。
-
----
-
-## 8. 错误响应
-
-### 8.1 常见 HTTP 状态
-
-| HTTP | 场景 |
-|---|---|
-| `400` | 提交参数无效、`stream=true`、非法尺寸/比例、参考图无效等；任务失败时通常对应 `error_code=601`、`602`、`604` 或 `611`–`613` |
-| `401` | API Key 无效 |
-| `403` | 平台不匹配，或普通生图 / 异步生图未开启 |
-| `404` | 任务不存在，或非提交所用 API Key |
-| `409` | 幂等冲突 / 输入字节额度不足 |
+| `400` | 参数、尺寸、输出格式或参考图无效，OpenAI 请求了流式，扩展参数类型/范围错误 |
+| `401` | 缺少或无效 API Key |
+| `403` | 对应平台计费分组不可用，图片生成或异步生图未开启 |
+| `404` | 任务不存在，或不是提交任务所用的 Key |
+| `409` | 幂等冲突；上传预留处理中或参考图字节额度不足等 |
 | `413` | 请求体或参考图超限 |
-| `408` | 上游请求超时；任务失败通常对应 `error_code=608` |
-| `429` | 上游限流；任务失败通常对应 `error_code=605` |
-| `502` | 上游网关或账号容量错误；按正文区分 `603` / `606` |
-| `503` | 上游、本地运行依赖或对象存储/运行配置暂时不可用；任务失败通常对应 `error_code=606` 或 `609` |
-| `504` / `524` | 上游或 CDN 超时；任务失败通常对应 `error_code=606` / `608` |
+| `429` | 准入/上传限频等；遵守 `Retry-After` |
+| `500` / `502` / `503` | 本地处理、上传、结果存储或运行依赖暂时不可用，按错误正文处理 |
 
-任务查询的 `failed` 是业务终态，仍使用 HTTP `200`。
-
-### 8.2 错误格式（OpenAI / Gemini 相同）
+异步 Handler 的业务错误形态：
 
 ```json
 {
@@ -488,128 +226,87 @@ OpenAI 与 Gemini 异步任务均使用此路径；受理响应里的 `query_url
 }
 ```
 
-### 8.3 上游失败原文
+入口鉴权中间件还可能返回顶层 `code` / `message`，客户端应兼容这两种错误结构。例如缺少密钥为 `API_KEY_REQUIRED`，无效密钥为 `INVALID_API_KEY`：
 
-Worker 会在现有脱敏和长度限制内保存上游错误正文。任务查询的 `fail_reason` 应直接展示，不要替换成笼统的 “image generation failed”。常见原文包括：
-
-```text
-上游生图失败（HTTP 400）：非常抱歉，生成的图片可能违反了关于与第三方内容相似性的防护限制。如果你认为此判断有误，请重试或修改提示语。
+```json
+{
+  "code": "INVALID_API_KEY",
+  "message": "Invalid API key"
+}
 ```
 
-```text
-上游生图失败（HTTP 400）：image_url fetch failed: Failed to perform, curl: (28) Connection timed out after 60001 milliseconds. See https://***.se/***/***/*** first for more details.
+### 5.2 已受理任务失败
+
+查询失败任务仍返回 HTTP `200`，例如：
+
+```json
+{
+  "status": "failed",
+  "task_id": "asyncimg_0123456789abcdef",
+  "error_code": 604,
+  "fail_reason": "请求参数或参考图无效，请检查任务返回的具体错误。"
+}
 ```
 
-```text
-上游生图失败（HTTP 502）：All available accounts exhausted
+`error_code` 是应用层分类，**不是 HTTP 状态码**。`fail_reason` 包含脱敏后的实际原因，应展示原文并保留任务 ID；不要把所有错误替换为固定提示。
+
+| `error_code` | 含义 | 建议 |
+|---:|---|---|
+| `601` | 内容安全或内容政策拦截 | 修改提示词或参考图后再提交 |
+| `602` | 参考图拉取失败 | 检查 URL 可访问性与有效期，或上传参考图 |
+| `603` | 账号或上游容量耗尽 | 检查容量并适当退避 |
+| `604` | 请求参数、尺寸、格式或参考图无效 | 根据原文修正请求 |
+| `605` | 上游限流 | 退避，避免密集重发 |
+| `606` | 上游暂时不可用 | 根据任务结果和原文处理 |
+| `607` | 上游图片输出无法解析或校验 | 检查输出格式和上游能力 |
+| `608` | 超时或执行结果未知 | 不自动重复生成，先核对原任务 |
+| `609` | 存储或计费后处理失败 | 联系管理员处理已有结果，不重新生图 |
+| `610` | 未分类错误 | 保留原文和任务 ID 排查，勿盲目重发 |
+| `611` | 参考图数量超过上游限制 | 按所选模型和错误原文减少数量 |
+| `612` | 缺少或无法使用所需参考图 | 重新提供有效参考图 |
+| `613` | 提示词或输入图片无法被上游处理 | 按原文调整输入 |
+
+### 5.3 重试边界
+
+服务器按错误分类、运行配置及任务预算处理可重试错误，可能重新排队、切换兼容渠道，或对特定参考图错误执行本地文件回退；没有对所有错误通用的固定重试次数。公共查询仅返回上述状态、结果或失败原因，不包含内部 `retry_count`、账号尝试或时间线。
+
+结果获取、校验、存储或计费阶段的失败不会通过重新生成图片来恢复；执行结果未知也禁止自动重调上游。客户端遇到提交响应丢失时，应携带原幂等键原样重试受理请求，取得原任务后继续查询。实现细节见[异步生图架构](wiki-new/异步生图架构.md)与[渠道错误及重试说明](wiki-new/图片渠道错误与换号重试诊断.md)。
+
+## 6. 辅助接口与兼容入口
+
+### 6.1 参考图上传
+
+`POST /v1/uploads/images_sc` 使用 multipart 字段 `file`，要求 API Key 有可用的 Gemini 平台生图计费分组。上传成功后将返回的 URL 放入图生图请求的 `image_urls`；使用同一个 API Key，且在输入对象有效期内引用。
+
+```bash
+curl 'https://api.example.com/v1/uploads/images_sc' \
+  -H 'Authorization: Bearer YOUR_API_KEY' \
+  -H 'Idempotency-Key: YOUR_UPLOAD_ID' \
+  -F 'file=@reference.png;type=image/png'
 ```
 
-```text
-上游生图失败（HTTP 429）：Upstream rate limit exceeded, please retry later
+成功返回 HTTP `200`：
+
+```json
+{
+  "url": "https://cdn.example.com/images/inputs/reference.png",
+  "filename": "reference.png",
+  "content_type": "image/png",
+  "bytes": 12345,
+  "created_at": 1793923200
+}
 ```
 
-```text
-上游生图失败（HTTP 400）：Invalid request
-```
+支持 PNG/JPEG/WebP，声明 MIME 应与文件一致。上传限频、文件大小及每 Key 的输入字节额度由部署配置控制；重复命中有效上传幂等结果时返回 `X-Idempotency-Replayed: true`。过期、跨 Key 或已进入清理流程的输入对象会被拒绝。
 
-### 8.4 近期生产错误快照（只读审计）
+### 6.2 当日统计
 
-以下统计来自 `2026-08-22 00:00` 至 `2026-08-29 11:45` 的服务器日志，事件为 `async_image.upstream_failed`，仅用于排查优先级，不代表接口固定配额或 SLA。关键词分类可能重叠。
-
-| 项目 | 统计 |
-|---|---:|
-| 总失败事件 | 2312 |
-| HTTP 400 / 502 / 503 / 504 | 1526 / 319 / 125 / 114 |
-| HTTP 429 / 524 / 403 / 408 | 113 / 50 / 64 / 1 |
-| 参考图 URL 拉取失败 | 1231 |
-| 账号或上游容量耗尽 | 733（Gemini 669、OpenAI 64） |
-| Gemini `Invalid request` | 154 |
-| 第三方相似性拦截 | 36 |
-| 内容安全/政策拦截 | 至少 29 |
-| 缺少参考图、格式或尺寸输入问题 | 16 |
-| 通用上游失败 | 4 |
-
-生产服务器本次仅执行只读日志查询，未修改配置、数据库或服务进程。
-
-### 8.5 卡住任务诊断（2026-08-31，只读）
-
-服务器 `108.186.246.14` 在 `2026-08-31T13:25:34Z` 的数据库快照：`succeeded=13626`、`failed=1278`、`execution_unknown=60`、`invoking=8`。其中 1 个是最近两分钟内的正常执行，另有 **7 个 `invoking` 已超过 2 分钟租约**，最早的任务已停留约 2 天 4 小时；7 个卡住任务全部是 Gemini `gemini-3-pro-image-preview`。
-
-这 7 个任务的事件链都只有 `queued -> invoking (invocation_started)`。日志同时记录了每个任务的：
-
-```text
-async_image.execution_timeout_cancel  timeout: 900000
-async_image.execution_unknown_transition_failed  error: context canceled
-```
-
-含义是：Worker 达到后台设置中的 `execution_timeout_seconds=900`（15 分钟）后取消上游请求；随后 Worker 复用已被取消的 context 写入 `execution_unknown`，数据库状态更新失败，任务截至快照仍长期留在 `invoking`，既没有成功也没有失败终态。当前恢复扫描配置为 `worker_lease_seconds=120`、`recovery_interval_seconds=30`，但这些任务尚未被恢复扫描收敛，属于已知运行风险；不要据此重复提交同一请求，以免产生重复生成或计费。生产修复（改用未取消的父 context、增加超时兜底和告警）尚未执行。
-
-近期 7 天任务表中的失败分类为：`upstream_failed=356`、`invalid_reference_image=297`、`local_capacity_exhausted=63`、`execution_timeout=46`、`upstream_capacity_exhausted=27`；另有 `execution_unknown=34`。失败查询仍返回 HTTP `200`，请以 `status`、`error_code` 和 `fail_reason` 为准。
-
----
-
-## 8.5 管理员异步任务中心
-
-管理员页面 `/admin/async-image-tasks` 支持查看全站任务详情、事件时间线、账号尝试和生成结果：
-
-```http
-GET  /api/v1/admin/async-image-tasks
-GET  /api/v1/admin/async-image-tasks/{task_id}
-POST /api/v1/admin/async-image-tasks/{task_id}/terminate
-```
-
-新提交的 BB/SC 图生图任务会保存远程 HTTP(S) 参考图 URL。管理员详情响应在 `task.reference_image_urls` 返回原顺序列表，页面在提示词下方展示完整 URL，点击会在新窗口打开；普通用户详情和任何任务列表均不返回。内联 `data:` 图片不重复保存，历史任务也不会自动回填。URL 可能包含会过期的临时签名参数，请将数据库与管理员页面按敏感运维数据保护。
-
-`terminate` 通过任务版本号和当前状态原子校验，将卡住或后处理失败任务结束为 `failed`，记录 `error_code=admin_terminated` 和 `admin_task_terminated` 事件，并清除加密请求载荷。成功、已失败、已过期任务不可重复操作；不会重新调用上游生图。
-
-### 8.6 本轮冒烟、安全与缺陷审查（2026-08-31）
-
-本轮仅在本地工作树执行，未连接生产服务、未部署、未重启。覆盖 Handler/Service 异步任务状态转换、超时终态、恢复扫描、管理员终止、错误码分类、路由注册和前端类型检查。
-
-| 检查项 | 结果 |
-|---|---|
-| 异步错误分类与 `610` 未知兜底 | 通过；未知文案保留脱敏后的 `fail_reason`，明确像素/尺寸/MIME 错误归 `604` |
-| 超时终态写入 | 通过；终态 transition 使用独立短超时且去除已取消信号的 context，不再复用 `context canceled` 的执行 context |
-| 恢复扫描 | 通过；按 `started_at`（缺失时 `created_at`）墙钟时间收敛超时 `invoking`，`updated_at` 心跳不会无限延长任务 |
-| 管理员终止安全性 | 通过；管理员路由受 AdminAuth/合规中间件保护，服务层使用状态+版本 CAS，成功任务不可覆盖，重复操作返回冲突 |
-| 资源泄漏检查 | 已修复；Chat Completions 异步账号超时 context 在兼容服务未配置的提前返回路径显式取消；`go vet ./internal/handler ./internal/service` 通过 |
-| 定向/完整冒烟 | `go test ./internal/handler -run 'AsyncImage|DurableAsyncImage|TaskCenter|GatewayRoutes' -count=1`、`go test ./internal/handler -count=1`、`go test ./internal/service -run 'AsyncImage|Gemini.*Async|Reference|Failover' -count=1`、`pnpm typecheck` 均通过 |
-
-安全边界与剩余风险：`execution_unknown` 仍禁止自动重新调用上游，避免未知结果导致重复生成或重复计费；`610` 只表示“无法归类”，客户端不应据此盲目重试。生产真实上游、Redis/PostgreSQL/OSS 端到端、部署后告警和账单对账尚未验证，生产生效需另行授权。
-
-生产复核（2026-08-31 14:50 UTC）显示当前 `invoking=3`，其中执行时间超过 1 小时的任务为 `0`；现有任务均为分钟级新任务。该查询为只读，生产仍运行旧二进制。
-
-## 9. 快速对接清单
-
-1. 确认分组已开启「图片生成」+「异步生图」，平台与路径匹配。
-2. 按平台选择提交路径：
-   - OpenAI 文生图 / 图生图 → `POST /v1/images/generations_oa`（有有效 `image_urls` 或 multipart `image` → 图生图，否则文生图）
-   - Gemini 文生图 / 图生图 → `POST /v1/images/generations_sc`
-3. 建议携带 `Idempotency-Key`，避免网络重试重复计费。
-4. 查询统一：`GET /v1/images/tasks_async/{task_id}`（OpenAI / Gemini 相同）。
-5. 仅在 `status === "succeeded"` 时下载 `data[].url`；任务失败时同时读取 `error_code` 与 `fail_reason`；链接约 24小时有效，过期则无效。
-
----
-
-## 10. 当日异步生图统计
-
-使用 API Key 所属用户身份，查询服务器配置时区当天的异步生图汇总。统计范围是该用户的全部持久化异步生图任务，不限于当前 API Key；正在处理的任务也计入请求数。
-
-### 10.1 请求
-
-```http
-GET /v1/images/tasks_async/stats
-Authorization: Bearer <API_KEY>
-```
-
-接口只支持 `Authorization: Bearer` 方式传入 API Key，不接受 URL 查询参数传 Key。鉴权通过但余额已耗尽的 Key 仍可读取自己的统计。
-
-### 10.2 成功响应
+`GET /v1/images/tasks_async/stats`，使用相同的 Bearer 鉴权。统计范围是 Key 所属用户当天的持久化异步任务，不限当前 Key；日期按服务器配置时区计算，已归入 `expired` 的任务不计入公开请求总数。余额耗尽但仍可通过此接口鉴权的 Key 可以查询统计。
 
 ```json
 {
   "object": "async_image.stats",
-  "date": "2026-08-23",
+  "date": "2026-11-06",
   "timezone": "Asia/Shanghai",
   "balance": 12.5,
   "today_requests": 20,
@@ -619,36 +316,24 @@ Authorization: Bearer <API_KEY>
 }
 ```
 
-字段说明：
+`today_requests` 为活动、成功和失败分类的数量之和，含未完成任务；`failure_count` 包含失败、执行未知及存储/计费失败。存储/计费失败可能仍在自动恢复，因此统计中的失败分类不等于公共查询已经显示 `failed`。`success_rate` 为成功数除以成功与失败数之和的百分比，分母为 `0` 时返回 `0`。响应带 `Cache-Control: no-store`；读取失败返回 `500 / stats_unavailable`，实例未提供统计能力返回 `503 / stats_unavailable`。
 
-| 字段 | 类型 | 说明 |
-|---|---|---|
-| `date` | string | 统计日期，格式 `YYYY-MM-DD` |
-| `timezone` | string | 服务器当前配置时区；日期边界按此时区计算 |
-| `balance` | number | 当前用户余额 |
-| `today_requests` | integer | 当天任务总数，包含处理中、成功和失败任务 |
-| `success_count` | integer | 当天成功任务数 |
-| `failure_count` | integer | 当天失败任务数，包括 `execution_unknown`、存储失败和计费失败等终态 |
-| `success_rate` | number | 成功率百分比，计算为 `success_count / (success_count + failure_count) * 100`；没有终态任务时为 `0` |
+### 6.3 兼容入口
 
-响应带有 `Cache-Control: no-store`。余额和统计均为请求时读取，不应长时间缓存。
+| 入口 | 约定 |
+|---|---|
+| `POST /v1/images/edits_oa` | 持久化 OpenAI 显式编辑入口，必须有参考图；结果仍查询 `tasks_async` |
+| `GET /v1/tasks_sc/{task_id}` | 持久化任务查询兼容路径，当前响应与 `tasks_async` 一致 |
+| `POST /v1/chat/completions_gm` | Gemini 的 BB 消息方言，使用用户消息而非本文 SC 的 `prompt` 结构；沿用相应受理字段，任务可通过 `tasks_async` 查询 |
+| `POST /v1/images/generations/async`、`POST /v1/images/edits/async` | 旧式异步接口；支持已实现的 OpenAI 格式参数，但保留旧受理/结果结构，并使用 `GET /v1/images/tasks/{task_id}` 查询 |
 
-### 10.3 错误
+推荐新接入使用第 1 节的持久化入口。不要把旧式 `/images/tasks/` 与持久任务 `/images/tasks_async/` 混用，也不要把其他网关的 `_async` 提交命名当成本服务已提供的路径。
 
-```json
-{
-  "error": {
-    "type": "authentication_error",
-    "code": "authentication_error",
-    "message": "invalid API key"
-  }
-}
-```
+### 6.4 运维与专题文档
 
-常见状态码：
+管理员任务中心为 `/admin/async-image-tasks`；内部状态、尝试记录、参考图 URL 审计及人工处理不属于本文公共查询契约。
 
-| HTTP | code | 说明 |
-|---|---|---|
-| `401` | `authentication_error` | 缺少或无效 API Key |
-| `500` | `stats_unavailable` | 统计查询失败 |
-| `503` | `stats_unavailable` | 当前实例未提供异步统计能力 |
+- [异步生图架构、状态机与恢复](wiki-new/异步生图架构.md)
+- [图片结果转存、格式限制与验证记录](wiki-new/异步生图结果转存与格式兼容.md)
+- [图片渠道错误、换号重试与尺寸诊断](wiki-new/图片渠道错误与换号重试诊断.md)
+- [异步生图早期运行诊断归档](wiki-new/异步生图早期运行诊断归档.md)：原主文档中的历史只读快照和当时验证，不能作为当前运行状态

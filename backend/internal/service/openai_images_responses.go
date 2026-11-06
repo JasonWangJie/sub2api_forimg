@@ -312,6 +312,10 @@ func openAIImageOutputMIMEType(outputFormat string) string {
 		return "image/jpeg"
 	case "webp":
 		return "image/webp"
+	case "gif":
+		return "image/gif"
+	case "svg":
+		return "image/svg+xml"
 	default:
 		return "image/png"
 	}
@@ -394,6 +398,15 @@ func buildOpenAIImagesResponsesRequest(parsed *OpenAIImagesRequest, toolModel st
 	}
 	if parsed.OutputCompression != nil {
 		tool, _ = sjson.SetBytes(tool, "output_compression", *parsed.OutputCompression)
+	}
+	if parsed.FrameCount != nil {
+		tool, _ = sjson.SetBytes(tool, "frame_count", *parsed.FrameCount)
+	}
+	if parsed.FrameDurationMS != nil {
+		tool, _ = sjson.SetBytes(tool, "frame_duration_ms", *parsed.FrameDurationMS)
+	}
+	if parsed.SVG != nil {
+		tool, _ = sjson.SetBytes(tool, "svg", parsed.SVG)
 	}
 	if parsed.PartialImages != nil {
 		tool, _ = sjson.SetBytes(tool, "partial_images", *parsed.PartialImages)

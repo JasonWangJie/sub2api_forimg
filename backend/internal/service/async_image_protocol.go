@@ -850,7 +850,7 @@ func (d AsyncImageReferenceDownloader) fetchRemoteImage(ctx context.Context, par
 	}
 	var reference *AsyncImageReference
 	if generated {
-		reference, err = d.validateImage(data, "")
+		reference, err = d.ValidateGeneratedBytes(data)
 	} else {
 		reference, err = d.validateDownloadedImage(data, resp.Header.Get("Content-Type"))
 	}
@@ -893,7 +893,7 @@ func (d AsyncImageReferenceDownloader) decodeDataURIWithMIME(raw string, generat
 		if err != nil {
 			return nil, errors.New("invalid base64 image data URI")
 		}
-		return d.validateImage(data, "")
+		return d.ValidateGeneratedBytes(data)
 	}
 	decodedLen := base64.StdEncoding.DecodedLen(len(raw) - comma - 1)
 	if int64(decodedLen) > d.maxBytes() {
@@ -986,6 +986,8 @@ func imageFormatMIME(format string) string {
 		return "image/png"
 	case "gif":
 		return "image/gif"
+	case "svg":
+		return "image/svg+xml"
 	case "webp":
 		return "image/webp"
 	default:

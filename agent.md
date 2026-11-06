@@ -1,5 +1,30 @@
 # AI 交接文档
 
+## 2026-11-06 当前交接 异步 API 文档结构已统一
+
+- 当前任务按现行本地代码整理 [API 文档](异步生图接口文档new.md)与指南双语内容：主示例只有文生图、图生图两类，格式扩展集中说明，辅助接口与历史诊断不再混入主流程。后续参数调整沿用这套结构，继续同步根文档、双语页面、相关 wiki 和三份记录。
+- “仅 OpenAI GPT Image 2.6+”描述新 GIF/SVG 能力；当前实现仍是 Flare/Sunburst 精确名单，不可写成未来型号自动支持。`frame_count` 与 `frame_duration_ms` 仅 GIF；SVG 作者按条件提供，不能把顶层图片模型自动作为作者，也不能把前轮 SVG 404 记成产出通过。
+- 按代码纠正旧契约：SC/BB 共用 queued/processing/succeeded/failed，成功 data[].url、失败 error_code/fail_reason；公开任务查询无内部事件时间线/重试计数。平台计费映射优先于主分组回退，认证中间件与任务处理器错误结构有区别。实现与实测细节留在 [架构](wiki-new/异步生图架构.md)和 [格式专题](wiki-new/异步生图结果转存与格式兼容.md)。
+- 实际 HEAD=`04e6e60e4069a944582e97fa5e87efa5b43b845d`，`main...origin/main`，describe=`v0.1.173.69-1-g04e6e60-dirty`，VERSION=`0.1.173.69`。开始 26 条既有改动全部保留；本轮只整理本地文档和指南页，不连接生产或追加试单。验证和完成快照见 [开发台账](开发台账.md)。下一步若要求上线须单独执行发布部署流程；前轮生产快照不能当作本轮已上线。
+- 本轮最终前端 typecheck/目标 ESLint/build、主文档 12 JSON、指南双语 14 JSON、4 主请求跨文档一致性、导航/参数与 42 新增本地链接检查通过；29 条路径未提交。没有重跑后端回归、CI 或浏览器实机验收。
+
+## 2026-11-06 当前交接 账号45 GIF通过 SVG作者仍阻断
+
+- 实际HEAD=`04e6e60e4069a944582e97fa5e87efa5b43b845d`，`main...origin/main`，describe=`v0.1.173.69-1-g04e6e60-dirty`，VERSION=`0.1.173.69`。开始24条既有改动已保留，新增SVG解析/测试两文件，共26条。生产实读仍`.68 / 32acddb478b06df6e102f672a625e41dc6ff18fc`，结束同PID2408951 active；未部署或重启。
+- 用户已授权账号45真实新格式烟测，累计8个独立POST。前4个400，GIF1024拼图超限、SVG缺作者；512复测GIF两组200且当前代码结果链路通过。Flare文生9帧200ms、Sunburst图生15帧100ms，分别9/15个不同帧。见 [实测证据](wiki-new/异步生图结果转存与格式兼容.md#2026-11-06-账号-45-真实新格式试单)。
+- 用户指定的 `svg.model=gpt-image-2.6-flare` 在SVG文本/编辑均404，错误param明确为`svg.model`。这不是顶层生图模型不可用；SVG作者模型选择/权限尚未确认。不要继续猜作者模型或把无SVG成品写成成功；下一步先取得账号可用作者值，再验证SVG产出与编辑能力。官方指南与编辑API参考对SVG编辑存在差异。
+- 新增 `service/openai_images_svg_options.go`，仅解析/透传作者与reasoning，不补默认。JSON嵌套对象、官方multipart方括号、Worker本地参考图转换/恢复快照及Responses均保留；作者为空/类型错误等拒绝。API文档与指南新增条件参数，GIF示例改512并说明组合预算与10ms取整。不要恢复会丢嵌套对象的通用标量转换。
+- 两GIF经过真实上游、当前Handler校验、模拟暂存数据库、真实本地存储回读与查询；未经过生产队列或账单。完整Service/Handler unit（排除外部token API对照）、普通编译、前端build/目标ESLint及示例检查通过，准确命令见 [开发台账](开发台账.md)。
+- 服务器试单文件已清理，账号45调度false未改，密钥未输出/落入本地。脱敏报告及成品留在本机TEMP的 `sub2api-gif-svg-probe-20261106`；构建脚本的multipart边界随机，不要重跑后声称哈希仍匹配历史报文。后续接口调整继续同步 [API文档](异步生图接口文档new.md)、指南双语、专题与三记录。
+
+## 2026-11-06 当前交接 异步 GIF 与 SVG 本地支持
+
+- 当前真实 HEAD=`04e6e60e4069a944582e97fa5e87efa5b43b845d`，`main...origin/main`，describe=`v0.1.173.69-1-g04e6e60-dirty`，VERSION=`0.1.173.69`。开始工作树干净，完成为本轮未提交改动；没有连接生产或实际模型试单，下方线上快照不代表本轮上线。
+- 请求核心为 `service/openai_images_async_output.go`：只对两款 2.6 异步请求补 PNG 默认，GIF 补 9/200 并校验 2～16/20～2000；非 GIF 带帧参数或旧模型 GIF/SVG 返回 400。两提交 handler 在建任务前处理，原始 body hash 不变，持久化的是固化默认值的请求。API Key 与 Responses 都保留帧参数，2.6 尺寸映射没有改动。
+- `service/async_image_generated_formats.go` 为生成结果专用校验，GIF 全帧且累计像素受 DownloadMaxPixels 限制；SVG 仅静态允许列表、内部引用与受限 CSS，根尺寸受限。Worker、下载器、旧式 uploader、FromTask 归档链路均支持，输入/普通图库导入仍用原严格静态图策略。不要把整个输入校验器改为允许 SVG，也不要重编码 GIF 丢帧。
+- API 文档与 `/guides/async-image-api` 双语说明已同步；[AGENTS](AGENTS.md) 与 `.cursor/rules/fork-release-deploy.mdc` 已加入强制接口文档同步规则。今后相关契约变更必须同任务更新 [API 文档](异步生图接口文档new.md)、双语指南、[格式专题](wiki-new/异步生图结果转存与格式兼容.md)及三份记录。
+- 已通过完整 Service/Handler unit（排除既有外部 token API 对照）、最终请求/结果定向补验、普通 Go 编译、前端类型/目标 ESLint/完整构建及示例检查；Go 格式、差异与新增链接检查通过，准确范围见 [开发台账](开发台账.md)。下一步是经用户明确授权后在实际供应商验证两模型各格式与 GIF 帧控制，再安排发布部署；本轮无真实服务/账单/存储端到端验收。
+
 ## 2026-11-06 当前交接 账号45已完成历史参数实测
 
 - 用户要求用前面失败任务参数实际试单。选 `asyncimg_67bd3e7898676b2bf365794ad9bcd761` 的 Sunburst 单图 `2448x3264` 和 `asyncimg_10e4ba5d4cb79cc2d9cdf82950fa0456` 的 Flare 三图 `1152x2048`，用取回的四张原参考图与留存提示词预览，通过当前 `buildOpenAIImagesRequest` 构建。每例从服务器以 45 号账号直发官方一次，均 HTTP 200，各返回一张同尺寸 PNG。[实际报文形态和结果](wiki-new/图片渠道错误与换号重试诊断.md#2026-11-06-账号45历史参数官方实测)。

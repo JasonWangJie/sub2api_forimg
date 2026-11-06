@@ -676,7 +676,9 @@ func (s *ImageLibraryService) FromTask(ctx context.Context, userID int64, taskID
 	if closeErr != nil {
 		return nil, false, apperrors.ServiceUnavailable("IMAGE_ARCHIVE_FAILED", "failed to close the asynchronous image result").WithCause(closeErr)
 	}
-	validated, err := ValidateImageBytes(data, ref.ContentType, policy.MaxImageBytes, policy.MaxImagePixels)
+	// Task results include validated animated GIF and passive SVG. Recheck with
+	// the generated-result policy so archiving does not quarantine valid output.
+	validated, err := ValidateGeneratedImageBytes(data, policy.MaxImageBytes, policy.MaxImagePixels)
 	if err != nil {
 		if quarantineErr := s.repo.QuarantineAssetFromTask(ctx, userID, taskID, imageIndex, *ref, cleanLibraryText(err.Error(), 1000)); quarantineErr != nil {
 			return nil, false, apperrors.ServiceUnavailable("IMAGE_QUARANTINE_FAILED", "invalid asynchronous image result could not be isolated").WithCause(quarantineErr)

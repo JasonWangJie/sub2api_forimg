@@ -70,3 +70,5 @@ alwaysApply: true
 每次代码、配置、测试或文档任务完成时，必须同步更新根目录 `readmenew.md`、`开发台账.md` 和 `agent.md`。记录必须以实际 `git rev-parse HEAD`、`git status --short --branch`、`git describe --tags --always --dirty` 和 `backend/cmd/server/VERSION` 输出为准，并包含变更摘要、验证命令/结果和未完成项。
 
 完成前运行 `git diff --check` 并检查 Markdown 链接。没有实际执行的测试、生产操作或 CI 不得写成已通过；生产服务器连接、修改或重启必须有用户明确授权。该规则与根目录 `AGENTS.md`、`开发台账.md` 和 `agent.md` 保持一致。
+
+对外异步生图接口的路径、参数、默认值、类型/范围校验、模型适用范围、响应、错误码、结果格式或重试行为有变更时，必须在同一任务同步根目录 `异步生图接口文档new.md`、`/guides/async-image-api` 页面中英文内容（`frontend/src/views/user/guideAsyncImageApiContent.ts` 及必要的 Vue 页面/组件）、受影响的 `wiki-new/` 专题和三份任务记录。参数表、JSON/multipart 示例与结果说明必须与最终代码一致，不得只改后端或遗漏页面语言版本。

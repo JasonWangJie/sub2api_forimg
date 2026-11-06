@@ -1,6 +1,7 @@
 package service
 
 import (
+	"bytes"
 	"context"
 	"encoding/base64"
 	"encoding/json"
@@ -134,6 +135,17 @@ func (u *ImageResultUploader) Rewrite(ctx context.Context, taskID string, result
 		data, contentType, err := u.fetchImageBytes(ctx, item)
 		if err != nil {
 			return nil, fmt.Errorf("image %d: %w", i, err)
+		}
+		// Extended formats must pass the same bounded, passive-content validation
+		// as durable results before any public object is written. Inspect XML-like
+		// bytes too: Base64 SVG often arrives without a reliable MIME declaration.
+		trimmed := bytes.TrimSpace(bytes.TrimPrefix(data, []byte{0xef, 0xbb, 0xbf}))
+		if strings.Contains(contentType, "svg") || bytes.HasPrefix(data, []byte("GIF")) || bytes.HasPrefix(trimmed, []byte("<")) {
+			validated, err := ValidateGeneratedImageBytes(data, u.maxDownloadBytes, DefaultImageLibraryMaxPixels)
+			if err != nil {
+				return nil, fmt.Errorf("image %d: %w", i, err)
+			}
+			contentType = validated.MIMEType
 		}
 		key := u.buildKey(taskID, i, contentType)
 		url, err := u.storage.Save(ctx, key, contentType, data)
@@ -333,6 +345,8 @@ func extensionForContentType(ct string) string {
 		return ".webp"
 	case strings.Contains(ct, "gif"):
 		return ".gif"
+	case strings.Contains(ct, "svg"):
+		return ".svg"
 	default:
 		return ".png"
 	}

@@ -79,6 +79,9 @@ type OpenAIImagesRequest struct {
 	Quality            string
 	Background         string
 	OutputFormat       string
+	FrameCount         *int
+	FrameDurationMS    *int
+	SVG                *OpenAIImagesSVGOptions
 	Moderation         string
 	InputFidelity      string
 	Style              string
@@ -328,7 +331,31 @@ func parseOpenAIImagesJSONRequest(body []byte, req *OpenAIImagesRequest) error {
 	req.ResponseFormat = strings.ToLower(strings.TrimSpace(gjson.GetBytes(body, "response_format").String()))
 	req.Quality = strings.TrimSpace(gjson.GetBytes(body, "quality").String())
 	req.Background = strings.TrimSpace(gjson.GetBytes(body, "background").String())
-	req.OutputFormat = strings.TrimSpace(gjson.GetBytes(body, "output_format").String())
+	if outputFormat := gjson.GetBytes(body, "output_format"); outputFormat.Exists() {
+		if outputFormat.Type != gjson.String {
+			return fmt.Errorf("output_format must be a string")
+		}
+		req.OutputFormat = strings.TrimSpace(outputFormat.String())
+	}
+	for _, field := range []struct {
+		name string
+		dest **int
+	}{{"frame_count", &req.FrameCount}, {"frame_duration_ms", &req.FrameDurationMS}} {
+		if value := gjson.GetBytes(body, field.name); value.Exists() {
+			var number int
+			if value.Type != gjson.Number || json.Unmarshal([]byte(value.Raw), &number) != nil {
+				return fmt.Errorf("%s must be an integer", field.name)
+			}
+			*field.dest = &number
+		}
+	}
+	if svg := gjson.GetBytes(body, "svg"); svg.Exists() {
+		var err error
+		req.SVG, err = ParseOpenAIImagesSVGOptions([]byte(svg.Raw))
+		if err != nil {
+			return err
+		}
+	}
 	req.Moderation = strings.TrimSpace(gjson.GetBytes(body, "moderation").String())
 	req.InputFidelity = strings.TrimSpace(gjson.GetBytes(body, "input_fidelity").String())
 	req.Style = strings.TrimSpace(gjson.GetBytes(body, "style").String())
@@ -566,6 +593,30 @@ func parseOpenAIImagesMultipartRequest(body []byte, contentType string, req *Ope
 		case "output_format":
 			req.OutputFormat = value
 			req.HasNativeOptions = true
+		case "frame_count", "frame_duration_ms":
+			number, err := strconv.Atoi(value)
+			if err != nil {
+				return fmt.Errorf("%s must be an integer", name)
+			}
+			if name == "frame_count" {
+				if req.FrameCount != nil {
+					return fmt.Errorf("frame_count must not be repeated")
+				}
+				req.FrameCount = &number
+			} else {
+				if req.FrameDurationMS != nil {
+					return fmt.Errorf("frame_duration_ms must not be repeated")
+				}
+				req.FrameDurationMS = &number
+			}
+			req.HasNativeOptions = true
+		case "svg[model]", "svg[reasoning][effort]":
+			if err := setOpenAIImagesSVGMultipartOption(req, name, value); err != nil {
+				return err
+			}
+			req.HasNativeOptions = true
+		case "svg":
+			return fmt.Errorf("multipart SVG options must use svg[model] and svg[reasoning][effort]")
 		case "moderation":
 			req.Moderation = value
 			req.HasNativeOptions = true
@@ -686,6 +737,9 @@ func hasOpenAINativeImageOptions(exists func(path string) bool) bool {
 		"quality",
 		"style",
 		"output_format",
+		"frame_count",
+		"frame_duration_ms",
+		"svg",
 		"output_compression",
 		"moderation",
 		"input_fidelity",
@@ -700,7 +754,7 @@ func hasOpenAINativeImageOptions(exists func(path string) bool) bool {
 
 func isOpenAINativeImageOption(name string) bool {
 	switch strings.TrimSpace(strings.ToLower(name)) {
-	case "background", "quality", "style", "output_format", "output_compression", "moderation", "input_fidelity", "partial_images":
+	case "background", "quality", "style", "output_format", "frame_count", "frame_duration_ms", "svg", "svg[model]", "svg[reasoning][effort]", "output_compression", "moderation", "input_fidelity", "partial_images":
 		return true
 	default:
 		return false

@@ -227,7 +227,9 @@ func (h *DurableAsyncImageHandler) submit(c *gin.Context, protocol, expectedPlat
 			err = parsed.ValidateAsyncDimensions()
 		}
 		if err == nil {
-			payload.Body = append([]byte(nil), body...)
+			payload.Body, payload.ContentType, err = parsed.NormalizeAsyncOutputOptions()
+		}
+		if err == nil {
 			model, prompt, imageCount = parsed.Model, parsed.Prompt, parsed.N
 			requestedSize = service.OpenAIImagesBillingInputSize(parsed)
 			if requestedSize == "" {

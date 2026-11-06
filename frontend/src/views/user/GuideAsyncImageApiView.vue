@@ -50,7 +50,7 @@
               </header>
 
               <section id="auth" class="api-section">
-                <h2 class="api-h2">{{ doc.toc[1].label }}</h2>
+                <h2 class="api-h2">{{ doc.auth.title }}</h2>
                 <div class="api-code-block">
                   <div class="api-code-toolbar">
                     <span>{{ doc.labels.baseUrl }}</span>
@@ -58,186 +58,135 @@
                   </div>
                   <pre><code>{{ doc.baseUrl }}</code></pre>
                 </div>
-                <div class="api-code-block mt-3">
-                  <pre><code>{{ doc.auth.header }}
-{{ doc.auth.contentType }}</code></pre>
-                </div>
-                <p class="api-note mt-3">{{ doc.auth.idempotency }}</p>
+                <div class="api-code-block mt-3"><pre><code>{{ doc.auth.headers }}</code></pre></div>
+                <ul class="api-bullet-list mt-3"><li v-for="note in doc.auth.notes" :key="note">{{ note }}</li></ul>
               </section>
 
-              <section id="openai" class="api-section">
-                <h2 class="api-h2">{{ doc.toc[2].label }}</h2>
-                <p class="api-lead">
-                  {{
-                    isEn
-                      ? 'Use generations_oa for text-to-image and edits_oa for explicit image edits. generations_oa also promotes to edit mode when usable reference inputs are present. Accept: HTTP 202 + task_id.'
-                      : '文生图使用 generations_oa，明确图生图使用 edits_oa；generations_oa 带有效参考图时也会自动进入编辑模式。受理成功：HTTP 202 + task_id。'
-                  }}
-                </p>
-                <AsyncImageApiEndpointCard
-                  class="mt-4"
-                  :block="doc.openaiT2I"
-                  :labels="doc.labels"
-                  :desc-header="descHeader"
-                  @copy="copyText"
-                />
-                <AsyncImageApiEndpointCard
-                  class="mt-6"
-                  :block="doc.openaiI2I"
-                  :labels="doc.labels"
-                  :desc-header="descHeader"
-                  @copy="copyText"
-                />
-              </section>
-
-              <section id="gemini-bb" class="api-section">
-                <h2 class="api-h2">{{ isEn ? 'Gemini BB' : 'Gemini BB' }}</h2>
-                <p class="api-lead">
-                  {{
-                    isEn
-                      ? 'Chat Completions-compatible Gemini endpoint for text-to-image and image-to-image. Use image_url content parts for references; stream is disabled.'
-                      : 'Chat Completions 兼容的 Gemini 入口，文生图和图生图都使用同一路径；参考图放入 image_url content part，异步接口不支持流式。'
-                  }}
-                </p>
-                <AsyncImageApiEndpointCard
-                  class="mt-4"
-                  :block="doc.geminiBBT2I"
-                  :labels="doc.labels"
-                  :desc-header="descHeader"
-                  @copy="copyText"
-                />
-                <AsyncImageApiEndpointCard
-                  class="mt-6"
-                  :block="doc.geminiBBI2I"
-                  :labels="doc.labels"
-                  :desc-header="descHeader"
-                  @copy="copyText"
-                />
-              </section>
-
-              <section id="gemini-sc" class="api-section">
-                <h2 class="api-h2">{{ isEn ? 'Gemini SC' : 'Gemini SC' }}</h2>
-                <p class="api-lead">
-                  {{
-                    isEn
-                      ? 'JSON-oriented Gemini endpoint for text-to-image and image-to-image. Use image_urls for references and size for ratio or pixel-size aliases. Accept: HTTP 202.'
-                      : 'JSON 风格的 Gemini 入口，文生图和图生图共用路径；图生图通过 image_urls 传参考图，size 支持比例或像素尺寸别名。受理成功：HTTP 202。'
-                  }}
-                </p>
-                <AsyncImageApiEndpointCard
-                  class="mt-4"
-                  :block="doc.geminiT2I"
-                  :labels="doc.labels"
-                  :desc-header="descHeader"
-                  @copy="copyText"
-                />
-                <AsyncImageApiEndpointCard
-                  class="mt-6"
-                  :block="doc.geminiI2I"
-                  :labels="doc.labels"
-                  :desc-header="descHeader"
-                  @copy="copyText"
-                />
-                <AsyncImageApiEndpointCard
-                  class="mt-6"
-                  :block="doc.scUpload"
-                  :labels="doc.labels"
-                  :desc-header="descHeader"
-                  @copy="copyText"
-                />
-              </section>
-
-              <section :id="doc.query.id" class="api-section">
-                <h2 class="api-h2">{{ doc.query.title }}</h2>
-                <div class="space-y-2">
-                  <div class="api-endpoint-head">
-                    <span class="api-method api-method-get">{{ doc.query.method }}</span>
-                    <code class="api-path">{{ doc.query.path }}</code>
-                    <span class="api-path-tag">OpenAI / Gemini</span>
+              <section id="parameters" class="api-section">
+                <h2 class="api-h2">{{ doc.parameters.title }}</h2>
+                <p class="api-lead">{{ doc.parameters.intro }}</p>
+                <div v-for="group in doc.parameters.groups" :key="group.title" class="mt-5">
+                  <h3 class="api-h3">{{ group.title }}</h3>
+                  <div class="api-table-wrap">
+                    <table class="api-table">
+                      <thead><tr><th>{{ doc.labels.params }}</th><th>{{ doc.labels.type }}</th><th>{{ doc.labels.required }}</th><th>{{ descHeader }}</th></tr></thead>
+                      <tbody>
+                        <tr v-for="param in group.params" :key="param.name">
+                          <td><code>{{ param.name }}</code></td><td><code>{{ param.type }}</code></td><td>{{ param.required }}</td><td>{{ param.desc }}</td>
+                        </tr>
+                      </tbody>
+                    </table>
                   </div>
+                  <ul v-if="group.notes?.length" class="api-bullet-list mt-3"><li v-for="note in group.notes" :key="note">{{ note }}</li></ul>
                 </div>
-                <p class="api-lead mt-3">{{ doc.query.summary }}</p>
-                <p class="api-note mt-2">
-                  {{ isEn ? 'Gemini SC compatibility alias: ' : 'Gemini SC 兼容查询别名：' }}<code>{{ doc.query.aliasPath }}</code>
-                </p>
+              </section>
 
-                <h3 class="api-h3">{{ doc.labels.statusTable }}</h3>
-                <div class="api-table-wrap">
+              <section v-for="scenario in doc.examples" :id="scenario.id" :key="scenario.id" class="api-section">
+                <h2 class="api-h2">{{ scenario.title }}</h2>
+                <p class="api-lead">{{ scenario.summary }}</p>
+                <div class="grid gap-4 lg:grid-cols-2 mt-4">
+                  <article v-for="example in scenario.platforms" :key="example.platform" class="min-w-0">
+                    <h3 class="api-h3">{{ example.platform }}</h3>
+                    <p class="api-path mb-3">POST {{ example.path }}</p>
+                    <div class="api-code-block">
+                      <div class="api-code-toolbar">
+                        <span>JSON · {{ doc.labels.requestBody }}</span>
+                        <button type="button" class="api-copy" @click="copyText(example.body)">{{ copyBtn }}</button>
+                      </div>
+                      <pre><code>{{ example.body }}</code></pre>
+                    </div>
+                  </article>
+                </div>
+              </section>
+
+              <section id="openai-26" class="api-section">
+                <h2 class="api-h2">{{ doc.extensions.title }}</h2>
+                <p class="api-lead">{{ doc.extensions.intro }}</p>
+                <div class="api-table-wrap mt-4">
                   <table class="api-table">
-                    <thead>
-                      <tr>
-                        <th>status</th>
-                        <th>{{ descHeader }}</th>
-                      </tr>
-                    </thead>
+                    <thead><tr><th>{{ doc.labels.params }}</th><th>{{ doc.labels.type }}</th><th>{{ doc.labels.required }}</th><th>{{ descHeader }}</th></tr></thead>
                     <tbody>
-                      <tr v-for="row in doc.query.statuses" :key="row.status">
-                        <td><code>{{ row.status }}</code></td>
-                        <td>{{ row.meaning }}</td>
+                      <tr v-for="param in doc.extensions.params" :key="param.name">
+                        <td><code>{{ param.name }}</code></td><td><code>{{ param.type }}</code></td><td>{{ param.required }}</td><td>{{ param.desc }}</td>
                       </tr>
                     </tbody>
                   </table>
                 </div>
+                <h3 class="api-h3">{{ doc.labels.adjustments }}</h3>
+                <div class="api-table-wrap">
+                  <table class="api-table">
+                    <thead><tr><th>output_format</th><th>{{ descHeader }}</th></tr></thead>
+                    <tbody><tr v-for="row in doc.extensions.adjustments" :key="row.format"><td><code>{{ row.format }}</code></td><td>{{ row.change }}</td></tr></tbody>
+                  </table>
+                </div>
+                <ul class="api-bullet-list mt-4"><li v-for="note in doc.extensions.notes" :key="note">{{ note }}</li></ul>
+                <a :href="doc.extensions.topicUrl" target="_blank" rel="noopener noreferrer" class="api-doc-link mt-3 inline-block">{{ doc.extensions.topicLabel }}</a>
+              </section>
 
-                <h3 class="api-h3">{{ isEn ? 'Response examples' : '响应示例' }}</h3>
-                <div class="grid gap-3 lg:grid-cols-3">
-                  <div class="api-code-block">
-                    <div class="api-code-toolbar"><span>queued</span></div>
-                    <pre><code>{{ doc.query.queuedExample }}</code></pre>
-                  </div>
-                  <div class="api-code-block">
-                    <div class="api-code-toolbar"><span>succeeded</span></div>
-                    <pre><code>{{ doc.query.successExample }}</code></pre>
-                  </div>
-                  <div class="api-code-block">
-                    <div class="api-code-toolbar"><span>failed</span></div>
-                    <pre><code>{{ doc.query.failedExample }}</code></pre>
-                  </div>
+              <section id="query" class="api-section">
+                <h2 class="api-h2">{{ doc.query.title }}</h2>
+                <p class="api-lead">{{ doc.query.summary }}</p>
+                <div class="api-code-block mt-4">
+                  <div class="api-code-toolbar"><span>{{ doc.labels.acceptResponse }}</span></div>
+                  <pre><code>{{ doc.query.acceptExample }}</code></pre>
+                </div>
+                <p class="api-path mt-4">GET {{ doc.query.path }}</p>
+                <h3 class="api-h3">{{ doc.labels.statusTable }}</h3>
+                <div class="api-table-wrap">
+                  <table class="api-table">
+                    <thead><tr><th>status</th><th>{{ descHeader }}</th></tr></thead>
+                    <tbody><tr v-for="row in doc.query.statuses" :key="row.status"><td><code>{{ row.status }}</code></td><td>{{ row.meaning }}</td></tr></tbody>
+                  </table>
+                </div>
+                <div class="grid gap-3 lg:grid-cols-2 mt-4">
+                  <div class="api-code-block"><div class="api-code-toolbar"><span>succeeded · HTTP 200</span></div><pre><code>{{ doc.query.successExample }}</code></pre></div>
+                  <div class="api-code-block"><div class="api-code-toolbar"><span>failed · HTTP 200</span></div><pre><code>{{ doc.query.failedExample }}</code></pre></div>
                 </div>
               </section>
 
               <section id="limits" class="api-section">
                 <h2 class="api-h2">{{ doc.limits.title }}</h2>
-                <ul class="api-bullet-list">
-                  <li v-for="(b, i) in doc.limits.bullets" :key="i">{{ b }}</li>
-                </ul>
+                <ul class="api-bullet-list"><li v-for="note in doc.limits.bullets" :key="note">{{ note }}</li></ul>
               </section>
 
               <section id="errors" class="api-section">
                 <h2 class="api-h2">{{ doc.errors.title }}</h2>
-                <div class="api-table-wrap">
+                <p class="api-lead">{{ doc.errors.intro }}</p>
+                <div class="api-table-wrap mt-4">
                   <table class="api-table">
-                    <thead>
-                      <tr>
-                        <th>HTTP</th>
-                        <th>{{ descHeader }}</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      <tr v-for="row in doc.errors.rows" :key="row.status">
-                        <td><code>{{ row.status }}</code></td>
-                        <td>{{ row.meaning }}</td>
-                      </tr>
-                    </tbody>
+                    <thead><tr><th>HTTP</th><th>{{ descHeader }}</th></tr></thead>
+                    <tbody><tr v-for="row in doc.errors.rows" :key="row.status"><td><code>{{ row.status }}</code></td><td>{{ row.meaning }}</td></tr></tbody>
+                  </table>
+                </div>
+                <div class="api-table-wrap mt-4">
+                  <table class="api-table">
+                    <thead><tr><th>error_code</th><th>{{ descHeader }}</th></tr></thead>
+                    <tbody><tr v-for="row in doc.errors.applicationCodes" :key="row.status"><td><code>{{ row.status }}</code></td><td>{{ row.meaning }}</td></tr></tbody>
                   </table>
                 </div>
               </section>
 
+              <section id="compatibility" class="api-section">
+                <h2 class="api-h2">{{ doc.compatibility.title }}</h2>
+                <p class="api-lead">{{ doc.compatibility.intro }}</p>
+                <details v-for="group in doc.compatibility.groups" :key="group.title" class="api-compatibility mt-3">
+                  <summary class="cursor-pointer text-sm font-semibold">{{ group.title }}</summary>
+                  <ul class="api-bullet-list mt-3"><li v-for="note in group.notes" :key="note">{{ note }}</li></ul>
+                  <div v-if="group.code" class="api-code-block mt-3">
+                    <div class="api-code-toolbar"><span>{{ group.codeLabel }}</span><button type="button" class="api-copy" @click="copyText(group.code)">{{ copyBtn }}</button></div>
+                    <pre><code>{{ group.code }}</code></pre>
+                  </div>
+                </details>
+              </section>
+
               <section id="oss" class="api-section api-oss">
                 <h2 class="api-h2">{{ doc.oss.title }}</h2>
-                <ul class="api-bullet-list">
-                  <li v-for="(b, i) in doc.oss.bullets" :key="i">{{ b }}</li>
-                </ul>
+                <ul class="api-bullet-list"><li v-for="note in doc.oss.bullets" :key="note">{{ note }}</li></ul>
+                <a :href="doc.oss.topicUrl" target="_blank" rel="noopener noreferrer" class="api-doc-link mt-3 inline-block">{{ doc.oss.topicLabel }}</a>
                 <div class="mt-5 flex flex-wrap gap-3">
-                  <router-link to="/guides/drawing" class="btn btn-secondary">
-                    {{ isEn ? 'Drawing Guide' : '绘图教程' }}
-                  </router-link>
-                  <router-link to="/keys" class="btn btn-secondary">
-                    {{ isEn ? 'API Keys' : '查看密钥' }}
-                  </router-link>
-                  <router-link to="/async-image-tasks" class="btn btn-primary">
-                    {{ isEn ? 'Async Tasks' : '异步生图任务' }}
-                  </router-link>
+                  <router-link to="/guides/drawing" class="btn btn-secondary">{{ isEn ? 'Drawing Guide' : '绘图教程' }}</router-link>
+                  <router-link to="/keys" class="btn btn-secondary">{{ isEn ? 'API Keys' : '查看密钥' }}</router-link>
+                  <router-link to="/async-image-tasks" class="btn btn-primary">{{ isEn ? 'Async Tasks' : '异步生图任务' }}</router-link>
                 </div>
               </section>
             </div>
@@ -253,7 +202,6 @@ import { computed, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import AppLayout from '@/components/layout/AppLayout.vue'
 import { useAppStore } from '@/stores'
-import AsyncImageApiEndpointCard from './AsyncImageApiEndpointCard.vue'
 import { getAsyncImageApiDoc } from './guideAsyncImageApiContent'
 
 const { t, locale } = useI18n()
@@ -261,7 +209,7 @@ const appStore = useAppStore()
 const contentRef = ref<HTMLElement | null>(null)
 const tocVisible = ref(typeof window !== 'undefined' ? window.innerWidth > 768 : true)
 const activeHeadingId = ref('overview')
-const copyBtn = ref('')
+const copied = ref(false)
 let scrollRafId = 0
 let copyTimer = 0
 
@@ -273,8 +221,7 @@ const apiRoot = computed(() => {
 const isEn = computed(() => String(locale.value).toLowerCase().startsWith('en'))
 const doc = computed(() => getAsyncImageApiDoc(String(locale.value), apiRoot.value))
 const descHeader = computed(() => (isEn.value ? 'Description' : '说明'))
-
-copyBtn.value = getAsyncImageApiDoc(String(locale.value), apiRoot.value).labels.copy
+const copyBtn = computed(() => copied.value ? doc.value.labels.copied : doc.value.labels.copy)
 
 function scrollToHeading(id: string) {
   const container = contentRef.value
@@ -306,10 +253,10 @@ function onContentScroll() {
 async function copyText(text: string) {
   try {
     await navigator.clipboard.writeText(text)
-    copyBtn.value = doc.value.labels.copied
+    copied.value = true
     window.clearTimeout(copyTimer)
     copyTimer = window.setTimeout(() => {
-      copyBtn.value = doc.value.labels.copy
+      copied.value = false
     }, 1600)
   } catch {
     /* ignore */
@@ -456,6 +403,12 @@ async function copyText(text: string) {
 }
 .api-copy {
   @apply rounded px-2 py-0.5 text-xs text-gray-200 hover:bg-white/10 transition-colors;
+}
+.api-doc-link {
+  @apply text-sm text-primary-700 dark:text-primary-300 underline;
+}
+.api-compatibility {
+  @apply rounded-xl border border-gray-200 dark:border-dark-600 p-4 bg-white dark:bg-dark-900 text-gray-800 dark:text-gray-100;
 }
 .api-oss {
   @apply rounded-2xl border border-amber-200 dark:border-amber-800/60 bg-amber-50 dark:bg-amber-950/40 p-5 md:p-6;

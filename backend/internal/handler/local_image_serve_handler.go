@@ -72,10 +72,16 @@ func (h *DurableAsyncImageHandler) ServeLocalObject(c *gin.Context) {
 			contentType = "image/webp"
 		case ".gif":
 			contentType = "image/gif"
+		case ".svg":
+			contentType = "image/svg+xml"
 		}
 	}
 	c.Header("Cache-Control", "private, max-age=300")
 	c.Header("Content-Type", contentType)
+	c.Header("X-Content-Type-Options", "nosniff")
+	if strings.EqualFold(strings.Split(contentType, ";")[0], "image/svg+xml") {
+		c.Header("Content-Security-Policy", "sandbox; default-src 'none'; style-src 'unsafe-inline'")
+	}
 	c.Status(http.StatusOK)
 	_, _ = io.Copy(c.Writer, body)
 }

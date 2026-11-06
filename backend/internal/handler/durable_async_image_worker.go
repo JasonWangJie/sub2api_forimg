@@ -1393,6 +1393,22 @@ func buildAsyncOpenAIEditMultipart(body []byte, contentType string) ([]byte, str
 		if key == "image" || key == "images" || key == "image_urls" || key == "mask" {
 			continue
 		}
+		if key == "svg" {
+			raw, err := json.Marshal(value)
+			if err != nil {
+				return nil, "", err
+			}
+			options, err := service.ParseOpenAIImagesSVGOptions(raw)
+			if err != nil {
+				return nil, "", err
+			}
+			for name, value := range options.MultipartFields() {
+				if err := writeField(name, value); err != nil {
+					return nil, "", err
+				}
+			}
+			continue
+		}
 		var scalar string
 		switch typed := value.(type) {
 		case string:
@@ -1699,7 +1715,7 @@ func applyCapturedOpenAIImageDimensions(result *service.OpenAIForwardResult, out
 // Upstream MIME metadata can be inaccurate. Use the decoded format while
 // retaining full container, signature, byte and pixel validation for outputs.
 func validateGeneratedAsyncImage(data []byte, _ string, cfg service.AsyncImageRuntimeConfig) (asyncImageCapturedOutput, error) {
-	validated, err := (service.AsyncImageReferenceDownloader{MaxBytes: cfg.DownloadMaxBytes, MaxPixels: cfg.DownloadMaxPixels}).ValidateBytes(data, "")
+	validated, err := (service.AsyncImageReferenceDownloader{MaxBytes: cfg.DownloadMaxBytes, MaxPixels: cfg.DownloadMaxPixels}).ValidateGeneratedBytes(data)
 	if err != nil {
 		return asyncImageCapturedOutput{}, fmt.Errorf("invalid generated image: %w", err)
 	}
