@@ -150,8 +150,9 @@ func (h *OpenAIGatewayHandler) Images(c *gin.Context) {
 		return
 	}
 	asyncImageGeneration := asyncImageUsageCaptureFromContext(c.Request.Context()) != nil
-	referenceRetryAccountID := asyncImageOpenAIReferenceRetryAccountFromContext(requestCtx)
-	preferReferenceRetryAccount := referenceRetryAccountID > 0 && parsed.IsEdits() && parsed.Multipart
+	referenceRetry := asyncImageOpenAIReferenceRetryFromContext(requestCtx)
+	preferReferenceRetryAccount := referenceRetry.originalAccountID > 0 && !referenceRetry.originalSent && !referenceRetry.originalExcluded &&
+		parsed.IsEdits() && parsed.Multipart
 	// Durable reference-image retries use a task-scoped sticky hash so the
 	// selected account is reused until the retry policy explicitly switches it.
 	sessionHash := service.AsyncImageRoutingSessionHash(requestCtx)
@@ -187,7 +188,7 @@ func (h *OpenAIGatewayHandler) Images(c *gin.Context) {
 		if preferReferenceRetryAccount {
 			preferReferenceRetryAccount = false
 			selection, scheduleDecision, err = h.gatewayService.SelectSpecificAccountWithSchedulerForImages(
-				requestCtx, apiKey.GroupID, sessionHash, routingModel, referenceRetryAccountID, service.OpenAIImagesCapabilityNative, parsed.SizeTier,
+				requestCtx, apiKey.GroupID, sessionHash, routingModel, referenceRetry.originalAccountID, service.OpenAIImagesCapabilityNative, parsed.SizeTier,
 			)
 		}
 		if err != nil || selection == nil || selection.Account == nil {
@@ -290,10 +291,13 @@ func (h *OpenAIGatewayHandler) Images(c *gin.Context) {
 		forwardStart := time.Now()
 		writerSizeBeforeForward := service.OpenAIImagesJSONKeepaliveAdjustedWrittenSize(c)
 		accountForwardCtx := requestCtx
+		if account.ID == referenceRetry.originalAccountID {
+			accountForwardCtx = service.WithAsyncImageOpenAIReferenceMultipartRetry(accountForwardCtx)
+		}
 		accountAttemptCancel := func() {}
 		if asyncImageGeneration {
 			if timeout, ok := service.AsyncImageAccountAttemptTimeout(requestCtx); ok {
-				accountForwardCtx, accountAttemptCancel = context.WithTimeout(requestCtx, timeout)
+				accountForwardCtx, accountAttemptCancel = context.WithTimeout(accountForwardCtx, timeout)
 			}
 		}
 		result, err := func() (*service.OpenAIForwardResult, error) {
@@ -362,10 +366,13 @@ func (h *OpenAIGatewayHandler) Images(c *gin.Context) {
 							AccountID: account.ID, AccountName: account.Name, Status: service.AsyncImageAccountAttemptFailed,
 							StatusCode: failoverErr.StatusCode, UpstreamRequestID: upstreamRequestIDFromFailover(failoverErr), Error: failoverErr.Error(),
 						}
-						if failoverErr.IsAsyncImageSizeCapabilityMismatch() || failoverErr.IsAsyncImageReferenceAccountFailover() ||
+						if referenceRetry.originalAccountID > 0 || failoverErr.IsAsyncImageSizeCapabilityMismatch() || failoverErr.IsAsyncImageReferenceAccountFailover() ||
 							failoverErr.IsAsyncImageInternalError422() || failoverErr.IsAsyncImageServiceTimeout400() ||
 							failoverErr.IsAsyncImageRetryableRejection() || failoverErr.IsAsyncImageOpenAIReferenceURLTimeout() {
 							attempt = asyncImageFailedAccountAttempt(account, failoverErr)
+						}
+						if referenceRetry.originalAccountID > 0 && service.IsAsyncImageOpenAIReferenceOutcomeUnknown(failoverErr.StatusCode, service.ExtractUpstreamErrorMessage(failoverErr.ResponseBody)) {
+							attempt.FailureReason = service.AsyncImageTaskStatusExecutionUnknown
 						}
 						service.RecordAsyncImageAccountAttempt(c.Request.Context(), attempt)
 					}
@@ -385,11 +392,11 @@ func (h *OpenAIGatewayHandler) Images(c *gin.Context) {
 						)
 						return
 					}
-					if failoverErr.IsAsyncImageOpenAIReferenceURLTimeout() || asyncImageReferenceLocalFallbackRequested(c, failoverErr) {
+					if referenceRetry.originalAccountID > 0 || failoverErr.IsAsyncImageOpenAIReferenceURLTimeout() || asyncImageReferenceLocalFallbackRequested(c, failoverErr) {
 						h.handleFailoverExhausted(c, failoverErr, streamStarted)
 						return
 					}
-					if failoverErr.RetryableOnSameAccount && account.ID != referenceRetryAccountID {
+					if failoverErr.RetryableOnSameAccount {
 						retryLimit := account.GetPoolModeRetryCount()
 						if sameAccountRetryCount[account.ID] < retryLimit {
 							sameAccountRetryCount[account.ID]++

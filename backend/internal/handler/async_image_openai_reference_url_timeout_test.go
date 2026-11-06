@@ -14,6 +14,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -29,37 +30,110 @@ const openAIReferenceURLTimeoutTestError = `{"error":{"type":"invalid_request_er
 
 type openAIReferenceURLTimeoutUpstream struct {
 	service.HTTPUpstream
-	t                 *testing.T
-	requests          []openAIReferenceURLTimeoutRequest
-	convertedStatuses []int
+	t                  *testing.T
+	requests           []openAIReferenceURLTimeoutRequest
+	convertedStatuses  []int
+	firstConvertedBody string
+	protocolErrors     []string
 }
 
 type openAIReferenceURLTimeoutRequest struct {
 	accountID         int64
 	path, contentType string
 	body              []byte
+	host              string
 }
 
 func (u *openAIReferenceURLTimeoutUpstream) Do(req *http.Request, _ string, accountID int64, _ int) (*http.Response, error) {
 	u.t.Helper()
 	body, err := io.ReadAll(req.Body)
 	require.NoError(u.t, err)
-	u.requests = append(u.requests, openAIReferenceURLTimeoutRequest{accountID, req.URL.Path, req.Header.Get("Content-Type"), body})
+	u.requests = append(u.requests, openAIReferenceURLTimeoutRequest{
+		accountID: accountID, path: req.URL.Path, contentType: req.Header.Get("Content-Type"), body: body, host: req.URL.Host,
+	})
 	status, response := http.StatusOK, `{"data":[{"b64_json":"`+durableAsyncImageOnePixelPNG+`"}]}`
-	if len(u.requests) == 1 {
+	protocolCode, protocolMessage := "", ""
+	if req.URL.Scheme == "https" && req.URL.Host == "api.openai.com" && strings.HasPrefix(req.Header.Get("Content-Type"), "multipart/") {
+		protocolCode, protocolMessage = validateOfficialOpenAIReferenceMultipart(body, req.Header.Get("Content-Type"))
+	}
+	if protocolCode != "" {
+		u.protocolErrors = append(u.protocolErrors, protocolCode)
+		status = http.StatusBadRequest
+		errorBody, marshalErr := json.Marshal(map[string]any{"error": map[string]string{
+			"type": "invalid_request_error", "code": protocolCode, "param": "image", "message": protocolMessage,
+		}})
+		require.NoError(u.t, marshalErr)
+		response = string(errorBody)
+	} else if len(u.requests) == 1 {
 		status, response = http.StatusBadRequest, openAIReferenceURLTimeoutTestError
 	} else if convertedIndex := len(u.requests) - 2; convertedIndex < len(u.convertedStatuses) {
 		status = u.convertedStatuses[convertedIndex]
-		if status == http.StatusBadRequest {
+		switch status {
+		case http.StatusBadRequest:
 			response = openAIReferenceURLTimeoutTestError
-		} else if status != http.StatusOK {
+		case http.StatusBadGateway:
+			response = `{"error":{"type":"server_error","code":"execution_unknown","message":"generation outcome is unknown after context deadline exceeded; do not retry"}}`
+		case http.StatusOK:
+		default:
 			response = `{"error":{"type":"server_error","code":"server_error","message":"test backend unavailable"}}`
+		}
+		if convertedIndex == 0 && u.firstConvertedBody != "" {
+			response = u.firstConvertedBody
 		}
 	}
 	return &http.Response{
 		StatusCode: status, Body: io.NopCloser(bytes.NewBufferString(response)), Request: req,
 		Header: http.Header{"Content-Type": {"application/json"}, "X-Request-Id": {fmt.Sprintf("test-img-%d", len(u.requests))}},
 	}, nil
+}
+
+// This fake upstream enforces the observed official upload contract before it
+// supplies a configured generation outcome. Invalid requests cannot pass merely
+// because they are the second or third invocation.
+func validateOfficialOpenAIReferenceMultipart(body []byte, contentType string) (string, string) {
+	_, params, err := mime.ParseMediaType(contentType)
+	if err != nil || params["boundary"] == "" {
+		return "invalid_multipart", "missing multipart boundary"
+	}
+	r := multipart.NewReader(bytes.NewReader(body), params["boundary"])
+	var imageFields []string
+	for {
+		part, err := r.NextPart()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return "invalid_multipart", "cannot read multipart part"
+		}
+		data, err := io.ReadAll(part)
+		if err != nil {
+			return "invalid_multipart", "cannot read multipart file"
+		}
+		if part.FileName() == "" {
+			continue
+		}
+		field := part.FormName()
+		if field == "image" || field == "image[]" {
+			imageFields = append(imageFields, field)
+		} else if field != "mask" {
+			return "invalid_multipart", "unexpected file field"
+		}
+		actualMIME := http.DetectContentType(data)
+		if (actualMIME != "image/png" && actualMIME != "image/jpeg" && actualMIME != "image/webp") || part.Header.Get("Content-Type") != actualMIME {
+			return "unsupported_file_mimetype", "Invalid file 'image': unsupported mimetype. Supported file formats are 'image/jpeg', 'image/png', and 'image/webp'."
+		}
+	}
+	if len(imageFields) == 0 {
+		return "invalid_multipart", "missing image file"
+	}
+	if len(imageFields) > 1 {
+		for _, field := range imageFields {
+			if field != "image[]" {
+				return "duplicate_parameter", "Duplicate parameter: 'image'. Use the array syntax instead e.g. 'image[]=<value>'."
+			}
+		}
+	}
+	return "", ""
 }
 
 type openAIReferenceURLTimeoutKeyRepo struct{ generatedWorkerKeyRepo }
@@ -93,33 +167,59 @@ func (r *openAIReferenceURLTimeoutRepo) SaveAsyncImagePreparedRequest(_ context.
 func TestAsyncImageOpenAIReferenceURLTimeoutFallback(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	const model, prompt = "gpt-image-2.5-flare", "Render a moonlit observatory using the silhouette and colors of the two references."
-	const origin, alternate = int64(45), int64(46)
+	const origin, alternate, third = int64(45), int64(46), int64(47)
 	const refOne, refTwo = "https://8.8.8.8/reference.png?sig=mock", "https://8.8.8.8/reference.jpg?sig=mock"
 	const ignoredRef = "https://8.8.8.8/ignored.png?sig=mock"
 	png, jpeg := generatedWorkerImageFixtures(t)
 	for _, tc := range []struct {
-		name              string
-		legacyImages      bool
-		duplicateAliases  bool
-		originDisabled    bool
-		invalidReference  bool
-		exhaustedBudget   bool
-		finalSend         bool
-		workerRetry       bool
-		convertedStatuses []int
-		wantAccounts      []int64
-		wantError         string
+		name                string
+		legacyImages        bool
+		duplicateAliases    bool
+		originDisabled      bool
+		invalidReference    bool
+		privateRedirect     bool
+		downloadStatus      int
+		exhaustedBudget     bool
+		finalSend           bool
+		workerRetry         bool
+		thirdPartyOrigin    bool
+		thirdPartyAlternate bool
+		convertedStatuses   []int
+		firstConvertedBody  string
+		wantAccounts        []int64
+		wantError           string
+		wantStatus          string
 	}{
 		{name: "eligible original takes priority", wantAccounts: []int64{origin, origin}},
 		{name: "legacy mixed images input converts both references", legacyImages: true, wantAccounts: []int64{origin, origin}},
 		{name: "duplicate aliases and ignored URL preserve original inputs", duplicateAliases: true, wantAccounts: []int64{origin, origin}},
 		{name: "unschedulable original uses alternate", originDisabled: true, wantAccounts: []int64{origin, alternate}},
+		{name: "unschedulable original still allows only one alternate send", originDisabled: true, convertedStatuses: []int{http.StatusServiceUnavailable}, wantAccounts: []int64{origin, alternate}, wantStatus: service.AsyncImageTaskStatusFailed},
 		{name: "invalid reference stops before sending", invalidReference: true, wantAccounts: []int64{origin}, wantError: "invalid_reference_image"},
+		{name: "private reference redirect stops before sending", privateRedirect: true, wantAccounts: []int64{origin}, wantError: "invalid_reference_image"},
+		{name: "transient local download failure switches once with original URLs", downloadStatus: http.StatusServiceUnavailable, wantAccounts: []int64{origin, alternate}},
+		{name: "failed alternate URL send cannot retry or visit third account", downloadStatus: http.StatusServiceUnavailable, convertedStatuses: []int{http.StatusServiceUnavailable}, wantAccounts: []int64{origin, alternate}, wantStatus: service.AsyncImageTaskStatusFailed},
 		{name: "exhausted reference budget stops before download", exhaustedBudget: true, wantAccounts: []int64{origin}, wantError: "upstream_failed"},
 		{name: "sixteenth send cannot queue a seventeenth", finalSend: true, wantAccounts: []int64{origin}, wantError: "upstream_failed"},
-		{name: "same error on converted request does not requeue", convertedStatuses: []int{http.StatusBadRequest}, wantAccounts: []int64{origin, origin}, wantError: "upstream_failed"},
+		{name: "definite 400 on converted request switches once with multipart", convertedStatuses: []int{http.StatusBadRequest}, wantAccounts: []int64{origin, origin, alternate}},
+		{name: "failed alternate multipart send cannot retry or visit third account", convertedStatuses: []int{http.StatusBadRequest, http.StatusServiceUnavailable}, wantAccounts: []int64{origin, origin, alternate}, wantStatus: service.AsyncImageTaskStatusFailed},
+		{name: "unknown converted outcome cannot send to an alternate", convertedStatuses: []int{http.StatusBadGateway}, wantAccounts: []int64{origin, origin}, wantStatus: service.AsyncImageTaskStatusExecutionUnknown},
+		{
+			name: "structured 503 timeout on converted request cannot send to an alternate", convertedStatuses: []int{http.StatusServiceUnavailable},
+			firstConvertedBody: `{"error":{"type":"server_error","code":"upstream_timeout","message":"upstream timed out"}}`,
+			wantAccounts:       []int64{origin, origin}, wantStatus: service.AsyncImageTaskStatusExecutionUnknown,
+		},
+		{
+			name: "moderation detail on converted 400 cannot send to an alternate", convertedStatuses: []int{http.StatusBadRequest},
+			firstConvertedBody: `{"error":{"type":"invalid_request_error","code":"invalid_value","message":"request rejected","details":{"reason":"blocked by safety policy; do not retry"}}}`,
+			wantAccounts:       []int64{origin, origin}, wantStatus: service.AsyncImageTaskStatusFailed,
+		},
 		{name: "original 503 switches without pool retry", convertedStatuses: []int{http.StatusServiceUnavailable}, wantAccounts: []int64{origin, origin, alternate}},
 		{name: "original cannot recur in another worker attempt", workerRetry: true, convertedStatuses: []int{http.StatusServiceUnavailable}, wantAccounts: []int64{origin, origin, alternate}},
+		{name: "third-party original keeps legacy multipart", thirdPartyOrigin: true, wantAccounts: []int64{origin, origin}},
+		{name: "third-party rejection normalizes only the official alternate", thirdPartyOrigin: true, convertedStatuses: []int{http.StatusBadRequest}, wantAccounts: []int64{origin, origin, alternate}},
+		{name: "official rejection sends one third-party alternate with legacy multipart", thirdPartyAlternate: true, convertedStatuses: []int{http.StatusBadRequest}, wantAccounts: []int64{origin, origin, alternate}},
+		{name: "failed third-party alternate cannot retry or visit third account", thirdPartyAlternate: true, convertedStatuses: []int{http.StatusBadRequest, http.StatusServiceUnavailable}, wantAccounts: []int64{origin, origin, alternate}, wantStatus: service.AsyncImageTaskStatusFailed},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			var firstDownloads, secondDownloads, otherDownloads atomic.Int32
@@ -131,6 +231,14 @@ func TestAsyncImageOpenAIReferenceURLTimeoutFallback(t *testing.T) {
 					_, _ = w.Write(png)
 				case "/reference.jpg":
 					secondDownloads.Add(1)
+					if tc.downloadStatus != 0 {
+						w.WriteHeader(tc.downloadStatus)
+						return
+					}
+					if tc.privateRedirect {
+						http.Redirect(w, req, "https://127.0.0.1/private.jpg", http.StatusFound)
+						return
+					}
 					w.Header().Set("Content-Type", "image/jpeg")
 					if tc.invalidReference {
 						_, _ = w.Write([]byte("invalid JPEG bytes"))
@@ -142,7 +250,7 @@ func TestAsyncImageOpenAIReferenceURLTimeoutFallback(t *testing.T) {
 					w.WriteHeader(http.StatusNotFound)
 				}
 			}))
-			upstream := &openAIReferenceURLTimeoutUpstream{t: t, convertedStatuses: tc.convertedStatuses}
+			upstream := &openAIReferenceURLTimeoutUpstream{t: t, convertedStatuses: tc.convertedStatuses, firstConvertedBody: tc.firstConvertedBody}
 			mode, size, ratio := service.AsyncImageReferenceTransportPassthroughFallbackLocal, "4K", "16:9"
 			groupID, price := int64(3), 0.04
 			group := &service.Group{
@@ -210,7 +318,14 @@ func TestAsyncImageOpenAIReferenceURLTimeoutFallback(t *testing.T) {
 			worker.apiKeys = service.NewAPIKeyService(&openAIReferenceURLTimeoutKeyRepo{generatedWorkerKeyRepo{key: key}}, nil, groupRepo, nil, nil, nil, nil)
 			accountRepo := openAIImagesFailoverAccountRepo{accounts: []service.Account{
 				mockOpenAIReferenceURLTimeoutAccount(origin, groupID, 1), mockOpenAIReferenceURLTimeoutAccount(alternate, groupID, 2),
+				mockOpenAIReferenceURLTimeoutAccount(third, groupID, 3),
 			}}
+			if tc.thirdPartyOrigin {
+				accountRepo.accounts[0].Credentials["base_url"] = "https://upstream.example/v1"
+			}
+			if tc.thirdPartyAlternate {
+				accountRepo.accounts[1].Credentials["base_url"] = "https://upstream.example/v1"
+			}
 			worker.accounts = service.NewAccountService(accountRepo, groupRepo)
 			cfg := &config.Config{RunMode: config.RunModeSimple}
 			billingRepo := &generatedWorkerBillingRepo{}
@@ -233,14 +348,8 @@ func TestAsyncImageOpenAIReferenceURLTimeoutFallback(t *testing.T) {
 			}
 			first := worker.processAsyncImageTask(ctx, task.TaskID)
 			require.Len(t, upstream.requests, 1, "the first invocation must send the URL request only once")
-			initial := upstream.requests[0]
-			require.Equal(t, "application/json", initial.contentType)
-			require.Equal(t, "/v1/images/edits", initial.path)
-			require.Equal(t, model, gjson.GetBytes(initial.body, "model").String())
-			require.Equal(t, "3840x2160", gjson.GetBytes(initial.body, "size").String())
-			require.Contains(t, string(initial.body), refOne)
-			require.Contains(t, string(initial.body), refTwo)
-			require.NotContains(t, string(initial.body), ignoredRef)
+			assertOpenAIReferenceURLTimeoutURLs(t, upstream.requests[0], model, prompt, refOne, refTwo)
+			require.NotContains(t, string(upstream.requests[0].body), ignoredRef)
 			require.Zero(t, firstDownloads.Load())
 			require.Zero(t, secondDownloads.Load())
 			require.Equalf(t, !tc.exhaustedBudget && !tc.finalSend, first.requeue, "first response ended in %s with attempts %s", repo.task.Status, repo.task.AccountAttempts)
@@ -250,31 +359,50 @@ func TestAsyncImageOpenAIReferenceURLTimeoutFallback(t *testing.T) {
 				require.Equal(t, 1, repo.task.ReferenceRetryCount)
 				require.Equal(t, 1, repo.task.RetryCount)
 				// Reverse priorities after the initial timeout. Preference must come from persisted task history.
-				accountRepo.accounts[0].Priority = 3
+				accountRepo.accounts[0].Priority = 4
 				accountRepo.accounts[0].Schedulable = !tc.originDisabled
-				require.Equal(t, tc.workerRetry, worker.processAsyncImageTask(ctx, task.TaskID).requeue)
-				if tc.workerRetry {
-					require.Len(t, upstream.requests, 2, "pool retry cannot resend the converted request to the original account")
-					require.Equal(t, service.AsyncImageTaskStatusQueued, repo.task.Status)
+				for i := 0; i < 4; i++ {
+					next := worker.processAsyncImageTask(ctx, task.TaskID)
+					if next.requeue && len(upstream.requests) >= 2 && tc.downloadStatus == 0 {
+						// Official normalization belongs to the selected destination,
+						// not to the snapshot another provider will consume later.
+						assertOpenAIReferenceURLTimeoutLegacySnapshot(t, repo.task, cipher, model, png, jpeg)
+					}
+					if !next.requeue {
+						break
+					}
+					// Prefer the original in ordinary scheduling on subsequent claims. It must still stay excluded.
 					accountRepo.accounts[0].Priority = 1
-					require.False(t, worker.processAsyncImageTask(ctx, task.TaskID).requeue)
 				}
-				require.Equal(t, int32(1), firstDownloads.Load())
-				require.Equal(t, int32(1), secondDownloads.Load())
 			}
 			require.False(t, worker.processAsyncImageTask(ctx, task.TaskID).requeue, "a terminal task cannot send again")
 			require.Zero(t, otherDownloads.Load())
-			require.Len(t, upstream.requests, len(tc.wantAccounts))
+			require.Empty(t, upstream.protocolErrors, "official sends must satisfy the upload contract before generation outcomes are simulated")
+			var actualAccounts []int64
+			for _, request := range upstream.requests {
+				actualAccounts = append(actualAccounts, request.accountID)
+			}
+			require.Equal(t, tc.wantAccounts, actualAccounts)
 			for index, request := range upstream.requests {
-				require.Equal(t, tc.wantAccounts[index], request.accountID)
 				if index > 0 {
-					assertOpenAIReferenceURLTimeoutMultipart(t, request, model, prompt, png, jpeg)
+					if tc.downloadStatus != 0 {
+						assertOpenAIReferenceURLTimeoutURLs(t, request, model, prompt, refOne, refTwo)
+					} else {
+						assertOpenAIReferenceURLTimeoutMultipart(t, request, model, prompt, png, jpeg)
+					}
 				}
+			}
+			if first.requeue {
+				require.Equal(t, int32(1), firstDownloads.Load())
+				require.Equal(t, int32(1), secondDownloads.Load())
 			}
 			if tc.wantError != "" {
 				require.Equal(t, service.AsyncImageTaskStatusFailed, repo.task.Status)
 				require.NotNil(t, repo.task.ErrorCode)
 				require.Equal(t, tc.wantError, *repo.task.ErrorCode)
+				require.Zero(t, billingRepo.charges)
+			} else if tc.wantStatus != "" {
+				require.Equal(t, tc.wantStatus, repo.task.Status)
 				require.Zero(t, billingRepo.charges)
 			} else {
 				require.Equal(t, service.AsyncImageTaskStatusSucceeded, repo.task.Status)
@@ -285,12 +413,51 @@ func TestAsyncImageOpenAIReferenceURLTimeoutFallback(t *testing.T) {
 	}
 }
 
+func assertOpenAIReferenceURLTimeoutLegacySnapshot(t *testing.T, task *service.AsyncImageTask, cipher resultFetchTestCipher, model string, png, jpeg []byte) {
+	t.Helper()
+	plain, err := cipher.Decrypt(string(task.RequestPayload))
+	require.NoError(t, err)
+	var payload durableAsyncImagePayload
+	require.NoError(t, json.Unmarshal([]byte(plain), &payload))
+	require.NotNil(t, payload.Prepared)
+	require.Equal(t, model, payload.Prepared.Model)
+	_, params, err := mime.ParseMediaType(payload.Prepared.ContentType)
+	require.NoError(t, err)
+	form, err := multipart.NewReader(bytes.NewReader(payload.Prepared.Body), params["boundary"]).ReadForm(1 << 20)
+	require.NoError(t, err)
+	defer form.RemoveAll()
+	require.Len(t, form.File, 1)
+	require.Len(t, form.File["image"], 2)
+	for i, want := range [][]byte{png, jpeg} {
+		require.Equal(t, "application/octet-stream", form.File["image"][i].Header.Get("Content-Type"))
+		file, err := form.File["image"][i].Open()
+		require.NoError(t, err)
+		got, err := io.ReadAll(file)
+		require.NoError(t, err)
+		require.NoError(t, file.Close())
+		require.Equal(t, want, got)
+	}
+}
+
+func assertOpenAIReferenceURLTimeoutURLs(t *testing.T, req openAIReferenceURLTimeoutRequest, model, prompt, refOne, refTwo string) {
+	t.Helper()
+	require.Equal(t, "application/json", req.contentType)
+	require.Equal(t, "/v1/images/edits", req.path)
+	require.Equal(t, model, gjson.GetBytes(req.body, "model").String())
+	require.Equal(t, prompt, gjson.GetBytes(req.body, "prompt").String())
+	require.Equal(t, "3840x2160", gjson.GetBytes(req.body, "size").String())
+	require.Equal(t, "high", gjson.GetBytes(req.body, "quality").String())
+	require.Equal(t, int64(1), gjson.GetBytes(req.body, "n").Int())
+	require.Contains(t, string(req.body), refOne)
+	require.Contains(t, string(req.body), refTwo)
+}
+
 func mockOpenAIReferenceURLTimeoutAccount(id, groupID int64, priority int) service.Account {
 	return service.Account{
 		ID: id, Platform: service.PlatformOpenAI, Type: service.AccountTypeAPIKey,
 		Status: service.StatusActive, Schedulable: true, Priority: priority, Concurrency: 1,
 		Credentials: map[string]any{
-			"api_key": "mock-token", "base_url": "https://upstream.example/v1",
+			"api_key": "mock-token", "base_url": "https://api.openai.com/v1",
 			"pool_mode": true, "pool_mode_retry_count": 3, "pool_mode_retry_status_codes": []any{400, 503},
 		},
 		AccountGroups: []service.AccountGroup{{AccountID: id, GroupID: groupID}},
@@ -327,9 +494,18 @@ func assertOpenAIReferenceURLTimeoutMultipart(t *testing.T, req openAIReferenceU
 		"model": {model}, "prompt": {prompt}, "size": {"3840x2160"}, "quality": {"high"}, "n": {"1"},
 	}, form.Value)
 	require.Len(t, form.File, 1)
-	require.Len(t, form.File["image"], 2)
+	field := "image"
+	if req.host == "api.openai.com" {
+		field = "image[]"
+	}
+	require.Len(t, form.File[field], 2)
 	for i, want := range [][]byte{png, jpeg} {
-		file, err := form.File["image"][i].Open()
+		wantMIME := "application/octet-stream"
+		if req.host == "api.openai.com" {
+			wantMIME = http.DetectContentType(want)
+		}
+		require.Equal(t, wantMIME, form.File[field][i].Header.Get("Content-Type"))
+		file, err := form.File[field][i].Open()
 		require.NoError(t, err)
 		data, err := io.ReadAll(file)
 		require.NoError(t, err)

@@ -25,7 +25,7 @@ func (h *DurableAsyncImageHandler) handleAsyncImageUpstreamFailure(parent, attem
 		canFallbackAsyncImageReferenceLocally(task, cfg) {
 		// The real invocation counter proves preselection rejected passthrough
 		// before generation. Keep the same accounts eligible after inlining.
-		return h.scheduleAsyncImageReferenceRetry(parent, task, cfg, "eligible image channels require locally loaded reference images", retryAfter, true, false)
+		return h.scheduleAsyncImageReferenceRetry(parent, task, cfg, "eligible image channels require locally loaded reference images", retryAfter, service.AsyncImageReferenceTransportLocal, false)
 	}
 	logger.L().Warn("async_image.upstream_failed",
 		zap.String("task_id", task.TaskID),
@@ -34,14 +34,16 @@ func (h *DurableAsyncImageHandler) handleAsyncImageUpstreamFailure(parent, attem
 		zap.Int("status_code", statusCode),
 		zap.String("message", message),
 	)
+	if asyncImageOpenAIReferenceRetryFromContext(attemptCtx).originalAccountID > 0 {
+		return h.finishAsyncImageOpenAIReferenceAttempt(parent, attemptCtx, task, cfg, statusCode, body, message, retryAfter)
+	}
 	if statusCode == http.StatusBadRequest &&
 		gjson.GetBytes(body, "error.code").String() == service.AsyncImageOpenAIReferenceURLTimeoutCode {
 		attempts, _ := asyncImageAttemptState(task, attemptCtx)
-		if _, pending := asyncImageOpenAIReferenceRetryAccount(attempts); pending &&
+		if state := asyncImageOpenAIReferenceRetryState(attempts); state.originalAccountID > 0 && !state.originalSent && !state.alternateSent &&
 			task.Platform == service.PlatformOpenAI && canFallbackAsyncImageReferenceLocally(task, cfg) &&
-			time.Now().Before(asyncImageTaskDeadline(task)) &&
-			service.AsyncImageUpstreamAttemptCount(attemptCtx) < asyncImageRemainingUpstreamAttempts(task) {
-			return h.scheduleAsyncImageReferenceRetry(parent, task, cfg, message, retryAfter, true, false)
+			canRetryAsyncImageOpenAIReference(attemptCtx, task, cfg) {
+			return h.scheduleAsyncImageReferenceRetry(parent, task, cfg, message, retryAfter, service.AsyncImageReferenceTransportLocal, false)
 		}
 		h.failAsyncImageTask(parent, task, "upstream_failed", message, false)
 		return asyncImageWorkerDisposition{}
@@ -65,7 +67,7 @@ func (h *DurableAsyncImageHandler) handleAsyncImageUpstreamFailure(parent, attem
 			canFallbackAsyncImageReferenceLocally(task, cfg) {
 			// Transport compatibility is a soft exclusion: try another account
 			// with inline references first, but allow A if no alternate exists.
-			return h.scheduleAsyncImageReferenceRetry(parent, task, cfg, message, retryAfter, true, false)
+			return h.scheduleAsyncImageReferenceRetry(parent, task, cfg, message, retryAfter, service.AsyncImageReferenceTransportLocal, false)
 		}
 		if canRetryAsyncImage(task, task.UpstreamRetryCount, cfg.UpstreamTransientMaxRetries, cfg.TotalMaxRetries) {
 			return h.retryAsyncImageUpstreamTransient(parent, task, cfg, message, retryAfter)
@@ -85,7 +87,7 @@ func (h *DurableAsyncImageHandler) handleAsyncImageUpstreamFailure(parent, attem
 			// The gateway already recorded the definite failure. Persist the local
 			// transport and its account audit atomically; the next invocation must
 			// retain the hard exclusion instead of creating a sticky same-account retry.
-			return h.scheduleAsyncImageReferenceRetry(parent, task, cfg, message, retryAfter, true, true)
+			return h.scheduleAsyncImageReferenceRetry(parent, task, cfg, message, retryAfter, service.AsyncImageReferenceTransportLocal, true)
 		}
 		h.failAsyncImageTask(parent, task, "upstream_failed", message, false)
 		return asyncImageWorkerDisposition{}

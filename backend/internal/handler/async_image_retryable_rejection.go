@@ -21,6 +21,9 @@ func asyncImageRetryableRejectionErrorDetails(c *gin.Context, err *service.Upstr
 	if err.IsAsyncImageOpenAIReferenceURLTimeout() {
 		return err.StatusCode, service.AsyncImageOpenAIReferenceURLTimeoutCode, err.ProviderErrorMessage, true
 	}
+	if err.Reason == service.AsyncImageOpenAIReferenceMultipartRejectionReason {
+		return err.StatusCode, service.AsyncImageOpenAIReferenceMultipartRejectionCode, err.ProviderErrorMessage, true
+	}
 	if !err.IsAsyncImageRetryableRejection() {
 		if !service.AsyncImageProviderRetryPolicyEnabled(ctx) || !err.IsAsyncImageBoundedRetryFailure() {
 			return 0, "", "", false

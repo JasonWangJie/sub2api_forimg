@@ -829,7 +829,11 @@ func (s *OpenAIGatewayService) forwardOpenAIImagesAPIKey(
 		resp.Body = io.NopCloser(bytes.NewReader(respBody))
 		upstreamMsg := strings.TrimSpace(extractUpstreamErrorMessage(respBody))
 		upstreamMsg = sanitizeUpstreamErrorMessage(upstreamMsg)
-		if rejection := newAsyncImageRetryableRejectionForContext(ctx, resp.StatusCode, respBody, resp.Header); rejection != nil {
+		rejection := newAsyncImageOpenAIReferenceMultipartRejection(ctx, resp.StatusCode, respBody, resp.Header)
+		if rejection == nil {
+			rejection = newAsyncImageRetryableRejectionForContext(ctx, resp.StatusCode, respBody, resp.Header)
+		}
+		if rejection != nil {
 			if rules := getBoundErrorPassthroughService(c); rules != nil && rules.MatchRule(account.Platform, resp.StatusCode, respBody) != nil {
 				return s.handleOpenAIImagesErrorResponse(upstreamCtx, resp, c, account, upstreamModel)
 			}
@@ -995,6 +999,14 @@ func (s *OpenAIGatewayService) buildOpenAIImagesRequest(
 			return nil, err
 		}
 		targetURL = buildOpenAIImagesURL(validatedURL, endpoint)
+	}
+
+	if account.IsOpenAIApiKey() && endpoint == openAIImagesEditsEndpoint {
+		var err error
+		body, contentType, err = normalizeOfficialOpenAIImageMultipart(targetURL, body, contentType)
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, targetURL, bytes.NewReader(body))

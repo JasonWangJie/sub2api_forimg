@@ -11,10 +11,66 @@ import (
 )
 
 const (
-	AsyncImageOpenAIReferenceURLTimeoutCode   = "async_image_openai_reference_url_timeout"
-	AsyncImageOpenAIReferenceURLTimeoutReason = GatewayFailureReason(AsyncImageOpenAIReferenceURLTimeoutCode)
-	openAIReferenceURLTimeoutMessage          = "Unable to download content from the provided URL before the timeout. Check that the URL is publicly accessible and responds promptly, or upload the file and provide a file_id instead."
+	AsyncImageOpenAIReferenceURLTimeoutCode           = "async_image_openai_reference_url_timeout"
+	AsyncImageOpenAIReferenceURLTimeoutReason         = GatewayFailureReason(AsyncImageOpenAIReferenceURLTimeoutCode)
+	AsyncImageOpenAIReferenceMultipartRejectionCode   = "async_image_openai_reference_multipart_rejection"
+	AsyncImageOpenAIReferenceMultipartRejectionReason = GatewayFailureReason(AsyncImageOpenAIReferenceMultipartRejectionCode)
+	openAIReferenceURLTimeoutMessage                  = "Unable to download content from the provided URL before the timeout. Check that the URL is publicly accessible and responds promptly, or upload the file and provide a file_id instead."
 )
+
+type asyncImageOpenAIReferenceMultipartRetryKey struct{}
+
+func WithAsyncImageOpenAIReferenceMultipartRetry(ctx context.Context) context.Context {
+	return context.WithValue(ctx, asyncImageOpenAIReferenceMultipartRetryKey{}, true)
+}
+
+// Only an explicit provider rejection can authorize the final alternate send.
+// Transport errors and gateway timeouts may have an unknown execution outcome.
+func newAsyncImageOpenAIReferenceMultipartRejection(ctx context.Context, status int, body []byte, headers http.Header) *UpstreamFailoverError {
+	enabled, _ := ctx.Value(asyncImageOpenAIReferenceMultipartRetryKey{}).(bool)
+	if !enabled {
+		return nil
+	}
+	switch status {
+	case http.StatusBadRequest, http.StatusUnauthorized, http.StatusForbidden, http.StatusNotFound,
+		http.StatusUnsupportedMediaType, http.StatusUnprocessableEntity, http.StatusTooManyRequests,
+		http.StatusInternalServerError, http.StatusServiceUnavailable, 529:
+	default:
+		return nil
+	}
+	if !gjson.ValidBytes(body) {
+		return nil
+	}
+	response := gjson.ParseBytes(body)
+	if response.Get("error.message").Type != gjson.String || response.Get("data.0").Exists() ||
+		hasAsyncImageTerminalRejectionDetail(response) {
+		return nil
+	}
+	message, code, requestID := geminiAsyncUpstreamDiagnostics(body, geminiRequestIDFromHeaders(headers))
+	if message == "" || IsAsyncImageOpenAIReferenceOutcomeUnknown(status, code+" "+message) {
+		return nil
+	}
+	return &UpstreamFailoverError{
+		StatusCode: status, ResponseBody: body, ResponseHeaders: headers.Clone(),
+		ProviderErrorCode: code, ProviderErrorMessage: message, UpstreamRequestID: requestID,
+		Scope: GatewayFailureScopeAccount, Reason: AsyncImageOpenAIReferenceMultipartRejectionReason, NextAccountAction: NextAccountStop,
+	}
+}
+
+// IsAsyncImageOpenAIReferenceOutcomeUnknown keeps ambiguous generation outcomes
+// out of the one-shot reference-image failover.
+func IsAsyncImageOpenAIReferenceOutcomeUnknown(status int, detail string) bool {
+	if status == 0 || status == http.StatusBadGateway || status == http.StatusGatewayTimeout {
+		return true
+	}
+	detail = strings.NewReplacer("_", " ", "-", " ").Replace(strings.ToLower(detail))
+	if containsAsyncImageRejectionPart(detail, "execution unknown", "outcome is unknown", "generation may have started",
+		"generation already started", "already been charged", "may already be charged") {
+		return true
+	}
+	return status >= http.StatusInternalServerError &&
+		containsAsyncImageRejectionPart(detail, "timeout", "timed out", "deadline exceeded", "connection reset", "broken pipe", "unexpected eof", "no response")
+}
 
 // Match the input-fetch rejection only when the durable worker can change
 // transport. The same URL body must not be sent again on this signal.
