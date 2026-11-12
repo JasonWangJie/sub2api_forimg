@@ -20,11 +20,12 @@ import (
 
 // S3ImageStorage 用 S3 兼容对象存储实现 service.ImageStorage。
 type S3ImageStorage struct {
-	client        *s3.Client
-	provider      string
-	bucket        string
-	publicBaseURL string
-	presignExpiry time.Duration
+	client          *s3.Client
+	provider        string
+	bucket          string
+	publicBaseURL   string
+	presignExpiry   time.Duration
+	storageIdentity string
 }
 
 var _ service.ImageStorage = (*S3ImageStorage)(nil)
@@ -56,11 +57,12 @@ func NewS3ImageStorage(ctx context.Context, cfg *config.ImageStorageConfig) (*S3
 	}
 
 	return &S3ImageStorage{
-		client:        client,
-		provider:      resolved.Provider,
-		bucket:        resolved.Bucket,
-		publicBaseURL: strings.TrimRight(resolved.PublicBaseURL, "/"),
-		presignExpiry: expiry,
+		client:          client,
+		provider:        resolved.Provider,
+		bucket:          resolved.Bucket,
+		publicBaseURL:   strings.TrimRight(resolved.PublicBaseURL, "/"),
+		presignExpiry:   expiry,
+		storageIdentity: service.ImageStorageIdentityFingerprint(&resolved),
 	}, nil
 }
 
@@ -117,12 +119,13 @@ func (s *S3ImageStorage) ObjectIntent(key, contentType string, sizeBytes int64, 
 		return service.ObjectRef{}, fmt.Errorf("object intent size and SHA-256 are required")
 	}
 	return service.ObjectRef{
-		Provider:       s.provider,
-		Bucket:         s.bucket,
-		ObjectKey:      key,
-		ContentType:    contentType,
-		SizeBytes:      sizeBytes,
-		ChecksumSHA256: checksumSHA256,
+		StorageIdentity: s.storageIdentity,
+		Provider:        s.provider,
+		Bucket:          s.bucket,
+		ObjectKey:       key,
+		ContentType:     contentType,
+		SizeBytes:       sizeBytes,
+		ChecksumSHA256:  checksumSHA256,
 	}, nil
 }
 
@@ -168,7 +171,12 @@ func (s *S3ImageStorage) Head(ctx context.Context, ref service.ObjectRef) (servi
 		return service.ObjectMetadata{}, err
 	}
 	finish := servertiming.ObserveDependency(ctx, "s3")
-	result, err := s.client.HeadObject(ctx, &s3.HeadObjectInput{Bucket: &s.bucket, Key: &ref.ObjectKey})
+	options, err := imageCleanupS3Options(ctx)
+	if err != nil {
+		finish()
+		return service.ObjectMetadata{}, err
+	}
+	result, err := s.client.HeadObject(ctx, &s3.HeadObjectInput{Bucket: &s.bucket, Key: &ref.ObjectKey}, options...)
 	finish()
 	if err != nil {
 		return service.ObjectMetadata{}, fmt.Errorf("S3 HeadObject: %w", err)
@@ -199,12 +207,30 @@ func (s *S3ImageStorage) Delete(ctx context.Context, ref service.ObjectRef) erro
 		return err
 	}
 	finish := servertiming.ObserveDependency(ctx, "s3")
-	_, err := s.client.DeleteObject(ctx, &s3.DeleteObjectInput{Bucket: &s.bucket, Key: &ref.ObjectKey})
+	options, err := imageCleanupS3Options(ctx)
+	if err != nil {
+		finish()
+		return err
+	}
+	_, err = s.client.DeleteObject(ctx, &s3.DeleteObjectInput{Bucket: &s.bucket, Key: &ref.ObjectKey}, options...)
 	finish()
 	if err != nil {
 		return fmt.Errorf("S3 DeleteObject: %w", err)
 	}
 	return nil
+}
+
+func imageCleanupS3Options(ctx context.Context) ([]func(*s3.Options), error) {
+	gate, cleanup := service.ImageCleanupRequestGate(ctx)
+	if !cleanup {
+		return nil, nil
+	}
+	if gate != nil {
+		if err := gate(ctx); err != nil {
+			return nil, err
+		}
+	}
+	return []func(*s3.Options){func(o *s3.Options) { o.Retryer = aws.NopRetryer{} }}, nil
 }
 
 func (s *S3ImageStorage) validateRef(ref service.ObjectRef) error {
@@ -220,6 +246,9 @@ func (s *S3ImageStorage) validateRef(ref service.ObjectRef) error {
 	}
 	if ref.Bucket != s.bucket {
 		return fmt.Errorf("object bucket %q does not match configured bucket", ref.Bucket)
+	}
+	if ref.StorageIdentity != "" && ref.StorageIdentity != s.storageIdentity {
+		return fmt.Errorf("object storage identity does not match configured storage")
 	}
 	if strings.TrimSpace(ref.ObjectKey) == "" {
 		return fmt.Errorf("object key is required")

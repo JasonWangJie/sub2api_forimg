@@ -64,13 +64,15 @@ func TestS3ImageStorageDurableObjectLifecycle(t *testing.T) {
 
 	ref, err := storage.SaveObject(context.Background(), "tasks/task-1/result 1.png", "image/png", []byte("payload"))
 	require.NoError(t, err)
+	require.Len(t, ref.StorageIdentity, 64)
 	require.Equal(t, service.ObjectRef{
-		Provider:       service.ImageStorageProviderCustomS3,
-		Bucket:         "images",
-		ObjectKey:      "tasks/task-1/result 1.png",
-		ContentType:    "image/png",
-		SizeBytes:      7,
-		ChecksumSHA256: "239f59ed55e737c77147cf55ad0c1b030b6d7ee748a7426952f9b852d5a935e5",
+		StorageIdentity: storage.storageIdentity,
+		Provider:        service.ImageStorageProviderCustomS3,
+		Bucket:          "images",
+		ObjectKey:       "tasks/task-1/result 1.png",
+		ContentType:     "image/png",
+		SizeBytes:       7,
+		ChecksumSHA256:  "239f59ed55e737c77147cf55ad0c1b030b6d7ee748a7426952f9b852d5a935e5",
 	}, ref)
 
 	metadata, err := storage.Head(context.Background(), ref)

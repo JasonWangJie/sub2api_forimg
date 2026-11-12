@@ -2030,7 +2030,8 @@ func (h *DurableAsyncImageHandler) uploadAsyncImageStaging(ctx context.Context, 
 			return errors.New("stored asynchronous image identity did not match its upload intent")
 		}
 		results = append(results, service.AsyncImageResult{
-			TaskID: task.TaskID, ImageIndex: object.ImageIndex,
+			StorageIdentity: ref.StorageIdentity,
+			TaskID:          task.TaskID, ImageIndex: object.ImageIndex,
 			Provider: ref.Provider, Bucket: ref.Bucket, ObjectKey: ref.ObjectKey,
 			ContentType: object.ContentType, ByteSize: object.ByteSize, Checksum: object.Checksum,
 			Width: object.Width, Height: object.Height,

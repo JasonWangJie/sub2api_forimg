@@ -68,7 +68,15 @@ func (s *ImageLibraryMaintenanceService) Start() {
 		s.done = make(chan struct{})
 		go func() {
 			defer close(s.done)
+			cleanupDone := make(chan struct{})
+			go func() {
+				defer close(cleanupDone)
+				if s.library.resultCleanup != nil {
+					s.library.resultCleanup.loop(ctx)
+				}
+			}()
 			s.loop(ctx)
+			<-cleanupDone
 		}()
 	})
 }
@@ -241,6 +249,16 @@ func (s *ImageLibraryMaintenanceService) processCleanup(ctx context.Context) err
 	job, err := repo.ClaimCleanupJob(ctx, time.Now().UTC().Add(-imageLibraryMaintenanceLease))
 	if err != nil || job == nil {
 		return err
+	}
+	if (job.Scope == "async_results" || job.Scope == "all") && s.library.resultCleanup != nil {
+		ready, err := s.library.resultCleanup.prepareLegacy(ctx, job)
+		if err != nil {
+			_ = repo.FinishCleanupJob(ctx, job.ID, job.LeaseVersion, "failed", "生成结果清理准备失败")
+			return err
+		}
+		if !ready {
+			return repo.FinishCleanupJob(ctx, job.ID, job.LeaseVersion, "pending", "等待生成结果安全清理任务")
+		}
 	}
 	lease := startImageLibraryLease(ctx, func(heartbeatCtx context.Context) (bool, error) {
 		return repo.HeartbeatCleanupJob(heartbeatCtx, job.ID, job.LeaseVersion)

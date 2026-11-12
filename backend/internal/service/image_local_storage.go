@@ -51,7 +51,8 @@ func ResolveLocalImageStorageDataDir(pricingDataDir, configured string) string {
 
 // LocalImageStorage stores durable library/plaza (or async) bytes on disk.
 type LocalImageStorage struct {
-	rootDir string
+	rootDir         string
+	storageIdentity string
 
 	// Optional URL resolution for async image_storage.backend=local:
 	// - localURL: static/CDN root mapped to data_dir → base/object_key (highest priority when set)
@@ -99,6 +100,7 @@ func NewLocalImageStorageWithURLOptions(rootDir, localURL, publicBaseURL, signSe
 	_ = os.Chmod(abs, dirMode)
 	return &LocalImageStorage{
 		rootDir:          abs,
+		storageIdentity:  ImageStorageIdentityFingerprint(&config.ImageStorageConfig{Backend: ImageStorageBackendLocal, Provider: ImageStorageProviderLocal, Local: config.ImageStorageLocalConfig{DataDir: abs}}),
 		localURL:         trimmedLocal,
 		publicBaseURL:    strings.TrimRight(strings.TrimSpace(publicBaseURL), "/"),
 		signServeBaseURL: strings.TrimRight(strings.TrimSpace(signServeBaseURL), "/"),
@@ -189,12 +191,13 @@ func (s *LocalImageStorage) ObjectIntent(key, contentType string, sizeBytes int6
 		return ObjectRef{}, fmt.Errorf("object intent size and SHA-256 are required")
 	}
 	return ObjectRef{
-		Provider:       config.ImageStorageProviderLocal,
-		Bucket:         "local",
-		ObjectKey:      key,
-		ContentType:    contentType,
-		SizeBytes:      sizeBytes,
-		ChecksumSHA256: checksumSHA256,
+		StorageIdentity: s.storageIdentity,
+		Provider:        config.ImageStorageProviderLocal,
+		Bucket:          "local",
+		ObjectKey:       key,
+		ContentType:     contentType,
+		SizeBytes:       sizeBytes,
+		ChecksumSHA256:  checksumSHA256,
 	}, nil
 }
 
@@ -246,8 +249,16 @@ func (s *LocalImageStorage) Read(_ context.Context, ref ObjectRef) (io.ReadClose
 	return file, nil
 }
 
-func (s *LocalImageStorage) Head(_ context.Context, ref ObjectRef) (ObjectMetadata, error) {
+func (s *LocalImageStorage) Head(ctx context.Context, ref ObjectRef) (ObjectMetadata, error) {
 	if err := s.validateRef(ref); err != nil {
+		return ObjectMetadata{}, err
+	}
+	if gate, cleanup := ImageCleanupRequestGate(ctx); cleanup && gate != nil {
+		if err := gate(ctx); err != nil {
+			return ObjectMetadata{}, err
+		}
+	}
+	if err := ctx.Err(); err != nil {
 		return ObjectMetadata{}, err
 	}
 	fullPath, err := s.absolutePath(ref.ObjectKey)
@@ -259,15 +270,57 @@ func (s *LocalImageStorage) Head(_ context.Context, ref ObjectRef) (ObjectMetada
 		return ObjectMetadata{}, fmt.Errorf("stat local object: %w", err)
 	}
 	observed := ref
+	observed.StorageIdentity = s.storageIdentity
 	observed.SizeBytes = info.Size()
+	observed.ChecksumSHA256 = ""
+	// A historical cleanup must compare server-observed bytes, not echo the
+	// caller's expected checksum. Never read mismatched or oversized files.
+	if ref.StorageIdentity == "" && info.Mode().IsRegular() && info.Size() == ref.SizeBytes && info.Size() <= 64<<20 {
+		file, openErr := os.Open(fullPath)
+		if openErr != nil {
+			return ObjectMetadata{}, openErr
+		}
+		defer file.Close()
+		hash := sha256.New()
+		buffer := make([]byte, 32<<10)
+		reader := io.LimitReader(file, (64<<20)+1)
+		var total int64
+		for {
+			if err := ctx.Err(); err != nil {
+				return ObjectMetadata{}, err
+			}
+			n, readErr := reader.Read(buffer)
+			if n > 0 {
+				_, _ = hash.Write(buffer[:n])
+				total += int64(n)
+			}
+			if readErr == io.EOF {
+				break
+			}
+			if readErr != nil {
+				return ObjectMetadata{}, readErr
+			}
+		}
+		if total == info.Size() {
+			observed.ChecksumSHA256 = hex.EncodeToString(hash.Sum(nil))
+		}
+	}
 	return ObjectMetadata{
 		ObjectRef:    observed,
 		LastModified: info.ModTime().UTC(),
 	}, nil
 }
 
-func (s *LocalImageStorage) Delete(_ context.Context, ref ObjectRef) error {
+func (s *LocalImageStorage) Delete(ctx context.Context, ref ObjectRef) error {
 	if err := s.validateRef(ref); err != nil {
+		return err
+	}
+	if gate, cleanup := ImageCleanupRequestGate(ctx); cleanup && gate != nil {
+		if err := gate(ctx); err != nil {
+			return err
+		}
+	}
+	if err := ctx.Err(); err != nil {
 		return err
 	}
 	fullPath, err := s.absolutePath(ref.ObjectKey)
@@ -286,6 +339,9 @@ func (s *LocalImageStorage) validateRef(ref ObjectRef) error {
 	}
 	if !strings.EqualFold(strings.TrimSpace(ref.Provider), config.ImageStorageProviderLocal) {
 		return fmt.Errorf("local storage cannot serve provider %q", ref.Provider)
+	}
+	if ref.StorageIdentity != "" && ref.StorageIdentity != s.storageIdentity {
+		return fmt.Errorf("object storage identity does not match configured local storage")
 	}
 	if strings.TrimSpace(ref.ObjectKey) == "" {
 		return fmt.Errorf("object key is required")

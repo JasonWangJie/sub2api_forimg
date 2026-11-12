@@ -169,29 +169,28 @@ func TestHasLiveImageObjectReferenceExcludesClaimedResultAndTask(t *testing.T) {
 	require.NoError(t, mock.ExpectationsWereMet())
 }
 
-func TestCompleteAsyncImageTaskDeletionMarksResultObjectsDeleted(t *testing.T) {
-	db, mock, err := sqlmock.New()
-	require.NoError(t, err)
-	defer func() { _ = db.Close() }()
-
-	claimedAt := time.Now().UTC()
-	mock.ExpectBegin()
-	mock.ExpectQuery("(?s)SELECT storage_object_id,provider,bucket,object_key.*FOR UPDATE").
-		WithArgs("asyncimg_old").
-		WillReturnRows(sqlmock.NewRows([]string{"storage_object_id", "provider", "bucket", "object_key"}).
-			AddRow(int64(77), "aliyun", "images", "results/old.png"))
-	mock.ExpectExec("(?s)DELETE FROM async_image_tasks.*cleanup_claimed_at").
-		WithArgs("asyncimg_old", claimedAt).
-		WillReturnResult(sqlmock.NewResult(0, 1))
-	mock.ExpectExec("(?s)UPDATE image_storage_objects.*state='deleted'.*NOT EXISTS.*async_image_results").
-		WithArgs(int64(77)).
-		WillReturnResult(sqlmock.NewResult(0, 1))
-	mock.ExpectCommit()
-
-	repo := requireAsyncImageTaskRepository(t, db)
-	err = repo.CompleteAsyncImageTaskDeletion(context.Background(), "asyncimg_old", claimedAt)
-	require.NoError(t, err)
-	require.NoError(t, mock.ExpectationsWereMet())
+func TestCompleteAsyncImageTaskDeletionRequiresNoResults(t *testing.T) {
+	for _, affected := range []int64{0, 1} {
+		db, mock, err := sqlmock.New()
+		require.NoError(t, err)
+		claimedAt := time.Now().UTC()
+		mock.ExpectBegin()
+		mock.ExpectExec("(?s)DELETE FROM async_image_tasks.*status IN.*NOT EXISTS.*async_image_results").
+			WithArgs("asyncimg_old", claimedAt).WillReturnResult(sqlmock.NewResult(0, affected))
+		if affected == 1 {
+			mock.ExpectCommit()
+		} else {
+			mock.ExpectRollback()
+		}
+		err = requireAsyncImageTaskRepository(t, db).CompleteAsyncImageTaskDeletion(context.Background(), "asyncimg_old", claimedAt)
+		if affected == 1 {
+			require.NoError(t, err)
+		} else {
+			require.ErrorIs(t, err, service.ErrAsyncImageInvalidTransition)
+		}
+		require.NoError(t, mock.ExpectationsWereMet())
+		_ = db.Close()
+	}
 }
 
 func TestClaimExpiredInputsExcludesActiveTaskReferences(t *testing.T) {

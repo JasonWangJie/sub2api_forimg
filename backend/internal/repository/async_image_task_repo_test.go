@@ -558,7 +558,7 @@ func TestReplaceAsyncImageResultsRegistersSharedStorageObject(t *testing.T) {
 		WithArgs("asyncimg_1").
 		WillReturnResult(sqlmock.NewResult(0, 0))
 	mock.ExpectQuery("(?s)INSERT INTO image_storage_objects.*ON CONFLICT.*RETURNING id").
-		WithArgs("aliyun", "images", "results/1.png", "image/png", int64(123), "checksum", 10, 20).
+		WithArgs("aliyun", "images", "results/1.png", "image/png", int64(123), "checksum", 10, 20, "").
 		WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(int64(77)))
 	mock.ExpectExec("(?s)INSERT INTO async_image_results.*storage_object_id").
 		WithArgs("asyncimg_1", 0, "aliyun", "images", "results/1.png", "image/png", int64(123), "checksum", 10, 20, int64(77)).

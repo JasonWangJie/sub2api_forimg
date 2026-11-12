@@ -72,6 +72,9 @@ func (r *asyncImageTaskRepository) CreateAsyncImageTask(ctx context.Context, par
 	if err := bindAsyncImageInputObjects(ctx, tx, params); err != nil {
 		return nil, false, err
 	}
+	if err := bindAsyncImageResultReferences(ctx, tx, params); err != nil {
+		return nil, false, err
+	}
 	eventPayload := normalizeJSONPayload(params.OutboxPayload)
 	if err := appendAsyncImageEventWithSQL(ctx, tx, service.AsyncImageEvent{
 		TaskID: task.TaskID, EventType: "task_created", ToStatus: stringPointer(service.AsyncImageTaskStatusQueued), Payload: eventPayload,
@@ -102,11 +105,11 @@ func insertAsyncImageTask(ctx context.Context, sqlq asyncImageSQLExecutor, param
 INSERT INTO async_image_tasks (
     task_id, user_id, api_key_id, group_id, protocol, platform, request_type,
     model, requested_image_size, aspect_ratio, image_count, idempotency_key,
-    request_hash, request_payload, prompt_preview, reference_image_urls, expires_at
+    request_hash, request_payload, prompt_preview, reference_image_urls, expires_at, result_references_checked
 ) VALUES (
     $1, $2, $3, $4, $5, $6, $7,
     $8, $9, $10, $11, $12,
-    $13, $14, $15, $16::jsonb, $17
+    $13, $14, $15, $16::jsonb, $17, jsonb_array_length($16::jsonb)=0
 )
 RETURNING ` + asyncImageTaskColumns
 	return scanAsyncImageTask(sqlq.QueryRowContext(ctx, query,
@@ -668,7 +671,9 @@ func (r *asyncImageTaskRepository) ReplaceAsyncImageResults(ctx context.Context,
 	}
 	defer func() { _ = tx.Rollback() }()
 	var exists bool
-	if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM async_image_tasks WHERE task_id = $1)`, taskID).Scan(&exists); err != nil {
+	// Serialize result replacement with task retention. A final DELETE's
+	// NOT EXISTS check alone cannot protect against an uncommitted FK insert.
+	if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM async_image_tasks WHERE task_id = $1 AND cleanup_claimed_at IS NULL FOR UPDATE)`, taskID).Scan(&exists); err != nil {
 		return err
 	}
 	if !exists {
@@ -683,16 +688,18 @@ func (r *asyncImageTaskRepository) ReplaceAsyncImageResults(ctx context.Context,
 		if err := tx.QueryRowContext(ctx, `
 INSERT INTO image_storage_objects (
     provider, bucket, object_key, content_type, byte_size, checksum_sha256,
-    width, height
-) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+    width, height, storage_identity
+) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
 ON CONFLICT (provider, bucket, object_key) DO UPDATE SET
     content_type=EXCLUDED.content_type, byte_size=EXCLUDED.byte_size,
     checksum_sha256=EXCLUDED.checksum_sha256, width=EXCLUDED.width,
     height=EXCLUDED.height, state='active', deletion_claimed_at=NULL,
-    deleted_at=NULL, updated_at=NOW()
+    deleted_at=NULL, updated_at=NOW(), storage_identity=EXCLUDED.storage_identity
+WHERE image_storage_objects.state <> 'deleting'
+  AND (image_storage_objects.storage_identity='' OR image_storage_objects.storage_identity=EXCLUDED.storage_identity)
 RETURNING id`,
 			result.Provider, result.Bucket, result.ObjectKey, result.ContentType,
-			result.ByteSize, result.Checksum, result.Width, result.Height,
+			result.ByteSize, result.Checksum, result.Width, result.Height, result.StorageIdentity,
 		).Scan(&storageObjectID); err != nil {
 			return err
 		}

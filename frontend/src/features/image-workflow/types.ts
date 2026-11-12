@@ -188,6 +188,23 @@ export interface ImageCleanupJob {
   created_at: string
   finished_at?: string | null
   error_message?: string | null
+  source?: 'manual' | 'scheduled' | 'legacy' | string
+  before?: string | null
+  detached_count?: number
+  protected_count?: number
+  skipped_count?: number
+  failed_count?: number
+  cancel_requested?: boolean
+}
+
+export interface ImageCleanupPreview {
+  matched_items: number
+  matched_bytes: number
+  before?: string
+  preview_token?: string
+  protected_count?: number
+  scanned_count?: number
+  truncated?: boolean
 }
 
 export interface ImageLibraryMigrationState {

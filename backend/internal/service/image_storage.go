@@ -34,14 +34,15 @@ type ImageStorage interface {
 // be persisted safely and resolved into a fresh URL whenever a client reads a
 // task record.
 type ObjectRef struct {
-	Provider       string `json:"provider"`
-	Bucket         string `json:"bucket"`
-	ObjectKey      string `json:"object_key"`
-	ContentType    string `json:"content_type,omitempty"`
-	SizeBytes      int64  `json:"size_bytes,omitempty"`
-	ChecksumSHA256 string `json:"checksum_sha256,omitempty"`
-	Width          int    `json:"width,omitempty"`
-	Height         int    `json:"height,omitempty"`
+	StorageIdentity string `json:"-"`
+	Provider        string `json:"provider"`
+	Bucket          string `json:"bucket"`
+	ObjectKey       string `json:"object_key"`
+	ContentType     string `json:"content_type,omitempty"`
+	SizeBytes       int64  `json:"size_bytes,omitempty"`
+	ChecksumSHA256  string `json:"checksum_sha256,omitempty"`
+	Width           int    `json:"width,omitempty"`
+	Height          int    `json:"height,omitempty"`
 }
 
 // ObjectMetadata is returned by Head and contains server-observed object

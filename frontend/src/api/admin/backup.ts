@@ -183,6 +183,37 @@ export interface ImageStorageConfigResponse {
   superbed_token_configured?: boolean
 }
 
+export interface ImageCleanupPolicy {
+  enabled: boolean
+  retention_value: number
+  retention_unit: 'hours' | 'days'
+  schedule_mode: 'interval' | 'daily'
+  interval_minutes: number
+  daily_time: string
+  timezone: 'Asia/Shanghai'
+  batch_size: number
+  requests_per_second: number
+  next_run_at?: string | null
+  configured?: boolean
+  revision?: number
+}
+
+export async function getImageCleanupPolicy(): Promise<ImageCleanupPolicy> {
+  const { data } = await apiClient.get<ImageCleanupPolicy>('/admin/backups/image-storage/cleanup-policy')
+  return data
+}
+
+export async function updateImageCleanupPolicy(policy: ImageCleanupPolicy): Promise<ImageCleanupPolicy> {
+  const payload = {
+    enabled: policy.enabled, retention_value: policy.retention_value, retention_unit: policy.retention_unit,
+    schedule_mode: policy.schedule_mode, interval_minutes: policy.interval_minutes, daily_time: policy.daily_time,
+    timezone: policy.timezone, batch_size: policy.batch_size, requests_per_second: policy.requests_per_second,
+    revision: policy.revision,
+  }
+  const { data } = await apiClient.put<ImageCleanupPolicy>('/admin/backups/image-storage/cleanup-policy', payload)
+  return data
+}
+
 export async function getImageStorageConfig(): Promise<ImageStorageConfigResponse> {
   const { data } = await apiClient.get<ImageStorageConfigResponse>('/admin/backups/image-storage')
   return data
@@ -254,6 +285,8 @@ export const backupAPI = {
   getImageStorageConfig,
   updateImageStorageConfig,
   testImageStorageConnection,
+  getImageCleanupPolicy,
+  updateImageCleanupPolicy,
   getSchedule,
   updateSchedule,
   createBackup,

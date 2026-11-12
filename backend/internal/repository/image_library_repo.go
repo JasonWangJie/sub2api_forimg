@@ -39,6 +39,8 @@ SELECT EXISTS(
  WHERE o.provider=$1 AND o.bucket=$2 AND o.object_key=$3
    AND (
      EXISTS (SELECT 1 FROM image_library_items i WHERE i.storage_object_id=o.id AND i.deleted_at IS NULL)
+     OR EXISTS(SELECT 1 FROM async_image_task_result_references d JOIN async_image_tasks dt ON dt.task_id=d.task_id WHERE d.storage_object_id=o.id AND dt.status NOT IN ('succeeded','failed','expired'))
+     OR EXISTS(SELECT 1 FROM async_image_tasks ut WHERE NOT ut.result_references_checked AND ut.status NOT IN ('succeeded','failed','expired'))
      OR EXISTS (
        SELECT 1 FROM image_plaza_publications p
        JOIN image_library_items i ON i.id=p.library_item_id
@@ -1298,7 +1300,9 @@ deleted_count,deleted_bytes,last_error,created_at`, adminUserID, scope, filters)
 
 func (r *imageLibraryRepository) ListCleanupJobs(ctx context.Context, limit int) ([]service.ImageLibraryCleanupJob, error) {
 	limit = normalizeLibraryLimit(limit)
-	rows, err := r.db.QueryContext(ctx, `SELECT id,requested_by,scope,filters,status,scanned_count,deleted_count,deleted_bytes,last_error,created_at FROM image_library_cleanup_jobs ORDER BY id DESC LIMIT $1`, limit)
+	rows, err := r.db.QueryContext(ctx, `SELECT id,requested_by,scope,filters,status,scanned_count,deleted_count,deleted_bytes,last_error,created_at,
+ result_request,detached_count,protected_count,skipped_count,failed_count,cancel_requested,next_attempt_at,finished_at
+ FROM image_library_cleanup_jobs ORDER BY id DESC LIMIT $1`, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -1306,10 +1310,20 @@ func (r *imageLibraryRepository) ListCleanupJobs(ctx context.Context, limit int)
 	jobs := make([]service.ImageLibraryCleanupJob, 0, limit)
 	for rows.Next() {
 		var job service.ImageLibraryCleanupJob
+		var requestJSON []byte
 		if err := rows.Scan(&job.ID, &job.RequestedBy, &job.Scope, &job.Filters,
 			&job.Status, &job.ScannedCount, &job.DeletedCount, &job.DeletedBytes,
-			&job.LastError, &job.CreatedAt); err != nil {
+			&job.LastError, &job.CreatedAt, &requestJSON, &job.DetachedCount, &job.ProtectedCount,
+			&job.SkippedCount, &job.FailedCount, &job.CancelRequested, &job.NextAttemptAt, &job.FinishedAt); err != nil {
 			return nil, err
+		}
+		if len(requestJSON) > 0 {
+			var request service.ImageResultCleanupRequest
+			if err := json.Unmarshal(requestJSON, &request); err != nil {
+				return nil, err
+			}
+			job.Before = &request.Before
+			job.Source = request.Source
 		}
 		jobs = append(jobs, job)
 	}
@@ -1348,12 +1362,6 @@ SELECT COUNT(*),COALESCE(SUM(byte_size),0) FROM (
 		preview.MatchedItems += orphanItems
 		preview.MatchedBytes += orphanBytes
 
-		inputItems, inputBytes, err := r.previewAsyncInputObjects(ctx, filters)
-		if err != nil {
-			return nil, err
-		}
-		preview.MatchedItems += inputItems
-		preview.MatchedBytes += inputBytes
 		return preview, nil
 	default:
 		where, args, err := imageLibraryCleanupWhere(scope, filters)
@@ -1423,7 +1431,7 @@ func (r *imageLibraryRepository) ClaimCleanupJob(ctx context.Context, staleBefor
 	err := r.db.QueryRowContext(ctx, `
 WITH candidate AS (
  SELECT id FROM image_library_cleanup_jobs
- WHERE status='pending' OR (status='running' AND updated_at<=$1)
+ WHERE result_request IS NULL AND (status='pending' OR (status='running' AND updated_at<=$1))
  ORDER BY id LIMIT 1 FOR UPDATE SKIP LOCKED
 )
 UPDATE image_library_cleanup_jobs j
@@ -1452,29 +1460,26 @@ func (r *imageLibraryRepository) PrepareCleanupBatch(ctx context.Context, jobID,
 		limit = 100
 	}
 	if scope == "async_results" || scope == "all" {
-		batch, err := r.prepareAsyncResultsCleanupBatch(ctx, jobID, leaseVersion, filters, limit)
+		var done bool
+		err := r.db.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM image_library_cleanup_jobs p
+          JOIN image_library_cleanup_jobs c ON c.id=p.result_child_job_id
+          WHERE p.id=$1 AND p.lease_version=$2 AND p.status='running' AND c.status='succeeded')`, jobID, leaseVersion).Scan(&done)
 		if err != nil {
 			return nil, err
 		}
-		if batch.MatchedItems > 0 || len(batch.Objects) > 0 {
-			return batch, nil
+		if !done {
+			return nil, apperrors.Conflict("IMAGE_RESULT_CLEANUP_PENDING", "result cleanup child job must complete first")
 		}
 		if scope == "async_results" {
 			return &service.ImageLibraryCleanupBatch{Done: true}, nil
 		}
-		batch, err = r.prepareLibraryItemsCleanupBatch(ctx, jobID, leaseVersion, "all", filters, limit)
-		if err != nil {
-			return nil, err
-		}
-		if batch.MatchedItems > 0 || len(batch.Objects) > 0 {
-			return batch, nil
+		batch, err := r.prepareLibraryItemsCleanupBatch(ctx, jobID, leaseVersion, "all", filters, limit)
+		if err != nil || batch.MatchedItems > 0 || len(batch.Objects) > 0 {
+			return batch, err
 		}
 		batch, err = r.prepareOrphanStorageCleanupBatch(ctx, jobID, leaseVersion, filters, limit)
-		if err != nil {
-			return nil, err
-		}
-		if batch.MatchedItems > 0 || len(batch.Objects) > 0 {
-			return batch, nil
+		if err != nil || batch.MatchedItems > 0 || len(batch.Objects) > 0 {
+			return batch, err
 		}
 		return r.prepareStorageResidueCleanupBatch(ctx, jobID, leaseVersion, filters, limit)
 	}
@@ -1572,6 +1577,8 @@ WHERE id=ANY($1)`, pq.Array(itemIDs)); err != nil {
 	objectRows, err := tx.QueryContext(ctx, `
 UPDATE image_storage_objects o SET state='deleting',deletion_claimed_at=NOW(),updated_at=NOW()
 WHERE o.id=ANY($1) AND o.state='active'
+  AND NOT EXISTS(SELECT 1 FROM async_image_task_result_references d JOIN async_image_tasks dt ON dt.task_id=d.task_id WHERE d.storage_object_id=o.id AND dt.status NOT IN ('succeeded','failed','expired'))
+  AND NOT EXISTS(SELECT 1 FROM async_image_tasks ut WHERE NOT ut.result_references_checked AND ut.status NOT IN ('succeeded','failed','expired'))
   AND NOT EXISTS (SELECT 1 FROM image_library_items i WHERE i.storage_object_id=o.id AND i.deleted_at IS NULL)
   AND NOT EXISTS (
     SELECT 1 FROM image_plaza_publications p JOIN image_library_items i ON i.id=p.library_item_id
@@ -1617,9 +1624,12 @@ WITH reactivated AS (
  UPDATE image_storage_objects o
  SET state='active',deletion_claimed_at=NULL,updated_at=NOW()
  WHERE o.state='deleting'
+   AND NOT EXISTS(SELECT 1 FROM image_result_cleanup_objects rc WHERE rc.storage_object_id=o.id AND rc.state IN ('deleting','retry'))
    AND (o.deletion_claimed_at IS NULL OR o.deletion_claimed_at<=$1)
    AND (
      EXISTS (SELECT 1 FROM image_library_items i WHERE i.storage_object_id=o.id AND i.deleted_at IS NULL)
+     OR EXISTS(SELECT 1 FROM async_image_task_result_references d JOIN async_image_tasks dt ON dt.task_id=d.task_id WHERE d.storage_object_id=o.id AND dt.status NOT IN ('succeeded','failed','expired'))
+     OR EXISTS(SELECT 1 FROM async_image_tasks ut WHERE NOT ut.result_references_checked AND ut.status NOT IN ('succeeded','failed','expired'))
      OR EXISTS (
        SELECT 1 FROM image_plaza_publications p
        JOIN image_library_items i ON i.id=p.library_item_id
@@ -1632,7 +1642,7 @@ WITH reactivated AS (
  RETURNING o.id
 ), candidates AS (
  SELECT id FROM image_storage_objects
- WHERE state='deleting' AND (deletion_claimed_at IS NULL OR deletion_claimed_at<=$1)
+ WHERE state='deleting' AND NOT EXISTS(SELECT 1 FROM image_result_cleanup_objects rc WHERE rc.storage_object_id=image_storage_objects.id AND rc.state IN ('deleting','retry')) AND (deletion_claimed_at IS NULL OR deletion_claimed_at<=$1)
    AND NOT EXISTS (SELECT 1 FROM reactivated r WHERE r.id=image_storage_objects.id)
  ORDER BY id LIMIT $2 FOR UPDATE SKIP LOCKED
 )
@@ -1686,11 +1696,11 @@ WHERE provider=$1 AND bucket=$2 AND object_key=$3 AND state='deleting'`, ref.Pro
 }
 
 func (r *imageLibraryRepository) FinishCleanupJob(ctx context.Context, jobID, leaseVersion int64, status, message string) error {
-	if status != "succeeded" && status != "failed" {
+	if status != "succeeded" && status != "failed" && status != "pending" {
 		return apperrors.BadRequest("INVALID_CLEANUP_STATUS", "cleanup status must be succeeded or failed")
 	}
 	result, err := r.db.ExecContext(ctx, `
-UPDATE image_library_cleanup_jobs SET status=$3,last_error=$4,finished_at=NOW(),updated_at=NOW()
+UPDATE image_library_cleanup_jobs SET status=$3::text,last_error=$4,finished_at=CASE WHEN $3::text='pending' THEN NULL ELSE NOW() END,updated_at=NOW()
 WHERE id=$1 AND lease_version=$2 AND status='running'`, jobID, leaseVersion, status, nullIfEmpty(message))
 	return requireImageLibraryLease(result, err)
 }
@@ -1748,6 +1758,8 @@ func (r *imageLibraryRepository) PrepareOutboxCleanup(ctx context.Context, itemI
 	rows, err := tx.QueryContext(ctx, `
 UPDATE image_storage_objects o SET state='deleting',deletion_claimed_at=NOW(),updated_at=NOW()
 WHERE o.id=$1 AND o.state='active'
+  AND NOT EXISTS(SELECT 1 FROM async_image_task_result_references d JOIN async_image_tasks dt ON dt.task_id=d.task_id WHERE d.storage_object_id=o.id AND dt.status NOT IN ('succeeded','failed','expired'))
+  AND NOT EXISTS(SELECT 1 FROM async_image_tasks ut WHERE NOT ut.result_references_checked AND ut.status NOT IN ('succeeded','failed','expired'))
   AND NOT EXISTS (SELECT 1 FROM image_library_items i WHERE i.storage_object_id=o.id AND i.deleted_at IS NULL)
   AND NOT EXISTS (
     SELECT 1 FROM image_plaza_publications p
@@ -1848,7 +1860,7 @@ WHERE migration_key=$1 AND lease_version=$2 AND status='running'`, key, leaseVer
 }
 
 func (r *imageLibraryRepository) FinishMigration(ctx context.Context, key string, leaseVersion int64, status, message string) error {
-	if status != "succeeded" && status != "failed" {
+	if status != "succeeded" && status != "failed" && status != "pending" {
 		return apperrors.BadRequest("INVALID_MIGRATION_STATUS", "migration status must be succeeded or failed")
 	}
 	result, err := r.db.ExecContext(ctx, `
@@ -1932,6 +1944,8 @@ func orphanStorageCleanupWhere(filters json.RawMessage) (string, []any, error) {
 		return "", nil, err
 	}
 	clauses := []string{
+		`NOT EXISTS(SELECT 1 FROM async_image_task_result_references d JOIN async_image_tasks dt ON dt.task_id=d.task_id WHERE d.storage_object_id=o.id AND dt.status NOT IN ('succeeded','failed','expired'))`,
+		`NOT EXISTS(SELECT 1 FROM async_image_tasks ut WHERE NOT ut.result_references_checked AND ut.status NOT IN ('succeeded','failed','expired'))`,
 		`NOT EXISTS (SELECT 1 FROM image_library_items i WHERE i.storage_object_id=o.id AND i.deleted_at IS NULL)`,
 		`NOT EXISTS (
       SELECT 1 FROM image_plaza_publications p
@@ -1954,132 +1968,7 @@ func orphanStorageCleanupWhere(filters json.RawMessage) (string, []any, error) {
 }
 
 func (r *imageLibraryRepository) prepareAsyncResultsCleanupBatch(ctx context.Context, jobID, leaseVersion int64, filters json.RawMessage, limit int) (*service.ImageLibraryCleanupBatch, error) {
-	where, args, err := asyncResultsCleanupWhere(filters)
-	if err != nil {
-		return nil, err
-	}
-	tx, err := r.db.BeginTx(ctx, nil)
-	if err != nil {
-		return nil, err
-	}
-	defer func() { _ = tx.Rollback() }()
-	var leaseAlive bool
-	if err := tx.QueryRowContext(ctx, `
-SELECT TRUE FROM image_library_cleanup_jobs
-WHERE id=$1 AND lease_version=$2 AND status='running'
-FOR UPDATE`, jobID, leaseVersion).Scan(&leaseAlive); err != nil {
-		if err == sql.ErrNoRows {
-			return nil, service.ErrImageLibraryLeaseLost
-		}
-		return nil, err
-	}
-	args = append(args, limit)
-	rows, err := tx.QueryContext(ctx, `
-SELECT r.id,r.storage_object_id,r.provider,r.bucket,r.object_key,r.content_type,r.byte_size,r.checksum,r.width,r.height
-FROM async_image_results r
-WHERE `+where+fmt.Sprintf(" ORDER BY r.id LIMIT $%d FOR UPDATE OF r SKIP LOCKED", len(args)), args...)
-	if err != nil {
-		return nil, err
-	}
-	type resultRow struct {
-		id       int64
-		objectID sql.NullInt64
-		ref      service.ObjectRef
-	}
-	claimed := make([]resultRow, 0, limit)
-	for rows.Next() {
-		var row resultRow
-		var width, height sql.NullInt64
-		if err := rows.Scan(
-			&row.id, &row.objectID, &row.ref.Provider, &row.ref.Bucket, &row.ref.ObjectKey,
-			&row.ref.ContentType, &row.ref.SizeBytes, &row.ref.ChecksumSHA256, &width, &height,
-		); err != nil {
-			_ = rows.Close()
-			return nil, err
-		}
-		if width.Valid {
-			row.ref.Width = int(width.Int64)
-		}
-		if height.Valid {
-			row.ref.Height = int(height.Int64)
-		}
-		claimed = append(claimed, row)
-	}
-	if err := rows.Close(); err != nil {
-		return nil, err
-	}
-	if len(claimed) == 0 {
-		return &service.ImageLibraryCleanupBatch{Done: true}, tx.Commit()
-	}
-	resultIDs := make([]int64, 0, len(claimed))
-	for _, row := range claimed {
-		resultIDs = append(resultIDs, row.id)
-	}
-	if _, err := tx.ExecContext(ctx, `DELETE FROM async_image_results WHERE id=ANY($1)`, pq.Array(resultIDs)); err != nil {
-		return nil, err
-	}
-	objects := make([]service.ObjectRef, 0, len(claimed))
-	seen := make(map[string]struct{}, len(claimed))
-	for _, row := range claimed {
-		key := row.ref.Provider + "\x00" + row.ref.Bucket + "\x00" + row.ref.ObjectKey
-		if _, ok := seen[key]; ok {
-			continue
-		}
-		objectRows, queryErr := tx.QueryContext(ctx, `
-UPDATE image_storage_objects o SET state='deleting',deletion_claimed_at=NOW(),updated_at=NOW()
-WHERE o.state IN ('active','deleting')
-  AND (
-    ($1::BIGINT>0 AND o.id=$1)
-    OR (o.provider=$2 AND o.bucket=$3 AND o.object_key=$4)
-  )
-  AND NOT EXISTS (SELECT 1 FROM image_library_items i WHERE i.storage_object_id=o.id AND i.deleted_at IS NULL)
-  AND NOT EXISTS (
-    SELECT 1 FROM image_plaza_publications p JOIN image_library_items i ON i.id=p.library_item_id
-    WHERE i.storage_object_id=o.id AND p.status IN ('pending_review','published','admin_hidden') AND p.expires_at>NOW()
-  )
-  AND NOT EXISTS (
-    SELECT 1 FROM async_image_results ar
-    WHERE ar.storage_object_id=o.id OR (ar.provider=o.provider AND ar.bucket=o.bucket AND ar.object_key=o.object_key)
-  )
-RETURNING o.provider,o.bucket,o.object_key,o.content_type,o.byte_size,o.checksum_sha256,o.width,o.height`,
-			nullInt64OrZero(row.objectID), row.ref.Provider, row.ref.Bucket, row.ref.ObjectKey)
-		if queryErr != nil {
-			return nil, queryErr
-		}
-		claimedObject := false
-		for objectRows.Next() {
-			ref, scanErr := scanObjectRef(objectRows)
-			if scanErr != nil {
-				_ = objectRows.Close()
-				return nil, scanErr
-			}
-			objects = append(objects, *ref)
-			claimedObject = true
-		}
-		if closeErr := objectRows.Close(); closeErr != nil {
-			return nil, closeErr
-		}
-		if !claimedObject && row.ref.ObjectKey != "" {
-			// Object metadata may only live on the result row (legacy / local path).
-			objects = append(objects, row.ref)
-		}
-		seen[key] = struct{}{}
-	}
-	result, err := tx.ExecContext(ctx, `
-UPDATE image_library_cleanup_jobs
-SET scanned_count=scanned_count+$3,deleted_count=deleted_count+$3,updated_at=NOW()
-WHERE id=$1 AND lease_version=$2 AND status='running'`, jobID, leaseVersion, len(claimed))
-	if err := requireImageLibraryLease(result, err); err != nil {
-		return nil, err
-	}
-	if err := tx.Commit(); err != nil {
-		return nil, err
-	}
-	return &service.ImageLibraryCleanupBatch{
-		MatchedItems: int64(len(claimed)),
-		Objects:      objects,
-		Done:         len(claimed) < limit,
-	}, nil
+	return nil, apperrors.Conflict("IMAGE_RESULT_CLEANUP_PREVIEW_REQUIRED", "result cleanup must use a recoverable cleanup job")
 }
 
 func nullInt64OrZero(value sql.NullInt64) int64 {
@@ -2154,109 +2043,11 @@ WHERE id=$1 AND lease_version=$2 AND status='running'`, jobID, leaseVersion, len
 	}, nil
 }
 
+// Upload inputs and recovery intents have their own retention protocol, which
+// protects active consumers and uncertain PUTs. A broad administrator cleanup
+// must not bypass that protocol or erase its recovery records.
 func (r *imageLibraryRepository) prepareStorageResidueCleanupBatch(ctx context.Context, jobID, leaseVersion int64, filters json.RawMessage, limit int) (*service.ImageLibraryCleanupBatch, error) {
-	inputWhere, inputArgs, err := asyncInputCleanupWhere(filters)
-	if err != nil {
-		return nil, err
-	}
-	tx, err := r.db.BeginTx(ctx, nil)
-	if err != nil {
-		return nil, err
-	}
-	defer func() { _ = tx.Rollback() }()
-	var leaseAlive bool
-	if err := tx.QueryRowContext(ctx, `
-SELECT TRUE FROM image_library_cleanup_jobs
-WHERE id=$1 AND lease_version=$2 AND status='running'
-FOR UPDATE`, jobID, leaseVersion).Scan(&leaseAlive); err != nil {
-		if err == sql.ErrNoRows {
-			return nil, service.ErrImageLibraryLeaseLost
-		}
-		return nil, err
-	}
-
-	inputArgs = append(inputArgs, limit)
-	inputRows, err := tx.QueryContext(ctx, `
-SELECT id,provider,bucket,object_key,content_type,byte_size,checksum,width,height
-FROM async_image_input_objects
-WHERE `+inputWhere+fmt.Sprintf(" ORDER BY id LIMIT $%d FOR UPDATE SKIP LOCKED", len(inputArgs)), inputArgs...)
-	if err != nil {
-		return nil, err
-	}
-	type inputRow struct {
-		id  int64
-		ref service.ObjectRef
-	}
-	inputs := make([]inputRow, 0, limit)
-	for inputRows.Next() {
-		var row inputRow
-		var width, height sql.NullInt64
-		if err := inputRows.Scan(
-			&row.id, &row.ref.Provider, &row.ref.Bucket, &row.ref.ObjectKey,
-			&row.ref.ContentType, &row.ref.SizeBytes, &row.ref.ChecksumSHA256, &width, &height,
-		); err != nil {
-			_ = inputRows.Close()
-			return nil, err
-		}
-		if width.Valid {
-			row.ref.Width = int(width.Int64)
-		}
-		if height.Valid {
-			row.ref.Height = int(height.Int64)
-		}
-		inputs = append(inputs, row)
-	}
-	if err := inputRows.Close(); err != nil {
-		return nil, err
-	}
-
-	objects := make([]service.ObjectRef, 0, len(inputs))
-	if len(inputs) > 0 {
-		ids := make([]int64, 0, len(inputs))
-		for _, row := range inputs {
-			ids = append(ids, row.id)
-			if row.ref.ObjectKey != "" {
-				objects = append(objects, row.ref)
-			}
-		}
-		if _, err := tx.ExecContext(ctx, `DELETE FROM async_image_input_objects WHERE id=ANY($1)`, pq.Array(ids)); err != nil {
-			return nil, err
-		}
-	}
-
-	// Wipe leftover upload intents / reservations that keep storage "in use".
-	if _, err := tx.ExecContext(ctx, `DELETE FROM async_image_result_upload_intents`); err != nil {
-		return nil, err
-	}
-	if _, err := tx.ExecContext(ctx, `DELETE FROM image_library_upload_intents`); err != nil {
-		return nil, err
-	}
-	if _, err := tx.ExecContext(ctx, `
-DELETE FROM async_image_upload_reservations
-WHERE status='reserved' OR intent_object_key IS NOT NULL`); err != nil {
-		return nil, err
-	}
-
-	matched := int64(len(inputs))
-	if matched == 0 && len(objects) == 0 {
-		// Still count one synthetic pass so the job can finish after residue wipe.
-		matched = 0
-	}
-	result, err := tx.ExecContext(ctx, `
-UPDATE image_library_cleanup_jobs
-SET scanned_count=scanned_count+$3,deleted_count=deleted_count+$3,updated_at=NOW()
-WHERE id=$1 AND lease_version=$2 AND status='running'`, jobID, leaseVersion, matched)
-	if err := requireImageLibraryLease(result, err); err != nil {
-		return nil, err
-	}
-	if err := tx.Commit(); err != nil {
-		return nil, err
-	}
-	return &service.ImageLibraryCleanupBatch{
-		MatchedItems: matched,
-		Objects:      objects,
-		Done:         len(inputs) < limit,
-	}, nil
+	return &service.ImageLibraryCleanupBatch{Done: true}, nil
 }
 
 func imageLibraryCleanupWhere(scope string, filters json.RawMessage) (string, []any, error) {

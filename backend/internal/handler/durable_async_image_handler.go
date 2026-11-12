@@ -267,6 +267,19 @@ func (h *DurableAsyncImageHandler) submit(c *gin.Context, protocol, expectedPlat
 		h.writeProtocolError(c, protocol, http.StatusBadRequest, "invalid_reference_image", "uploaded reference image is unavailable")
 		return
 	}
+	var resultReferences []service.ObjectRef
+	if len(inputReferenceURLs) > 0 {
+		referenceConfig, configErr := h.storage.ResultReferenceConfig(c.Request.Context())
+		if configErr != nil {
+			h.writeProtocolError(c, protocol, http.StatusServiceUnavailable, "request_persistence_failed", "reference image protection is unavailable")
+			return
+		}
+		resultReferences, err = service.ResolveImageResultReferences(referenceConfig, inputReferenceURLs)
+		if err != nil {
+			h.writeProtocolError(c, protocol, http.StatusBadRequest, "invalid_reference_image", "reference image is unavailable")
+			return
+		}
+	}
 	if requestedSize == "0.5K" {
 		if expectedPlatform != service.PlatformGemini || !service.AsyncImageGeminiModelSupportsHalfK(runtimeCfg, model) {
 			h.writeProtocolError(c, protocol, http.StatusBadRequest, "unsupported_image_dimensions", "unsupported_image_dimensions: 0.5K is not enabled for this Gemini model")
@@ -301,9 +314,11 @@ func (h *DurableAsyncImageHandler) submit(c *gin.Context, protocol, expectedPlat
 		Protocol: protocol, Platform: expectedPlatform, RequestType: kind,
 		Model: model, ImageCount: imageCount, IdempotencyKey: idempotencyKeyPtr,
 		RequestHash: requestHash, RequestPayload: []byte(ciphertext), ExpiresAt: &expiresAt,
-		ReferenceImageURLs: inputReferenceURLs,
-		OutboxPayload:      json.RawMessage(`{"source":"public_submit"}`),
-		InputObjectIDs:     inputObjectIDs,
+		ReferenceImageURLs:      inputReferenceURLs,
+		OutboxPayload:           json.RawMessage(`{"source":"public_submit"}`),
+		InputObjectIDs:          inputObjectIDs,
+		ResultObjectReferences:  resultReferences,
+		ResultReferencesChecked: true,
 	}
 	if requestedSize != "" {
 		params.RequestedImageSize = &requestedSize

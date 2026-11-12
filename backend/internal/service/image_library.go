@@ -268,17 +268,26 @@ type AdminImageLibraryStats struct {
 }
 
 type ImageLibraryCleanupJob struct {
-	ID           int64           `json:"id"`
-	RequestedBy  *int64          `json:"requested_by,omitempty"`
-	Scope        string          `json:"scope"`
-	Filters      json.RawMessage `json:"filters"`
-	Status       string          `json:"status"`
-	LeaseVersion int64           `json:"-"`
-	ScannedCount int64           `json:"scanned_count"`
-	DeletedCount int64           `json:"deleted_count"`
-	DeletedBytes int64           `json:"deleted_bytes"`
-	LastError    *string         `json:"last_error,omitempty"`
-	CreatedAt    time.Time       `json:"created_at"`
+	ID              int64           `json:"id"`
+	RequestedBy     *int64          `json:"requested_by,omitempty"`
+	Scope           string          `json:"scope"`
+	Filters         json.RawMessage `json:"filters"`
+	Status          string          `json:"status"`
+	LeaseVersion    int64           `json:"-"`
+	ScannedCount    int64           `json:"scanned_count"`
+	DeletedCount    int64           `json:"deleted_count"`
+	DeletedBytes    int64           `json:"deleted_bytes"`
+	LastError       *string         `json:"last_error,omitempty"`
+	CreatedAt       time.Time       `json:"created_at"`
+	Before          *time.Time      `json:"before,omitempty"`
+	Source          string          `json:"source,omitempty"`
+	DetachedCount   int64           `json:"detached_count"`
+	ProtectedCount  int64           `json:"protected_count"`
+	SkippedCount    int64           `json:"skipped_count"`
+	FailedCount     int64           `json:"failed_count"`
+	CancelRequested bool            `json:"cancel_requested"`
+	NextAttemptAt   *time.Time      `json:"next_attempt_at,omitempty"`
+	FinishedAt      *time.Time      `json:"finished_at,omitempty"`
 }
 
 type ImageLibraryCleanupPreview struct {
@@ -399,6 +408,7 @@ type ImageLibraryImportInput struct {
 }
 
 type ImageLibraryService struct {
+	resultCleanup   *ImageResultCleanupService
 	repo            ImageLibraryRepository
 	submissions     ImagePlazaSubmissionRepository
 	storageSettings *ImageStorageSettingService
@@ -411,6 +421,7 @@ func NewImageLibraryService(
 	durableStorage *ImageDurableStorageService,
 ) *ImageLibraryService {
 	svc := &ImageLibraryService{repo: repo, storageSettings: storageSettings, durableStorage: durableStorage}
+	svc.resultCleanup = newImageResultCleanupService(repo, storageSettings)
 	if submissions, ok := repo.(ImagePlazaSubmissionRepository); ok {
 		svc.submissions = submissions
 	}

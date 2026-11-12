@@ -329,12 +329,9 @@ func (s *AsyncImageRetentionService) RunOnce(ctx context.Context, now time.Time)
 	if err := s.cleanupInputs(ctx, durable, now, staleBefore, batch, &stats); err != nil {
 		firstErr = joinAsyncImageRetentionError(firstErr, err)
 	}
-	resultCutoff := now.Add(-time.Duration(cfg.ResultRetentionDays) * 24 * time.Hour)
-	if err := s.cleanupResults(ctx, durable, resultCutoff, staleBefore, batch, &stats); err != nil {
-		firstErr = joinAsyncImageRetentionError(firstErr, err)
-	}
+	// Generated results are handled exclusively by the bounded cleanup job worker.
 	taskCutoff := now.Add(-time.Duration(cfg.TaskRetentionDays) * 24 * time.Hour)
-	if err := s.cleanupTasks(ctx, durable, now, taskCutoff, staleBefore, batch, &stats); err != nil {
+	if err := s.cleanupTasks(ctx, now, taskCutoff, staleBefore, batch, &stats); err != nil {
 		firstErr = joinAsyncImageRetentionError(firstErr, err)
 	}
 	return stats, firstErr
@@ -431,39 +428,7 @@ func (s *AsyncImageRetentionService) cleanupInputs(ctx context.Context, storage 
 	return firstErr
 }
 
-func (s *AsyncImageRetentionService) cleanupResults(ctx context.Context, storage DurableImageStorage, createdBefore, staleBefore time.Time, batch int, stats *AsyncImageRetentionStats) error {
-	results, err := s.repo.ClaimExpiredAsyncImageResults(ctx, createdBefore, staleBefore, batch)
-	if err != nil {
-		return fmt.Errorf("claim expired async image results: %w", err)
-	}
-	var firstErr error
-	for i := range results {
-		result := &results[i]
-		ref := asyncImageResultObjectRef(*result)
-		shared, sharedErr := asyncImageObjectHasLiveReference(ctx, s.repo, ref, result.ID, "")
-		if sharedErr != nil {
-			_ = s.repo.ReleaseAsyncImageResultDeletion(ctx, result.ID, result.CleanupClaimedAt)
-			firstErr = joinAsyncImageRetentionError(firstErr, fmt.Errorf("check async image result %d references: %w", result.ID, sharedErr))
-			continue
-		}
-		if !shared {
-			if err := storage.Delete(ctx, ref); err != nil {
-				_ = s.repo.ReleaseAsyncImageResultDeletion(ctx, result.ID, result.CleanupClaimedAt)
-				firstErr = joinAsyncImageRetentionError(firstErr, fmt.Errorf("delete async image result %d: %w", result.ID, err))
-				continue
-			}
-		}
-		if err := s.repo.CompleteAsyncImageResultDeletion(ctx, result.ID, result.CleanupClaimedAt); err != nil {
-			_ = s.repo.ReleaseAsyncImageResultDeletion(ctx, result.ID, result.CleanupClaimedAt)
-			firstErr = joinAsyncImageRetentionError(firstErr, fmt.Errorf("complete async image result %d deletion: %w", result.ID, err))
-			continue
-		}
-		stats.ResultsDeleted++
-	}
-	return firstErr
-}
-
-func (s *AsyncImageRetentionService) cleanupTasks(ctx context.Context, storage DurableImageStorage, expiresBefore, createdBefore, staleBefore time.Time, batch int, stats *AsyncImageRetentionStats) error {
+func (s *AsyncImageRetentionService) cleanupTasks(ctx context.Context, expiresBefore, createdBefore, staleBefore time.Time, batch int, stats *AsyncImageRetentionStats) error {
 	tasks, err := s.repo.ClaimExpiredAsyncImageTasks(ctx, expiresBefore, createdBefore, staleBefore, batch)
 	if err != nil {
 		return fmt.Errorf("claim expired async image tasks: %w", err)
@@ -477,24 +442,7 @@ func (s *AsyncImageRetentionService) cleanupTasks(ctx context.Context, storage D
 			firstErr = joinAsyncImageRetentionError(firstErr, fmt.Errorf("list results for expired async image task %s: %w", task.TaskID, listErr))
 			continue
 		}
-		deleteFailed := false
-		for j := range results {
-			ref := asyncImageResultObjectRef(results[j])
-			shared, sharedErr := asyncImageObjectHasLiveReference(ctx, s.repo, ref, 0, task.TaskID)
-			if sharedErr != nil {
-				deleteFailed = true
-				firstErr = joinAsyncImageRetentionError(firstErr, fmt.Errorf("check references for expired async image task %s: %w", task.TaskID, sharedErr))
-				continue
-			}
-			if shared {
-				continue
-			}
-			if deleteErr := storage.Delete(ctx, ref); deleteErr != nil {
-				deleteFailed = true
-				firstErr = joinAsyncImageRetentionError(firstErr, fmt.Errorf("delete result for expired async image task %s: %w", task.TaskID, deleteErr))
-			}
-		}
-		if deleteFailed {
+		if len(results) != 0 {
 			_ = s.repo.ReleaseAsyncImageTaskDeletion(ctx, task.TaskID, task.CleanupClaimedAt)
 			continue
 		}

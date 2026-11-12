@@ -652,6 +652,19 @@ func (h *ImageLibraryHandler) AdminResolveReport(c *gin.Context) {
 }
 
 func (h *ImageLibraryHandler) AdminListCleanupJobs(c *gin.Context) {
+	if c.Query("scope") == "async_results" {
+		s := h.resultCleanup(c)
+		if s == nil {
+			return
+		}
+		jobs, err := s.List(c.Request.Context(), parseImageLimit(c))
+		if err != nil {
+			imageResultCleanupError(c, err)
+			return
+		}
+		response.Success(c, gin.H{"items": jobs})
+		return
+	}
 	jobs, err := h.svc.AdminListCleanupJobs(c.Request.Context(), parseImageLimit(c))
 	if err != nil {
 		response.ErrorFrom(c, err)
@@ -673,6 +686,19 @@ func (h *ImageLibraryHandler) AdminCreateCleanupJob(c *gin.Context) {
 		response.ErrorFrom(c, err)
 		return
 	}
+	if strings.EqualFold(strings.TrimSpace(req.Scope), "async_results") {
+		s := h.resultCleanup(c)
+		if s == nil {
+			return
+		}
+		job, err := s.Create(c.Request.Context(), subject.UserID, req.Filters)
+		if err != nil {
+			imageResultCleanupError(c, err)
+			return
+		}
+		response.Created(c, job)
+		return
+	}
 	job, err := h.svc.AdminCreateCleanupJob(c.Request.Context(), subject.UserID, req.Scope, req.Filters)
 	if err != nil {
 		response.ErrorFrom(c, err)
@@ -688,6 +714,23 @@ func (h *ImageLibraryHandler) AdminPreviewCleanup(c *gin.Context) {
 	}
 	if err := bindLimitedJSON(c, &req, 32<<10); err != nil {
 		response.ErrorFrom(c, err)
+		return
+	}
+	if strings.EqualFold(strings.TrimSpace(req.Scope), "async_results") {
+		s := h.resultCleanup(c)
+		if s == nil {
+			return
+		}
+		subject, ok := imageLibrarySubject(c)
+		if !ok {
+			return
+		}
+		preview, err := s.Preview(c.Request.Context(), subject.UserID, req.Filters)
+		if err != nil {
+			imageResultCleanupError(c, err)
+			return
+		}
+		response.Success(c, preview)
 		return
 	}
 	preview, err := h.svc.AdminPreviewCleanup(c.Request.Context(), req.Scope, req.Filters)

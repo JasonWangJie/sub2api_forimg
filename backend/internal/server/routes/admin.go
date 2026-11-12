@@ -139,6 +139,8 @@ func registerImageLibraryRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
 		library.GET("/cleanup-jobs", h.Admin.ImageLibrary.AdminListCleanupJobs)
 		library.POST("/cleanup-jobs/preview", h.Admin.ImageLibrary.AdminPreviewCleanup)
 		library.POST("/cleanup-jobs", h.Admin.ImageLibrary.AdminCreateCleanupJob)
+		library.POST("/cleanup-jobs/:id/cancel", h.Admin.ImageLibrary.AdminCancelResultCleanup)
+		library.POST("/cleanup-jobs/:id/resume", h.Admin.ImageLibrary.AdminResumeResultCleanup)
 		library.GET("/migration", h.Admin.ImageLibrary.AdminMigrationState)
 	}
 	plaza := admin.Group("/image-plaza")
@@ -661,6 +663,8 @@ func registerBackupRoutes(admin *gin.RouterGroup, h *handler.Handlers, stepUpAut
 
 		// 异步生图对象存储配置（与备份共用 S3 客户端，可直接复用备份凭证）
 		backup.GET("/image-storage", h.Admin.Backup.GetImageStorageConfig)
+		backup.GET("/image-storage/cleanup-policy", h.Admin.ImageLibrary.AdminGetResultCleanupPolicy)
+		backup.PUT("/image-storage/cleanup-policy", h.Admin.ImageLibrary.AdminUpdateResultCleanupPolicy)
 		// 同 S3 配置：改写对象存储目标可将生成内容导向外部账号——要求 step-up 2FA
 		backup.PUT("/image-storage", gin.HandlerFunc(stepUpAuth), h.Admin.Backup.UpdateImageStorageConfig)
 		backup.POST("/image-storage/test", h.Admin.Backup.TestImageStorageConnection)

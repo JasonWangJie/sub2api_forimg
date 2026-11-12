@@ -106,25 +106,27 @@ type AsyncImageTask struct {
 }
 
 type CreateAsyncImageTaskParams struct {
-	TaskID             string
-	UserID             int64
-	APIKeyID           int64
-	GroupID            int64
-	Protocol           string
-	Platform           string
-	RequestType        string
-	Model              string
-	RequestedImageSize *string
-	AspectRatio        *string
-	ImageCount         int
-	IdempotencyKey     *string
-	RequestHash        string
-	RequestPayload     []byte
-	PromptPreview      *string
-	ReferenceImageURLs []string
-	ExpiresAt          *time.Time
-	OutboxPayload      json.RawMessage
-	InputObjectIDs     []int64
+	TaskID                  string
+	UserID                  int64
+	APIKeyID                int64
+	GroupID                 int64
+	Protocol                string
+	Platform                string
+	RequestType             string
+	Model                   string
+	RequestedImageSize      *string
+	AspectRatio             *string
+	ImageCount              int
+	IdempotencyKey          *string
+	RequestHash             string
+	RequestPayload          []byte
+	PromptPreview           *string
+	ReferenceImageURLs      []string
+	ExpiresAt               *time.Time
+	OutboxPayload           json.RawMessage
+	InputObjectIDs          []int64
+	ResultObjectReferences  []ObjectRef
+	ResultReferencesChecked bool
 }
 
 type AsyncImageTaskFilter struct {
@@ -255,6 +257,7 @@ type RecordAsyncImageUpstreamSuccessParams struct {
 }
 
 type AsyncImageResult struct {
+	StorageIdentity  string    `json:"-"`
 	ID               int64     `json:"-"`
 	TaskID           string    `json:"task_id"`
 	ImageIndex       int       `json:"image_index"`

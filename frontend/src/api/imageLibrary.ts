@@ -2,6 +2,7 @@ import { apiClient } from './client'
 import type {
   CursorPage,
   ImageCleanupJob,
+  ImageCleanupPreview,
   ImageLibraryItem,
   ImageLibraryMigrationState,
   ImageLibraryStats,
@@ -336,7 +337,7 @@ export async function getAdminImageLibraryStats(): Promise<ImageLibraryStats> {
   }
 }
 
-export async function listCleanupJobs(params: { cursor?: string; limit?: number } = {}): Promise<CursorPage<ImageCleanupJob>> {
+export async function listCleanupJobs(params: { cursor?: string; limit?: number; scope?: string } = {}): Promise<CursorPage<ImageCleanupJob>> {
   const { data } = await apiClient.get('/admin/image-library/cleanup-jobs', { params })
   const page = normalizePage<any>(data)
   return {
@@ -350,10 +351,18 @@ export async function listCleanupJobs(params: { cursor?: string; limit?: number 
   }
 }
 
-export async function previewCleanup(payload: Record<string, unknown>): Promise<{ matched_items: number; matched_bytes: number }> {
+export async function previewCleanup(payload: Record<string, unknown>): Promise<ImageCleanupPreview> {
   const { scope, ...filters } = payload
   const { data } = await apiClient.post('/admin/image-library/cleanup-jobs/preview', { scope, filters })
   return data
+}
+
+export async function cancelCleanupJob(id: string | number): Promise<void> {
+  await apiClient.post(`/admin/image-library/cleanup-jobs/${encodeURIComponent(String(id))}/cancel`)
+}
+
+export async function resumeCleanupJob(id: string | number): Promise<void> {
+  await apiClient.post(`/admin/image-library/cleanup-jobs/${encodeURIComponent(String(id))}/resume`)
 }
 
 export async function createCleanupJob(payload: Record<string, unknown>): Promise<ImageCleanupJob> {

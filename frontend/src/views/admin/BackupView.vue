@@ -257,7 +257,8 @@
             </div>
             <div>
               <label class="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">{{ t('admin.backup.imageStorage.resultRetentionDays') }}</label>
-              <input v-model.number="imageStorageForm.async_image.result_retention_days" type="number" min="1" class="input w-full" />
+              <input v-model.number="imageStorageForm.async_image.result_retention_days" type="number" min="1" class="input w-full" :disabled="imageCleanupConfigured" />
+              <p v-if="imageCleanupConfigured" class="mt-1 text-xs text-gray-500 dark:text-gray-400">{{ t('imageCleanup.policyTakesPrecedence') }}</p>
             </div>
           </div>
 
@@ -479,6 +480,8 @@
           </button>
         </div>
       </div>
+
+      <ImageCleanupCard @configured="imageCleanupConfigured = $event" />
 
       <!-- Schedule Config -->
       <div class="card p-6">
@@ -765,6 +768,7 @@ import type {
 } from '@/api/admin/backup'
 import { useStepUp, isStepUpBlocked, isStepUpCancelled, stepUpBlockReason } from '@/composables/useStepUp'
 import TotpStepUpDialog from '@/components/auth/TotpStepUpDialog.vue'
+import ImageCleanupCard from '@/components/admin/ImageCleanupCard.vue'
 import {
   ASYNC_IMAGE_DOWNLOAD_PIXEL_LIMITS,
   ASYNC_IMAGE_REFERENCE_RETRY_DEFAULTS,
@@ -773,6 +777,7 @@ import {
 const { t } = useI18n()
 const appStore = useAppStore()
 const backupStepUp = useStepUp()
+const imageCleanupConfigured = ref(false)
 
 // 敏感操作被 2FA 门控拦截时的统一提示。
 function reportStepUpBlocked(error: unknown): boolean {

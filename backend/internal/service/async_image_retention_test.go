@@ -241,7 +241,7 @@ func serviceObjectRefForRetentionTest(key string) ObjectRef {
 	return ObjectRef{Provider: "aliyun", Bucket: "images", ObjectKey: key}
 }
 
-func TestAsyncImageRetentionDeletesObjectsBeforeRowsAndTasks(t *testing.T) {
+func TestAsyncImageRetentionLeavesGeneratedResultsToCleanupWorker(t *testing.T) {
 	now := time.Now().UTC()
 	events := make([]string, 0)
 	claim := now.Add(-time.Minute)
@@ -271,11 +271,10 @@ func TestAsyncImageRetentionDeletesObjectsBeforeRowsAndTasks(t *testing.T) {
 
 	stats, err := svc.RunOnce(context.Background(), now)
 	require.NoError(t, err)
-	require.Equal(t, AsyncImageRetentionStats{StagingDeleted: 2, InputsDeleted: 1, ResultsDeleted: 1, TasksDeleted: 1}, stats)
+	require.Equal(t, AsyncImageRetentionStats{StagingDeleted: 2, InputsDeleted: 1}, stats)
 	require.Equal(t, []string{
 		"delete:input", "complete-input",
-		"delete:result", "complete-result",
-		"delete:task-result", "complete-task",
+		"release-task",
 	}, events)
 }
 
@@ -306,7 +305,7 @@ func TestAsyncImageRetentionReleasesClaimWhenObjectDeleteFails(t *testing.T) {
 	require.Equal(t, []string{"delete:input", "release-input"}, events)
 }
 
-func TestAsyncImageRetentionKeepsSharedObjectAndOnlyRemovesResultRow(t *testing.T) {
+func TestAsyncImageRetentionNeverClaimsGeneratedResultRows(t *testing.T) {
 	now := time.Now().UTC()
 	events := make([]string, 0)
 	checks := make([]string, 0)
@@ -331,9 +330,9 @@ func TestAsyncImageRetentionKeepsSharedObjectAndOnlyRemovesResultRow(t *testing.
 
 	stats, err := svc.RunOnce(context.Background(), now)
 	require.NoError(t, err)
-	require.Equal(t, 1, stats.ResultsDeleted)
-	require.Equal(t, []string{"complete-result"}, events)
-	require.Equal(t, []string{"shared-result:"}, checks)
+	require.Zero(t, stats.ResultsDeleted)
+	require.Empty(t, events)
+	require.Empty(t, checks)
 }
 
 type asyncImageInputResolverRepoStub struct {

@@ -283,11 +283,14 @@
             <p>{{ t('imageWorkflow.admin.cleanupHint') }}</p>
             <label><span>{{ t('imageWorkflow.admin.cleanupScope') }}</span><select v-model="cleanupForm.scope" class="input"><option value="all">{{ t('imageWorkflow.admin.allStorageAssets') }}</option><option value="async_results">{{ t('imageWorkflow.admin.asyncResultAssets') }}</option><option value="expired">{{ t('imageWorkflow.admin.expiredAssets') }}</option><option value="deleted">{{ t('imageWorkflow.admin.deletedAssets') }}</option><option value="user">{{ t('imageWorkflow.admin.userAssets') }}</option></select></label>
             <label v-if="cleanupForm.scope === 'user'"><span>{{ t('imageWorkflow.admin.userId') }}</span><input v-model.number="cleanupForm.userId" type="number" min="1" inputmode="numeric" class="input" :placeholder="t('imageWorkflow.admin.userIdPlaceholder')" /></label>
-            <label v-else-if="cleanupForm.scope !== 'all'"><span>{{ t('imageWorkflow.admin.beforeDate') }}</span><input v-model="cleanupForm.before" type="date" class="input" /></label>
+            <label v-else-if="cleanupForm.scope !== 'all'"><span>{{ t(cleanupForm.scope === 'async_results' ? 'imageCleanup.beforeDateUTC' : 'imageWorkflow.admin.beforeDate') }}</span><input v-model="cleanupForm.before" type="date" class="input" :required="cleanupForm.scope === 'async_results'" :max="cleanupForm.scope === 'async_results' ? latestCleanupDate : undefined" /></label>
             <button type="submit" class="btn btn-secondary" data-testid="cleanup-preview" :disabled="cleanupBusy || !cleanupFormValid">{{ t('imageWorkflow.admin.previewCleanup') }}</button>
             <div v-if="cleanupPreview" class="cleanup-preview" role="status">
               <strong>{{ t('imageWorkflow.admin.cleanupMatches', { count: cleanupPreview.matched_items, bytes: formatBytes(cleanupPreview.matched_bytes) }) }}</strong>
-              <button type="button" class="btn btn-danger" :disabled="cleanupBusy || cleanupPreview.matched_items === 0" @click="startCleanup">{{ t('imageWorkflow.admin.executeCleanup') }}</button>
+              <p v-if="cleanupPreview.before" class="mt-1 text-xs">{{ t('imageCleanup.cutoff', { time: formatDate(cleanupPreview.before) }) }}</p>
+              <p v-if="cleanupPreview.truncated" class="mt-1 text-xs">{{ t('imageCleanup.truncated', { count: cleanupPreview.scanned_count ?? 0 }) }}</p>
+              <p v-if="cleanupForm.scope === 'async_results'" class="mt-1 text-xs">{{ t('imageCleanup.protectionRecheck') }}</p>
+              <button type="button" class="btn btn-danger" :disabled="cleanupBusy || !cleanupPreviewHasCandidates || (cleanupForm.scope === 'async_results' && !cleanupPreview.preview_token)" @click="startCleanup">{{ t('imageWorkflow.admin.executeCleanup') }}</button>
             </div>
           </form>
           <div class="cleanup-jobs">
@@ -329,6 +332,7 @@ import {
 } from '@/api/imageLibrary'
 import type {
   ImageCleanupJob,
+  ImageCleanupPreview,
   ImageLibraryItem,
   ImageLibraryMigrationState,
   ImageLibraryStats,
@@ -363,7 +367,7 @@ const libraryItems = ref<ImageLibraryItem[]>([])
 const libraryCursor = ref<string | null>(null)
 const stats = ref<ImageLibraryStats | null>(null)
 const cleanupJobs = ref<ImageCleanupJob[]>([])
-const cleanupPreview = ref<{ matched_items: number; matched_bytes: number } | null>(null)
+const cleanupPreview = ref<ImageCleanupPreview | null>(null)
 const cleanupBusy = ref(false)
 const migrationState = ref<ImageLibraryMigrationState | null>(null)
 const adminImageURLs = ref<Record<string, string>>({})
@@ -379,6 +383,14 @@ const cleanupForm = reactive<{ scope: string; before: string; userId: number | '
   scope: 'all',
   before: new Date().toISOString().slice(0, 10),
   userId: '',
+})
+const latestCleanupDate = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString().slice(0, 10)
+function cleanupDateIsPast(): boolean {
+  const cutoff = new Date(`${cleanupForm.before}T23:59:59Z`).getTime()
+  return Number.isFinite(cutoff) && cutoff < Date.now()
+}
+watch(() => cleanupForm.scope, scope => {
+  if (scope === 'async_results' && !cleanupDateIsPast()) cleanupForm.before = latestCleanupDate
 })
 
 const tabs = computed<Array<{ value: Tab; label: string; icon: IconName; count?: number }>>(() => [
@@ -398,7 +410,16 @@ const actionablePublications = computed(() => publications.value.filter((item) =
 const allActionableSelected = computed(() => actionablePublications.value.length > 0
   && actionablePublications.value.every((item) => selectedPublicationIds.value.has(String(item.id))))
 const someActionableSelected = computed(() => selectedPublicationIds.value.size > 0 && !allActionableSelected.value)
-const cleanupFormValid = computed(() => cleanupForm.scope !== 'user' || Number(cleanupForm.userId) > 0)
+const cleanupFormValid = computed(() => {
+  if (cleanupForm.scope === 'user') return Number(cleanupForm.userId) > 0
+  if (cleanupForm.scope === 'async_results') return Boolean(cleanupForm.before) && cleanupDateIsPast()
+  return true
+})
+const cleanupPreviewHasCandidates = computed(() => {
+  if (!cleanupPreview.value) return false
+  const preview = cleanupPreview.value
+  return (cleanupForm.scope === 'async_results' ? preview.scanned_count ?? preview.matched_items : preview.matched_items) > 0
+})
 
 async function loadPublications(append = false) {
   loading.value = true
@@ -530,15 +551,30 @@ async function loadCleanup() {
   catch (cause: any) { appStore.showError(cause?.message || t('imageWorkflow.admin.loadFailed')) } finally { loading.value = false }
 }
 async function previewCleanupJob() {
+  if (cleanupBusy.value || !cleanupFormValid.value) return
+  const payload = cleanupPayload()
+  cleanupPreview.value = null
   cleanupBusy.value = true
-  try { cleanupPreview.value = await previewCleanup(cleanupPayload()) }
+  try {
+    const result = await previewCleanup(payload)
+    if (JSON.stringify(payload) === JSON.stringify(cleanupPayload())) cleanupPreview.value = result
+  }
   catch (cause: any) { appStore.showError(cause?.message || t('imageWorkflow.admin.actionFailed')) } finally { cleanupBusy.value = false }
 }
 async function startCleanup() {
+  if (cleanupBusy.value || !cleanupFormValid.value || !cleanupPreviewHasCandidates.value) return
   if (!cleanupPreview.value || !window.confirm(cleanupForm.scope === 'all' ? t('imageWorkflow.admin.cleanupConfirmAll') : t('imageWorkflow.admin.cleanupConfirm'))) return
+  if (cleanupForm.scope === 'async_results' && (!cleanupPreview.value.preview_token || !cleanupPreview.value.before)) {
+    cleanupPreview.value = null
+    appStore.showError(t('imageCleanup.invalidPreview'))
+    return
+  }
+  const payload = cleanupPreview.value.preview_token
+    ? { scope: cleanupForm.scope, before: cleanupPreview.value.before, preview_token: cleanupPreview.value.preview_token }
+    : cleanupPayload()
   cleanupBusy.value = true
-  try { await createCleanupJob(cleanupPayload()); cleanupPreview.value = null; await loadCleanup(); appStore.showSuccess(t('imageWorkflow.admin.cleanupQueued')) }
-  catch (cause: any) { appStore.showError(cause?.message || t('imageWorkflow.admin.actionFailed')) } finally { cleanupBusy.value = false }
+  try { await createCleanupJob(payload); cleanupPreview.value = null; await loadCleanup(); appStore.showSuccess(t('imageWorkflow.admin.cleanupQueued')) }
+  catch (cause: any) { cleanupPreview.value = null; appStore.showError(cause?.message || t('imageWorkflow.admin.actionFailed')) } finally { cleanupBusy.value = false }
 }
 
 function cleanupPayload(): Record<string, unknown> {

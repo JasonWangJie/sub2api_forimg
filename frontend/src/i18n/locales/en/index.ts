@@ -5,6 +5,7 @@ import channelMonitorV2 from './channelMonitorV2'
 import batchImage from './batchImage'
 import asyncImageTasks from './asyncImageTasks'
 import imageWorkflow from './imageWorkflow'
+import imageCleanup from './imageCleanup'
 import admin from './admin'
 import misc from './misc'
 
@@ -16,6 +17,7 @@ export default {
   ...batchImage,
   ...asyncImageTasks,
   ...imageWorkflow,
+  ...imageCleanup,
   admin,
   ...misc,
 }
