@@ -18,11 +18,21 @@ func asyncImageRetryableRejectionErrorDetails(c *gin.Context, err *service.Upstr
 	if service.AsyncImageAccountAttemptCaptureFromContext(ctx) == nil {
 		return 0, "", "", false
 	}
+	if err.IsAsyncImageTimeoutTerminal() {
+		code := service.AsyncImageTimeoutTerminalCode
+		if err.Reason == service.AsyncImageTimeoutUnknownReason {
+			code = service.AsyncImageTimeoutUnknownCode
+		}
+		return err.StatusCode, code, err.ProviderErrorMessage, true
+	}
 	if err.IsAsyncImageOpenAIReferenceURLTimeout() {
 		return err.StatusCode, service.AsyncImageOpenAIReferenceURLTimeoutCode, err.ProviderErrorMessage, true
 	}
 	if err.Reason == service.AsyncImageOpenAIReferenceMultipartRejectionReason {
 		return err.StatusCode, service.AsyncImageOpenAIReferenceMultipartRejectionCode, err.ProviderErrorMessage, true
+	}
+	if err.IsAsyncImageTimeoutRejection() && service.AsyncImageProviderRetryPolicyEnabled(ctx) {
+		return err.StatusCode, service.AsyncImageTimeoutRetryCode, err.ProviderErrorMessage, true
 	}
 	if !err.IsAsyncImageRetryableRejection() {
 		if !service.AsyncImageProviderRetryPolicyEnabled(ctx) || !err.IsAsyncImageBoundedRetryFailure() {
@@ -50,7 +60,8 @@ func asyncImageRetryableRejectionErrorDetails(c *gin.Context, err *service.Upstr
 		message = service.ExtractUpstreamErrorMessage(err.ResponseBody)
 	}
 	status = err.StatusCode
-	if status != http.StatusBadRequest && status != http.StatusUnprocessableEntity {
+	if status != http.StatusBadRequest && status != http.StatusUnprocessableEntity &&
+		!((status == service.AsyncImageReferenceTimeoutStatus || status == http.StatusNotFound) && err.IsAsyncImageReferenceAccountFailover()) {
 		return 0, "", "", false
 	}
 	return status, code, message, true

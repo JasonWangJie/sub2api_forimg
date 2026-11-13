@@ -160,6 +160,13 @@ func TestAsyncImageReferenceBudget400SwitchesWithoutSameAccountRetry(t *testing.
 						require.Equal(t, "req-budget-400", failover.UpstreamRequestID)
 						require.Equal(t, "13", failover.ResponseHeaders.Get("Retry-After"))
 						require.Empty(t, recorder.Body.Bytes())
+					} else if mode == "appended stop" {
+						require.ErrorAs(t, err, &failover)
+						require.True(t, failover.IsAsyncImageTimeoutTerminal())
+						require.False(t, failover.ShouldRetryNextAccount())
+						require.False(t, failover.IsAsyncImageReferenceAccountFailover())
+						require.Equal(t, http.StatusBadRequest, failover.StatusCode)
+						require.Empty(t, recorder.Body.Bytes())
 					} else {
 						require.NotErrorAs(t, err, &failover)
 						if mode == "admin passthrough" {

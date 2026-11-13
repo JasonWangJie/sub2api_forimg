@@ -1,5 +1,16 @@
 export default {
   asyncImageTasks: {
+    capacity: {
+      candidateCountUnknown: 'Candidate total not observed',
+      title: 'Capacity diagnostics',
+      note: 'Observations collected for capacity failures, not upstream calls. Counts may overlap across stages and must not be added together. Recovery times do not guarantee availability.',
+      snapshotNote: 'Account-pool state sampled after a capacity failure. This may differ from the state at selection time and is not an exact audit of scheduler exclusions.',
+      group: 'Group {id}', candidates: '{count} observed candidates', pool: 'Account pool', accounts: 'Accounts', recovery: 'Nearest expiry for this restriction',
+      truncated: 'The record is truncated. The displayed accounts or candidates are not a complete list.',
+      sources: { pool_snapshot: 'Account-pool snapshot', scheduler_filter: 'Captured scheduler filters', concurrency: 'Concurrency admission', unavailable: 'Diagnostics unavailable', unknown: 'Other observation stage' },
+      pools: { resolution: 'Resolution', model: 'Model', model_resolution: 'Model and resolution', default: 'Default group pool', unknown: 'Other account pool' },
+      reasons: { not_schedulable: 'Other scheduling condition unmet', runtime_blocked: 'Runtime block', privacy_not_set: 'Privacy requirement unmet', transport_incompatible: 'Incompatible transport', quota: 'Quota limit', window_cost: 'Window cost limit', rpm: 'Requests-per-minute limit', profit_control: 'Profit protection', circuit_open: 'Circuit-breaker cooldown', oauth_required: 'OAuth account required', no_candidates: 'No candidate accounts', scheduling_disabled: 'Scheduling disabled', inactive: 'Account not active', expired: 'Account expired', platform_mismatch: 'Platform mismatch', rate_limited: 'Account rate-limited', overloaded: 'Overload cooldown', temporarily_unschedulable: 'Temporarily unschedulable', eligible_at_snapshot: 'No listed block observed in snapshot', model_not_supported: 'Model unsupported', model_rate_limited: 'Model rate-limited', excluded: 'Excluded for this attempt', concurrency_full: 'Concurrency unavailable', unknown: 'Reason undetermined' }
+    },
     title: 'Async Image Tasks',
     description: 'Track image generation, billing, and object storage delivery',
     adminTitle: 'Async Image Task Center',
@@ -66,6 +77,7 @@ export default {
       storage_failed: 'Storage failed',
       billing_failed: 'Billing failed',
       expired: 'Expired',
+      capacity_diagnostic: 'Capacity diagnostic snapshot',
       upstream_image_url_fetch_retry: 'Reference image fetch timeout retry',
       result_fetch_pending: 'Awaiting generated images',
       result_fetch_attempt: 'Fetching generated images',

@@ -49,3 +49,11 @@ func (c *openAI403CounterCache) ResetOpenAI403Count(ctx context.Context, account
 	key := fmt.Sprintf("%s%d", openAI403CounterPrefix, accountID)
 	return c.rdb.Del(ctx, key).Err()
 }
+
+func (c *openAI403CounterCache) SnapshotOpenAI403Count(ctx context.Context, id int64) (string, error) {
+	value, err := c.rdb.Get(ctx, fmt.Sprintf("%s%d", openAI403CounterPrefix, id)).Result()
+	if err == redis.Nil {
+		return "", nil
+	}
+	return value, err
+}

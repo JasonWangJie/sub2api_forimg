@@ -3,6 +3,7 @@
 package handler
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"strings"
@@ -246,12 +247,36 @@ func TestAsyncImageServiceTimeout400StrictAndSynchronousBoundaries(t *testing.T)
 				h := newReferenceDownloadGatewayHarness(t, platform, 2, 3, map[int64]referenceDownloadGatewayFailure{1: {scenario.status, scenario.message}})
 				setServiceTimeout400GatewayBodies(t, h)
 				flag := true
-				_, response, capture, _ := invokeReferenceLocalFallbackGateway(t, h, nil, &flag, scenario.async, true, false)
-				require.Equal(t, scenario.status, response.Code, response.Body.String())
-				require.Equal(t, []int64{1}, h.upstream.calls, "the precise timeout rule must not broaden generic or synchronous failures")
+				c, response, capture, _ := invokeReferenceLocalFallbackGateway(t, h, nil, &flag, scenario.async, true, false)
+				genericTimeout := scenario.async && (scenario.name == "incomplete timeout family 400" || scenario.name == "prefixed extra explanation" || scenario.name == "wrong HTTP status")
+				if genericTimeout {
+					// These complete provider messages are outside the old exact
+					// Service400 signature and now use the generic timeout policy.
+					require.Equal(t, http.StatusOK, response.Code, response.Body.String())
+					require.Equal(t, []int64{1, 2}, h.upstream.calls)
+				} else {
+					require.Equal(t, scenario.status, response.Code, response.Body.String())
+					require.Equal(t, []int64{1}, h.upstream.calls, "explicit stops and synchronous requests must not switch")
+				}
 				require.NotEqual(t, service.AsyncImageReferenceLocalFallbackCode, gjson.GetBytes(response.Body.Bytes(), "error.code").String())
 				for _, attempt := range capture.Attempts() {
 					require.NotEqual(t, string(service.AsyncImageServiceTimeout400Reason), attempt.FailureReason)
+					if genericTimeout && attempt.Status == service.AsyncImageAccountAttemptFailed {
+						require.Equal(t, string(service.AsyncImageTimeoutRejectionReason), attempt.FailureReason)
+					}
+				}
+				if scenario.async && !genericTimeout {
+					require.Equal(t, service.AsyncImageTimeoutTerminalCode, gjson.GetBytes(response.Body.Bytes(), "error.code").String())
+					task := referenceLocalFallbackTask(platform, h.model, service.AsyncImageReferenceTransportPassthroughFallbackLocal)
+					repo := &referenceLocalFallbackRepo{&generatedWorkerResultRepo{task: task}}
+					h.worker.tasks = service.NewAsyncImageTaskService(repo)
+					require.False(t, h.worker.handleAsyncImageUpstreamFailure(context.Background(), c.Request.Context(), task, referenceLocalFallbackConfig(), response.Code, response.Body.Bytes(), response.Header()).requeue)
+					require.Equal(t, service.AsyncImageTaskStatusFailed, repo.task.Status)
+					require.Zero(t, repo.task.RetryCount)
+					for i := 0; i < 2; i++ {
+						require.False(t, h.worker.processAsyncImageTask(context.Background(), task.TaskID).requeue)
+					}
+					require.Equal(t, []int64{1}, h.upstream.calls, "terminal redelivery must not send another generation")
 				}
 			})
 		}
@@ -307,11 +332,21 @@ func TestAsyncImageReferenceTLSStrictAndSynchronousBoundaries(t *testing.T) {
 				}
 				flag := true
 				_, response, capture, _ := invokeReferenceLocalFallbackGateway(t, h, nil, &flag, scenario.async, scenario.input, false)
-				require.Equal(t, http.StatusBadRequest, response.Code, response.Body.String())
-				require.Equal(t, []int64{1}, h.upstream.calls)
+				if scenario.async && scenario.input {
+					// These complete timeout messages miss the exact TLS-reference
+					// signature, but an explicit input task can use generic failover.
+					require.Equal(t, http.StatusOK, response.Code, response.Body.String())
+					require.Equal(t, []int64{1, 2}, h.upstream.calls)
+				} else {
+					require.Equal(t, http.StatusBadRequest, response.Code, response.Body.String())
+					require.Equal(t, []int64{1}, h.upstream.calls)
+				}
 				require.NotEqual(t, service.AsyncImageReferenceLocalFallbackCode, gjson.GetBytes(response.Body.Bytes(), "error.code").String())
 				for _, attempt := range capture.Attempts() {
 					require.NotEqual(t, service.AsyncImageReferenceAccountFailoverCode, attempt.FailureReason)
+					if scenario.async && scenario.input && attempt.Status == service.AsyncImageAccountAttemptFailed {
+						require.Equal(t, string(service.AsyncImageTimeoutRejectionReason), attempt.FailureReason)
+					}
 				}
 			})
 		}

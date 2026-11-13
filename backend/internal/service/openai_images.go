@@ -772,7 +772,14 @@ func (s *OpenAIGatewayService) ForwardImages(
 	body []byte,
 	parsed *OpenAIImagesRequest,
 	channelMappedModel string,
-) (*OpenAIForwardResult, error) {
+) (qualityResult *OpenAIForwardResult, qualityErr error) {
+	ctx, qualityCapture := beginImageResolutionCapture(ctx)
+	defer func() {
+		if qualityResult != nil {
+			qualityResult.ImageResolutionExpectation = qualityCapture.get()
+		}
+	}()
+
 	if parsed == nil {
 		return nil, fmt.Errorf("parsed images request is required")
 	}
@@ -857,10 +864,15 @@ func (s *OpenAIGatewayService) forwardOpenAIImagesAPIKey(
 	defer func() {
 		finishImageCircuitAttempt(probeDone, forwardErr == nil && observedImageOutput, resp, forwardErr)
 	}()
+	var qualityAdmissionErr error
+	upstreamReq, qualityAdmissionErr = s.imageResolutionMonitor.Admit(upstreamReq, account)
+	if qualityAdmissionErr != nil {
+		return nil, qualityAdmissionErr
+	}
 	if budgetErr := BeginAsyncImageUpstreamAttempt(ctx, account.ID); budgetErr != nil {
 		return nil, budgetErr
 	}
-	resp, err = s.httpUpstream.Do(upstreamReq, proxyURL, account.ID, account.Concurrency)
+	resp, err = s.imageResolutionMonitor.Do(s.httpUpstream, upstreamReq, proxyURL, account)
 	SetOpsLatencyMs(c, OpsUpstreamLatencyMsKey, time.Since(upstreamStart).Milliseconds())
 	if err != nil {
 		safeErr := sanitizeUpstreamErrorMessage(err.Error())
@@ -877,6 +889,7 @@ func (s *OpenAIGatewayService) forwardOpenAIImagesAPIKey(
 		return nil, fmt.Errorf("upstream request failed: %s", safeErr)
 	}
 	if resp.StatusCode >= 400 {
+		ctx = trackAsyncImageErrorResponse(ctx, resp)
 		respBody := s.readUpstreamErrorBody(resp)
 		_ = resp.Body.Close()
 		respBody = s.redactAgentIdentitySensitiveBody(upstreamCtx, account, respBody)
@@ -911,7 +924,7 @@ func (s *OpenAIGatewayService) forwardOpenAIImagesAPIKey(
 		if shouldFailover || asyncSizeMismatch || asyncReferenceBudget || asyncReferenceURLTimeout != nil || asyncInternal422 || asyncServiceTimeout {
 			var referenceBudgetErr *UpstreamFailoverError
 			if asyncReferenceBudget {
-				referenceBudgetErr = newAsyncImageReferenceAccountFailoverError(respBody, resp.Header)
+				referenceBudgetErr = newAsyncImageReferenceAccountFailoverErrorWithStatus(resp.StatusCode, respBody, resp.Header)
 				upstreamMsg = referenceBudgetErr.ProviderErrorMessage
 			}
 			appendOpsUpstreamError(c, OpsUpstreamErrorEvent{

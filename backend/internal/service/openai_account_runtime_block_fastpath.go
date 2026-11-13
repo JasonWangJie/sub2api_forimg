@@ -388,3 +388,29 @@ func (s *OpenAIGatewayService) ShouldStopOpenAIOAuth429Failover(account *Account
 	}
 	return s.isOpenAIOAuth429Storm()
 }
+
+// Manual resets compare an observed generation under the same per-account lock
+// used by writers, so a new 429 arriving after database commit is preserved.
+func (s *OpenAIGatewayService) SnapshotAccountSchedulingBlock(id int64) (uint64, time.Time) {
+	mu := s.openAIAccountRuntimeBlockLock(id)
+	mu.Lock()
+	defer mu.Unlock()
+	raw, _ := s.openaiAccountRuntimeBlockGeneration.Load(id)
+	value, _ := raw.(uint64)
+	rawUntil, _ := s.openaiAccountRuntimeBlockUntil.Load(id)
+	until, _ := rawUntil.(time.Time)
+	return value, until
+}
+func (s *OpenAIGatewayService) ClearAccountSchedulingBlockIfObserved(id int64, observed uint64) bool {
+	mu := s.openAIAccountRuntimeBlockLock(id)
+	mu.Lock()
+	defer mu.Unlock()
+	raw, _ := s.openaiAccountRuntimeBlockGeneration.Load(id)
+	value, _ := raw.(uint64)
+	if value != observed {
+		return false
+	}
+	s.openaiAccountRuntimeBlockUntil.Delete(id)
+	s.openaiAccountRuntimeBlockGeneration.Store(id, s.openaiAccountRuntimeBlockSequence.Add(1))
+	return true
+}

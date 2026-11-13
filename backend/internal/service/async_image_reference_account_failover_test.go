@@ -196,6 +196,15 @@ func TestAsyncImageReferenceAccount400ServicePolicies(t *testing.T) {
 							require.False(t, failure.RetryableOnSameAccount)
 							require.Empty(t, recorder.Body.Bytes())
 							require.NotContains(t, failure.ProviderErrorMessage, "private")
+						} else if mode == "no replay" {
+							// A received timeout with an explicit stop is now carried
+							// through the gateway as a typed, non-replayable failure.
+							require.ErrorAs(t, err, &failure)
+							require.True(t, failure.IsAsyncImageTimeoutTerminal())
+							require.False(t, failure.ShouldRetryNextAccount())
+							require.False(t, failure.IsAsyncImageReferenceAccountFailover())
+							require.Equal(t, http.StatusBadRequest, failure.StatusCode)
+							require.Empty(t, recorder.Body.Bytes())
 						} else {
 							require.NotErrorAs(t, err, &failure)
 							if mode == "admin passthrough" {

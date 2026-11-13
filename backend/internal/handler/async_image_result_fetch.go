@@ -45,7 +45,7 @@ func asyncImageBillingAccount(a *service.Account) *service.Account {
 	if a == nil {
 		return nil
 	}
-	return &service.Account{ID: a.ID, Platform: a.Platform, Type: a.Type, RateMultiplier: a.RateMultiplier, ParentAccountID: a.ParentAccountID, QuotaDimension: a.QuotaDimension, Extra: map[string]any{
+	return &service.Account{ID: a.ID, Name: a.Name, Platform: a.Platform, Type: a.Type, RateMultiplier: a.RateMultiplier, ParentAccountID: a.ParentAccountID, QuotaDimension: a.QuotaDimension, Extra: map[string]any{
 		"quota_limit": a.GetQuotaLimit(), "quota_daily_limit": a.GetQuotaDailyLimit(), "quota_weekly_limit": a.GetQuotaWeeklyLimit(),
 		"openai_long_context_billing_enabled": a.IsOpenAILongContextBillingEnabled(),
 	}}

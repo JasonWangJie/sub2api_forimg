@@ -121,14 +121,15 @@ func (e *PromptTooLongError) Error() string {
 
 // AntigravityGatewayService 处理 Antigravity 平台的 API 转发
 type AntigravityGatewayService struct {
-	accountRepo       AccountRepository
-	tokenProvider     *AntigravityTokenProvider
-	rateLimitService  *RateLimitService
-	httpUpstream      HTTPUpstream
-	settingService    *SettingService
-	cache             GatewayCache // 用于模型级限流时清除粘性会话绑定
-	schedulerSnapshot *SchedulerSnapshotService
-	internal500Cache  Internal500CounterCache // INTERNAL 500 渐进惩罚计数器
+	imageResolutionMonitor *ImageResolutionMonitor
+	accountRepo            AccountRepository
+	tokenProvider          *AntigravityTokenProvider
+	rateLimitService       *RateLimitService
+	httpUpstream           HTTPUpstream
+	settingService         *SettingService
+	cache                  GatewayCache // 用于模型级限流时清除粘性会话绑定
+	schedulerSnapshot      *SchedulerSnapshotService
+	internal500Cache       Internal500CounterCache // INTERNAL 500 渐进惩罚计数器
 }
 
 func (s *AntigravityGatewayService) upstreamErrorBodyReadLimit() int64 {
@@ -404,19 +405,20 @@ func (s *AntigravityGatewayService) TestConnection(ctx context.Context, account 
 	// 复用 antigravityRetryLoop：完整的重试 / credits overages / 智能重试
 	prefix := fmt.Sprintf("[antigravity-Test] account=%d(%s)", account.ID, account.Name)
 	p := antigravityRetryLoopParams{
-		ctx:            ctx,
-		prefix:         prefix,
-		account:        account,
-		proxyURL:       proxyURL,
-		accessToken:    accessToken,
-		action:         "streamGenerateContent",
-		body:           requestBody,
-		c:              nil, // 无 gin.Context → 跳过 ops 追踪
-		httpUpstream:   s.httpUpstream,
-		settingService: s.settingService,
-		accountRepo:    s.accountRepo,
-		requestedModel: modelID,
-		handleError:    testConnectionHandleError,
+		ctx:                    ctx,
+		prefix:                 prefix,
+		account:                account,
+		proxyURL:               proxyURL,
+		accessToken:            accessToken,
+		action:                 "streamGenerateContent",
+		body:                   requestBody,
+		c:                      nil, // 无 gin.Context → 跳过 ops 追踪
+		httpUpstream:           s.httpUpstream,
+		imageResolutionMonitor: s.imageResolutionMonitor,
+		settingService:         s.settingService,
+		accountRepo:            s.accountRepo,
+		requestedModel:         modelID,
+		handleError:            testConnectionHandleError,
 	}
 
 	result, err := s.antigravityRetryLoop(p)

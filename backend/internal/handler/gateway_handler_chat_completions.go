@@ -548,7 +548,7 @@ func (h *GatewayHandler) handleCCFailoverExhausted(c *gin.Context, lastErr *serv
 		return
 	}
 	if errType, code, message, ok := asyncImageReferenceAccountErrorDetails(c, lastErr); ok {
-		c.JSON(http.StatusBadRequest, gin.H{"error": gin.H{"type": errType, "code": code, "message": message}})
+		c.JSON(lastErr.StatusCode, gin.H{"error": gin.H{"type": errType, "code": code, "message": message}})
 		return
 	}
 	if errType, code, message, ok := asyncImageInternalError422ErrorDetails(c, lastErr); ok {

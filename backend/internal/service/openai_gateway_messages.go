@@ -363,7 +363,10 @@ func (s *OpenAIGatewayService) ForwardAsAnthropic(
 				return nil, fmt.Errorf("build grok retry request: %w", err)
 			}
 		}
-		resp, err = s.httpUpstream.Do(upstreamReq, proxyURL, account.ID, account.Concurrency)
+		resp, err = s.imageResolutionMonitor.Do(s.httpUpstream, upstreamReq, proxyURL, account)
+		if isImageResolutionCooling(err) {
+			return nil, err
+		}
 		if err != nil {
 			return nil, s.handleOpenAIUpstreamTransportError(ctx, c, account, err, false)
 		}

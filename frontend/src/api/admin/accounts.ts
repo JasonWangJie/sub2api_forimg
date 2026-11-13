@@ -330,14 +330,31 @@ export async function getBatchUsage(accountIds: number[], force?: boolean): Prom
   return data
 }
 
-/**
- * Clear account rate limit status
- * @param id - Account ID
- * @returns Updated account
- */
-export async function clearRateLimit(id: number): Promise<Account> {
-  const { data } = await apiClient.post<Account>(
-    `/admin/accounts/${id}/clear-rate-limit`
+export interface AccountRateLimitState {
+  account_id: number
+  version: string
+  status: string
+  schedulable: boolean
+  restrictions: Array<{ kind: 'account' | 'model' | 'overload' | 'temporary' | 'quota'; scope?: string; until?: string }>
+  active_count: number
+  truncated?: boolean
+}
+
+export interface AccountRateLimitClearResult {
+  account: Account | null
+  before: AccountRateLimitState
+  after: AccountRateLimitState
+  cache_sync: { status: 'synced' | 'warning'; failed_components: string[] }
+}
+
+export async function getRateLimitState(id: number): Promise<AccountRateLimitState> {
+  const { data } = await apiClient.get<AccountRateLimitState>(`/admin/accounts/${id}/rate-limit-state`)
+  return data
+}
+
+export async function clearRateLimit(id: number, expectedVersion: string): Promise<AccountRateLimitClearResult> {
+  const { data } = await apiClient.post<AccountRateLimitClearResult>(
+    `/admin/accounts/${id}/clear-rate-limit`, { expected_version: expectedVersion }
   )
   return data
 }
@@ -1003,6 +1020,7 @@ export const accountsAPI = {
   getTodayStats,
   getBatchTodayStats,
   clearRateLimit,
+  getRateLimitState,
   recoverState,
   resetAccountQuota,
   getTempUnschedulableStatus,

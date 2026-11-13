@@ -8,6 +8,7 @@ package main
 
 import (
 	"context"
+	"database/sql"
 	"github.com/Wei-Shaw/sub2api/ent"
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/Wei-Shaw/sub2api/internal/handler"
@@ -289,7 +290,8 @@ func initializeApplication(buildInfo handler.BuildInfo) (*Application, error) {
 	auditLogHandler := admin.NewAuditLogHandler(auditLogService, totpService)
 	upstreamBillingProbeService := service.ProvideUpstreamBillingProbeService(accountRepository, accountTestService, settingService, leaderLockCache, db)
 	ollamaCloudUsageService := service.ProvideOllamaCloudUsageService(accountRepository, httpUpstream, settingService, secretEncryptor, configConfig, leaderLockCache, db)
-	adminHandlers := handler.ProvideAdminHandlers(dashboardHandler, adminUserHandler, groupHandler, accountHandler, adminAnnouncementHandler, dataManagementHandler, backupHandler, asyncImageTaskCenterHandler, imageLibraryHandler, oAuthHandler, openAIOAuthHandler, geminiOAuthHandler, antigravityOAuthHandler, grokOAuthHandler, proxyHandler, adminRedeemHandler, promoHandler, settingHandler, opsHandler, systemHandler, adminSubscriptionHandler, adminUsageHandler, userAttributeHandler, errorPassthroughHandler, tlsFingerprintProfileHandler, adminAPIKeyHandler, scheduledTestHandler, channelHandler, channelMonitorHandler, channelMonitorRequestTemplateHandler, contentModerationHandler, promptAdminHandler, paymentHandler, affiliateHandler, complianceHandler, auditLogHandler, upstreamBillingProbeService, ollamaCloudUsageService)
+	imageResolutionGuardService := provideImageResolutionGuardService(db, settingRepository, notificationEmailService, userRepository, redisClient)
+	adminHandlers := handler.ProvideAdminHandlers(dashboardHandler, adminUserHandler, groupHandler, accountHandler, adminAnnouncementHandler, dataManagementHandler, backupHandler, asyncImageTaskCenterHandler, imageLibraryHandler, oAuthHandler, openAIOAuthHandler, geminiOAuthHandler, antigravityOAuthHandler, grokOAuthHandler, proxyHandler, adminRedeemHandler, promoHandler, settingHandler, opsHandler, systemHandler, adminSubscriptionHandler, adminUsageHandler, userAttributeHandler, errorPassthroughHandler, tlsFingerprintProfileHandler, adminAPIKeyHandler, scheduledTestHandler, channelHandler, channelMonitorHandler, channelMonitorRequestTemplateHandler, contentModerationHandler, promptAdminHandler, paymentHandler, affiliateHandler, complianceHandler, auditLogHandler, upstreamBillingProbeService, ollamaCloudUsageService, imageResolutionGuardService)
 	usageRecordWorkerPool := service.NewUsageRecordWorkerPool(configConfig)
 	userMsgQueueCache := repository.NewUserMsgQueueCache(redisClient)
 	userMessageQueueService := service.ProvideUserMessageQueueService(userMsgQueueCache, rpmCache, configConfig)
@@ -350,19 +352,20 @@ func initializeApplication(buildInfo handler.BuildInfo) (*Application, error) {
 	proxyExpiryService := service.ProvideProxyExpiryService(proxyRepository)
 	subscriptionExpiryService := service.ProvideSubscriptionExpiryService(userSubscriptionRepository, settingRepository, notificationEmailService, leaderLockCache, db)
 	batchImageWorkerRuntime := service.ProvideBatchImageWorkerRuntime(batchImageRepository, accountRepository, batchImageQueue, usageBillingRepository, usageLogRepository, batchImageModelPricingResolver, apiKeyAuthCacheInvalidator, configConfig)
+	imageResolutionMonitor := provideImageResolutionMonitor(imageResolutionGuardService, imageStorageSettingService)
 	imageAccountCircuitBreaker := repository.NewImageAccountCircuitBreaker(redisClient)
-	mainImageAccountCircuitBreakerRuntime := provideImageAccountCircuitBreakerRuntime(imageAccountCircuitBreaker, imageStorageSettingService, gatewayService, openAIGatewayService, geminiMessagesCompatService)
+	mainImageAccountCircuitBreakerRuntime := provideImageAccountCircuitBreakerRuntime(imageAccountCircuitBreaker, imageStorageSettingService, gatewayService, openAIGatewayService, geminiMessagesCompatService, antigravityGatewayService, durableAsyncImageHandler, imageResolutionGuardService, imageResolutionMonitor)
 	scheduledTestRunnerService := service.ProvideScheduledTestRunnerService(scheduledTestPlanRepository, scheduledTestService, accountTestService, rateLimitService, configConfig)
 	paymentOrderExpiryService := service.ProvidePaymentOrderExpiryService(paymentService, leaderLockCache, db)
 	channelMonitorRunner := service.ProvideChannelMonitorRunner(channelMonitorService, settingService)
 	channelMonitorV2Aggregator := service.ProvideChannelMonitorV2Aggregator(channelMonitorV2Repository, db, settingService)
 	userPlatformQuotaUsageFlusher := service.ProvideUserPlatformQuotaUsageFlusher(configConfig, billingCache, serviceUserPlatformQuotaRepository, timingWheelService)
-	v := provideCleanup(client, redisClient, opsMetricsCollector, opsAggregationService, opsAlertEvaluatorService, opsCleanupService, opsScheduledReportService, opsSystemLogSink, opsService, opsIngressRejectAggregator, settingService, apiKeyService, authCacheInvalidationWorker, schedulerSnapshotService, tokenRefreshService, accountExpiryService, openAICodexVersionSyncService, proxyExpiryService, subscriptionExpiryService, usageCleanupService, idempotencyCleanupService, batchImageCleanupService, batchImageWorkerRuntime, durableAsyncImageHandler, imageLibraryMaintenanceService, pricingService, emailQueueService, billingCacheService, usageRecordWorkerPool, subscriptionService, oAuthService, openAIOAuthService, geminiOAuthService, antigravityOAuthService, grokOAuthService, openAIGatewayService, mainImageAccountCircuitBreakerRuntime, scheduledTestRunnerService, backupService, paymentOrderExpiryService, channelMonitorRunner, channelMonitorV2Aggregator, userPlatformQuotaUsageFlusher, upstreamBillingProbeService, ollamaCloudUsageService, auditLogService, promptService)
+	v := provideCleanup(client, redisClient, opsMetricsCollector, opsAggregationService, opsAlertEvaluatorService, opsCleanupService, opsScheduledReportService, opsSystemLogSink, opsService, opsIngressRejectAggregator, settingService, apiKeyService, authCacheInvalidationWorker, schedulerSnapshotService, tokenRefreshService, accountExpiryService, openAICodexVersionSyncService, proxyExpiryService, subscriptionExpiryService, usageCleanupService, idempotencyCleanupService, batchImageCleanupService, batchImageWorkerRuntime, durableAsyncImageHandler, imageLibraryMaintenanceService, pricingService, emailQueueService, imageResolutionGuardService, imageResolutionMonitor, billingCacheService, usageRecordWorkerPool, subscriptionService, oAuthService, openAIOAuthService, geminiOAuthService, antigravityOAuthService, grokOAuthService, openAIGatewayService, mainImageAccountCircuitBreakerRuntime, scheduledTestRunnerService, backupService, paymentOrderExpiryService, channelMonitorRunner, channelMonitorV2Aggregator, userPlatformQuotaUsageFlusher, upstreamBillingProbeService, ollamaCloudUsageService, auditLogService, promptService)
 	application := &Application{
-		DurableAsyncImage: durableAsyncImageHandler,
 		Server:            httpServer,
 		PromptAudit:       promptService,
 		Cleanup:           v,
+		DurableAsyncImage: durableAsyncImageHandler,
 	}
 	return application, nil
 }
@@ -380,6 +383,18 @@ func providePrivacyClientFactory() service.PrivacyClientFactory {
 	return repository.CreatePrivacyReqClient
 }
 
+func provideImageResolutionGuardService(db *sql.DB, settings service.SettingRepository, email *service.NotificationEmailService, users service.UserRepository, rdb *redis.Client) *service.ImageResolutionGuardService {
+	guard := service.NewImageResolutionGuardService(repository.NewImageResolutionGuardRepository(db), settings, email, users, rdb)
+	guard.Start()
+	return guard
+}
+
+func provideImageResolutionMonitor(guard *service.ImageResolutionGuardService, settings *service.ImageStorageSettingService) *service.ImageResolutionMonitor {
+	monitor := service.NewImageResolutionMonitor(guard)
+	monitor.SetRuntimeConfigProvider(settings)
+	return monitor
+}
+
 func provideServiceBuildInfo(buildInfo handler.BuildInfo) service.BuildInfo {
 	return service.BuildInfo{
 		Version:   buildInfo.Version,
@@ -395,11 +410,20 @@ func provideImageAccountCircuitBreakerRuntime(
 	gateway *service.GatewayService,
 	openAIGateway *service.OpenAIGatewayService,
 	geminiMessagesCompat *service.GeminiMessagesCompatService,
+	antigravityGateway *service.AntigravityGatewayService,
+	durableAsyncImage *handler.DurableAsyncImageHandler,
+	imageResolutionGuard *service.ImageResolutionGuardService,
+	imageResolutionMonitor *service.ImageResolutionMonitor,
 ) *imageAccountCircuitBreakerRuntime {
 	repository.ConfigureImageAccountCircuitBreaker(imageCircuitBreaker, imageStorageSettings)
 	gateway.SetImageAccountCircuitBreaker(imageCircuitBreaker)
 	openAIGateway.SetImageAccountCircuitBreaker(imageCircuitBreaker)
 	geminiMessagesCompat.SetImageAccountCircuitBreaker(imageCircuitBreaker)
+	gateway.SetImageResolutionGuard(imageResolutionMonitor)
+	openAIGateway.SetImageResolutionGuard(imageResolutionMonitor)
+	geminiMessagesCompat.SetImageResolutionGuard(imageResolutionMonitor)
+	antigravityGateway.SetImageResolutionGuard(imageResolutionMonitor)
+	durableAsyncImage.SetImageResolutionGuard(imageResolutionGuard)
 	return &imageAccountCircuitBreakerRuntime{}
 }
 
@@ -431,6 +455,8 @@ func provideCleanup(
 	imageLibraryMaintenance *service.ImageLibraryMaintenanceService,
 	pricing *service.PricingService,
 	emailQueue *service.EmailQueueService,
+	imageResolutionGuard *service.ImageResolutionGuardService,
+	imageResolutionMonitor *service.ImageResolutionMonitor,
 	billingCache *service.BillingCacheService,
 	usageRecordWorkerPool *service.UsageRecordWorkerPool,
 	subscriptionService *service.SubscriptionService,
@@ -620,6 +646,11 @@ func provideCleanup(
 			}},
 			{"EmailQueueService", func() error {
 				emailQueue.Stop()
+				return nil
+			}},
+			{"ImageResolutionGuardService", func() error {
+				imageResolutionMonitor.Close()
+				imageResolutionGuard.Stop()
 				return nil
 			}},
 			{"BillingCacheService", func() error {

@@ -287,8 +287,9 @@
             <AccountCapacityCell :account="row" />
           </template>
           <template #cell-status="{ row }">
-            <div class="flex items-center gap-1.5">
+            <div class="flex flex-col items-start gap-2">
               <AccountStatusIndicator :account="row" @show-temp-unsched="handleShowTempUnsched" />
+              <AccountImageResolutionSummary :account="row" :now="resolutionCooldownNow" @open="resolutionCooldownAcc = $event" />
             </div>
           </template>
           <template #cell-schedulable="{ row }">
@@ -456,7 +457,8 @@
     <AccountTestModal :show="showTest" :account="testingAcc" @close="closeTestModal" />
     <AccountStatsModal :show="showStats" :account="statsAcc" @close="closeStatsModal" />
     <ScheduledTestsPanel :show="showSchedulePanel" :account-id="scheduleAcc?.id ?? null" :model-options="scheduleModelOptions" @close="closeSchedulePanel" />
-    <AccountActionMenu :show="menu.show" :account="menu.acc" :position="menu.pos" @close="menu.show = false" @test="handleTest" @stats="handleViewStats" @schedule="handleSchedule" @duplicate="handleDuplicateAccount" @reauth="handleReAuth" @refresh-token="handleRefresh" @recover-state="handleRecoverState" @clear-rate-limit="rateLimitAcc = $event" @reset-quota="handleResetQuota" @set-privacy="handleSetPrivacy" @create-spark-shadow="handleCreateSparkShadow" />
+    <AccountActionMenu :show="menu.show" :account="menu.acc" :position="menu.pos" @close="menu.show = false" @test="handleTest" @stats="handleViewStats" @schedule="handleSchedule" @duplicate="handleDuplicateAccount" @reauth="handleReAuth" @refresh-token="handleRefresh" @recover-state="handleRecoverState" @clear-rate-limit="rateLimitAcc = $event" @image-resolution-cooldowns="resolutionCooldownAcc = $event" @reset-quota="handleResetQuota" @set-privacy="handleSetPrivacy" @create-spark-shadow="handleCreateSparkShadow" />
+    <AccountImageResolutionDialog :show="resolutionCooldownAcc !== null" :account="resolutionCooldownAcc" @close="resolutionCooldownAcc = null" @cleared="reload" />
     <AccountRateLimitDialog :show="rateLimitAcc !== null" :account="rateLimitAcc" @close="rateLimitAcc = null" @cleared="handleRateLimitCleared" />
     <SyncFromCrsModal :show="showSync" @close="showSync = false" @synced="reload" />
     <ImportDataModal :show="showImportData" @close="showImportData = false" @imported="handleDataImported" />
@@ -471,7 +473,7 @@
       @close="showBulkEdit = false"
       @updated="handleBulkUpdated"
     />
-    <TempUnschedStatusModal :show="showTempUnsched" :account="tempUnschedAcc" @close="showTempUnsched = false" @reset="handleTempUnschedReset" />
+    <TempUnschedStatusModal :show="showTempUnsched" :account="tempUnschedAcc" @close="showTempUnsched = false" @preview-clear="handleTempUnschedPreview" />
     <ConfirmDialog :show="showDeleteDialog" :title="t('admin.accounts.deleteAccount')" :message="t('admin.accounts.deleteConfirm', { name: deletingAcc?.name })" :confirm-text="t('common.delete')" :cancel-text="t('common.cancel')" :danger="true" @confirm="confirmDelete" @cancel="showDeleteDialog = false" />
     <ConfirmDialog :show="showCreateShadowDialog" :title="t('admin.accounts.createSparkShadow')" :message="t('admin.accounts.createSparkShadowConfirm', { name: creatingShadowAcc?.name })" @confirm="confirmCreateSparkShadow" @cancel="showCreateShadowDialog = false" />
     <ConfirmDialog :show="showExportDataDialog" :title="t('admin.accounts.dataExport')" :message="t('admin.accounts.dataExportConfirmMessage')" :confirm-text="t('admin.accounts.dataExportConfirm')" :cancel-text="t('common.cancel')" @confirm="handleExportData" @cancel="showExportDataDialog = false">
@@ -509,6 +511,8 @@ import AccountTableActions from '@/components/admin/account/AccountTableActions.
 import AccountTableFilters from '@/components/admin/account/AccountTableFilters.vue'
 import AccountBulkActionsBar from '@/components/admin/account/AccountBulkActionsBar.vue'
 import AccountActionMenu from '@/components/admin/account/AccountActionMenu.vue'
+import AccountImageResolutionSummary from '@/components/admin/account/AccountImageResolutionSummary.vue'
+import AccountImageResolutionDialog from '@/components/admin/account/AccountImageResolutionDialog.vue'
 import AccountRateLimitDialog from '@/components/admin/account/AccountRateLimitDialog.vue'
 import ImportDataModal from '@/components/admin/account/ImportDataModal.vue'
 import ReAuthAccountModal from '@/components/admin/account/ReAuthAccountModal.vue'
@@ -528,6 +532,7 @@ import ErrorPassthroughRulesModal from '@/components/admin/ErrorPassthroughRules
 import TLSFingerprintProfilesModal from '@/components/admin/TLSFingerprintProfilesModal.vue'
 import { fetchAllAccountIds } from '@/utils/accountSelection'
 import { buildOpenAIUsageRefreshKey } from '@/utils/accountUsageRefresh'
+import { accountImageResolutionRefreshKey } from '@/utils/accountImageResolution'
 import { formatDateTime, formatRelativeTime } from '@/utils/format'
 import { proxyExpiryBadgeClass, proxyExpiryLabelKey } from '@/utils/proxyExpiry'
 import { extractApiErrorMessage } from '@/utils/apiError'
@@ -602,6 +607,7 @@ const showTLSFingerprintProfiles = ref(false)
 const edAcc = ref<Account | null>(null)
 const tempUnschedAcc = ref<Account | null>(null)
 const rateLimitAcc = ref<Account | null>(null)
+const resolutionCooldownAcc = ref<Account | null>(null)
 const deletingAcc = ref<Account | null>(null)
 const creatingShadowAcc = ref<Account | null>(null)
 const reAuthAcc = ref<Account | null>(null)
@@ -616,6 +622,8 @@ const exportingData = ref(false)
 const probingUpstreamBilling = reactive(new Set<number>())
 const upstreamBillingProbeGloballyEnabled = ref<boolean | undefined>(undefined)
 const upstreamBillingNow = ref(Date.now())
+const resolutionCooldownNow = ref(Date.now())
+const { pause: pauseResolutionClock, resume: resumeResolutionClock } = useIntervalFn(() => { resolutionCooldownNow.value = Date.now() }, 1000, { immediate: false })
 let lastUpstreamBillingSortRefreshMinute = -1
 useIntervalFn(() => { upstreamBillingNow.value = Date.now() }, 60_000)
 
@@ -1274,6 +1282,7 @@ const isAnyModalOpen = computed(() => {
     showBulkEdit.value ||
     showTempUnsched.value ||
     rateLimitAcc.value !== null ||
+    resolutionCooldownAcc.value !== null ||
     showDeleteDialog.value ||
     showReAuth.value ||
     showTest.value ||
@@ -1293,6 +1302,12 @@ const inAutoRefreshSilentWindow = () => {
   return Date.now() < autoRefreshSilentUntil.value
 }
 
+watch(() => accounts.value.some(account => (account.image_resolution_guard?.cooldowns ?? []).some(item => Date.parse(item.cooldown_until) > resolutionCooldownNow.value)), (hasCooldowns) => {
+  resolutionCooldownNow.value = Date.now()
+  if (hasCooldowns) resumeResolutionClock()
+  else pauseResolutionClock()
+}, { immediate: true })
+
 const shouldReplaceAutoRefreshRow = (current: Account, next: Account) => {
   return (
     current.updated_at !== next.updated_at ||
@@ -1304,6 +1319,7 @@ const shouldReplaceAutoRefreshRow = (current: Account, next: Account) => {
     current.rate_limit_reset_at !== next.rate_limit_reset_at ||
     current.overload_until !== next.overload_until ||
     current.temp_unschedulable_until !== next.temp_unschedulable_until ||
+    accountImageResolutionRefreshKey(current) !== accountImageResolutionRefreshKey(next) ||
     buildOpenAIUsageRefreshKey(current) !== buildOpenAIUsageRefreshKey(next)
   )
 }
@@ -1313,6 +1329,7 @@ const syncAccountRefs = (nextAccount: Account) => {
   if (reAuthAcc.value?.id === nextAccount.id) reAuthAcc.value = nextAccount
   if (tempUnschedAcc.value?.id === nextAccount.id) tempUnschedAcc.value = nextAccount
   if (rateLimitAcc.value?.id === nextAccount.id) rateLimitAcc.value = nextAccount
+  if (resolutionCooldownAcc.value?.id === nextAccount.id) resolutionCooldownAcc.value = nextAccount
   if (deletingAcc.value?.id === nextAccount.id) deletingAcc.value = nextAccount
   if (menu.acc?.id === nextAccount.id) menu.acc = nextAccount
 }
@@ -2208,14 +2225,19 @@ const handleRecoverState = async (a: Account) => {
     enterAutoRefreshSilentWindow()
     appStore.showSuccess(t('admin.accounts.recoverStateSuccess'))
   } catch (error: any) {
+    if (error?.code === 'RATE_LIMIT_PREVIEW_REQUIRED') { rateLimitAcc.value = a; return }
     console.error('Failed to recover account state:', error)
     appStore.showError(error?.message || t('admin.accounts.recoverStateFailed'))
   }
 }
-const handleRateLimitCleared = (updated: Account) => {
+const handleRateLimitCleared = (result: import('@/api/admin/accounts').AccountRateLimitClearResult) => {
+  const updated = result.account
+  if (!updated) return
   patchAccountInList(updated)
   enterAutoRefreshSilentWindow()
-  appStore.showSuccess(t(updated.schedulable ? 'admin.accounts.rateLimit.success' : 'admin.accounts.rateLimit.successPaused'))
+  if (result.cache_sync.status === 'synced') {
+    appStore.showSuccess(t(updated.schedulable ? 'admin.accounts.rateLimit.success' : 'admin.accounts.rateLimit.successPaused'))
+  }
 }
 const handleResetQuota = async (a: Account) => {
   try {
@@ -2310,11 +2332,10 @@ const handleToggleSchedulable = async (a: Account) => {
   }
 }
 const handleShowTempUnsched = (a: Account) => { tempUnschedAcc.value = a; showTempUnsched.value = true }
-const handleTempUnschedReset = async (updated: Account) => {
+const handleTempUnschedPreview = (account: Account) => {
   showTempUnsched.value = false
   tempUnschedAcc.value = null
-  patchAccountInList(updated)
-  enterAutoRefreshSilentWindow()
+  rateLimitAcc.value = account
 }
 const formatExpiresAt = (value: number | null) => {
   if (!value) return '-'

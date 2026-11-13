@@ -1,5 +1,16 @@
 export default {
   asyncImageTasks: {
+    capacity: {
+      candidateCountUnknown: '候选总数未观测',
+      title: '容量不足诊断',
+      note: '以下是各次容量失败时采集的观察记录，不是渠道调用记录。不同阶段的数量可能重叠，不能相加；预计恢复时间不保证账号届时一定可用。',
+      snapshotNote: '这是容量失败后读取的账号池状态快照，不等于实际筛选时的状态或逐项排除结果。',
+      group: '分组 {id}', candidates: '已观察候选 {count}', pool: '账号池', accounts: '账号', recovery: '该限制最近到期',
+      truncated: '记录已截断，展示的账号或候选并非完整列表。',
+      sources: { pool_snapshot: '账号池状态快照', scheduler_filter: '已捕获的实际筛选', concurrency: '并发准入结果', unavailable: '未取得诊断信息', unknown: '其他观察阶段' },
+      pools: { resolution: '按清晰度', model: '按模型', model_resolution: '模型与清晰度', default: '默认分组池', unknown: '其他账号池' },
+      reasons: { not_schedulable: '其他调度条件不满足', runtime_blocked: '运行时阻断', privacy_not_set: '隐私设置不满足', transport_incompatible: '传输方式不兼容', quota: '额度限制', window_cost: '窗口费用限制', rpm: '每分钟请求限制', profit_control: '利润保护限制', circuit_open: '熔断冷却', oauth_required: '要求OAuth账号', no_candidates: '没有候选账号', scheduling_disabled: '已关闭调度', inactive: '账号非正常状态', expired: '账号已过期', platform_mismatch: '平台不匹配', rate_limited: '账号限速', overloaded: '过载冷却', temporarily_unschedulable: '临时不可调度', eligible_at_snapshot: '快照中未发现上述阻断', model_not_supported: '模型不支持', model_rate_limited: '模型限速', excluded: '本次尝试已排除', concurrency_full: '并发容量不足', unknown: '原因未确定' }
+    },
     title: '异步生图任务',
     description: '查看生图进度、计费结果和对象存储交付情况',
     adminTitle: '异步生图任务中心',
@@ -66,6 +77,7 @@ export default {
       storage_failed: '存储失败',
       billing_failed: '计费失败',
       expired: '已过期',
+      capacity_diagnostic: '容量诊断快照',
       upstream_image_url_fetch_retry: '参考图拉取超时重试',
       result_fetch_pending: '等待获取生成图片',
       result_fetch_attempt: '获取生成图片',

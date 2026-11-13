@@ -155,6 +155,20 @@ func TestAsyncImageServiceTimeout400FourServicePathsPreserveBoundaries(t *testin
 						require.JSONEq(t, errorBody, string(failure.ResponseBody))
 						require.False(t, failure.RetryableOnSameAccount)
 						require.Empty(t, recorder.Body.Bytes())
+					} else if mode == "no replay" {
+						require.ErrorAs(t, err, &failure)
+						require.True(t, failure.IsAsyncImageTimeoutTerminal())
+						require.False(t, failure.ShouldRetryNextAccount())
+						require.Empty(t, recorder.Body.Bytes())
+					} else if mode == "other message" {
+						// The original exact signature remains Service400; other
+						// complete timeout messages now use the generic policy.
+						require.ErrorAs(t, err, &failure)
+						require.True(t, failure.IsAsyncImageTimeoutRejection())
+						require.False(t, failure.IsAsyncImageServiceTimeout400())
+						require.Equal(t, http.StatusBadRequest, failure.StatusCode)
+						require.False(t, failure.RetryableOnSameAccount)
+						require.Empty(t, recorder.Body.Bytes())
 					} else {
 						require.NotErrorAs(t, err, &failure)
 						if mode == "admin passthrough" {

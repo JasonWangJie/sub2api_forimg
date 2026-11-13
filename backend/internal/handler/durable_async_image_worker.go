@@ -682,6 +682,7 @@ func (h *DurableAsyncImageHandler) invokeAsyncImageTask(parent context.Context, 
 	if task.RequestedImageSize != nil {
 		requestedSize = *task.RequestedImageSize
 	}
+	ctx = service.WithImageCapacityDiagnostics(ctx, task.GroupID, task.Model, requestedSize)
 	ctx, err = service.WithImageAccountPoolRoute(ctx, task.Model, requestedSize)
 	if err != nil {
 		h.failAsyncImageTask(parent, task, "invalid_model", asyncImageSafeError(err), false)
@@ -718,7 +719,7 @@ func (h *DurableAsyncImageHandler) invokeAsyncImageTask(parent context.Context, 
 		return asyncImageWorkerDisposition{}
 	}
 	if isOpsRoutingCapacityLimited(ginContext) && (originalReferenceAccountID == 0 || service.AsyncImageUpstreamAttemptCount(parent) == 0) {
-		return h.deferAsyncImageForLocalCapacity(parent, task, cfg)
+		return h.deferAsyncImageForLocalCapacity(parent, task, cfg, ginContext.Request.Context())
 	}
 	// A deadline racing with response handling must not discard a complete
 	// upstream response. Only an invocation with no response body is unknown;
@@ -775,6 +776,7 @@ func (h *DurableAsyncImageHandler) completeAsyncImageInvocation(
 		h.markAsyncImageExecutionUnknown(parent, task, asyncImageSafeError(err))
 		return asyncImageWorkerDisposition{}
 	}
+	h.observeAsyncImageResolution(parent, task, usageCapture, outputs, accountID, upstreamRequestID)
 	billingPayload, err := json.Marshal(prepared)
 	if err != nil {
 		h.markAsyncImageExecutionUnknown(parent, task, "prepared billing command could not be persisted")
@@ -815,9 +817,13 @@ func (h *DurableAsyncImageHandler) deferAsyncImageForLocalCapacity(
 	ctx context.Context,
 	task *service.AsyncImageTask,
 	cfg service.AsyncImageRuntimeConfig,
+	invocationContexts ...context.Context,
 ) asyncImageWorkerDisposition {
 	if task == nil {
 		return asyncImageWorkerDisposition{}
+	}
+	if len(invocationContexts) > 0 {
+		h.persistAsyncImageCapacityDiagnostics(ctx, invocationContexts[0], task)
 	}
 	if !canRetryAsyncImage(task, task.CapacityRetryCount, cfg.CapacityMaxRetries, cfg.TotalMaxRetries) {
 		h.failAsyncImageTask(

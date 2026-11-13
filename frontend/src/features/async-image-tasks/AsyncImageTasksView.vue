@@ -440,6 +440,8 @@
           <AsyncImageAttemptHistory :attempts="detail.account_attempts || []" />
         </section>
 
+        <AsyncImageCapacityDiagnostics v-if="admin" :admin="admin" :events="detail.events || []" />
+
         <section v-if="detail.error_message" class="rounded-md border border-rose-200 bg-rose-50 p-4 dark:border-rose-900/60 dark:bg-rose-950/30">
           <div class="flex items-start gap-3">
             <Icon name="exclamationTriangle" size="sm" class="mt-0.5 flex-none text-rose-600 dark:text-rose-400" />
@@ -568,6 +570,7 @@ import { formatBytes, formatCurrency, formatDateTime } from '@/utils/format'
 import { buildOssThumbnailUrl } from '@/utils/ossThumbnail'
 import { sanitizeUrl } from '@/utils/url'
 
+import AsyncImageCapacityDiagnostics from './AsyncImageCapacityDiagnostics.vue'
 import asyncImageTasksAPI from './api'
 import { defaultAsyncImageTaskDateFilters } from './dateFilters'
 import { countGenerationRequests } from './attemptHistory'
@@ -640,7 +643,7 @@ let detailController: AbortController | null = null
 
 const inProgressStatuses = new Set(['queued', 'invoking', 'upstream_succeeded', 'uploading', 'billing_pending'])
 const inProgressAuditStatuses = new Set([
-  'selected', 'invocation_started', 'upstream_image_url_fetch_retry',
+  'selected', 'invocation_started', 'upstream_image_url_fetch_retry', 'capacity_diagnostic',
   'result_fetch_pending', 'result_fetch_attempt', 'result_fetch_retry', 'result_finalize_retry',
 ])
 const successfulAuditStatuses = new Set(['succeeded', 'result_fetch_completed', 'reference_snapshot_saved'])

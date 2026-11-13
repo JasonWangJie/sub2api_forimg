@@ -18,6 +18,10 @@
               <Icon name="chart" size="sm" class="text-indigo-500" />
               {{ t('admin.accounts.viewStats') }}
             </button>
+            <button v-if="account && ['openai', 'gemini', 'antigravity'].includes(account.platform)" @click="$emit('image-resolution-cooldowns', account); $emit('close')" class="flex w-full items-center gap-2 px-4 py-2 text-sm hover:bg-gray-100 dark:hover:bg-dark-700" data-testid="resolution-cooldowns-action">
+              <Icon name="shield" size="sm" class="text-amber-600 dark:text-amber-300" />
+              {{ t('admin.accounts.imageResolutionGuard.action') }}
+            </button>
             <button @click="$emit('schedule', account); $emit('close')" class="flex w-full items-center gap-2 px-4 py-2 text-sm hover:bg-gray-100 dark:hover:bg-dark-700">
               <Icon name="clock" size="sm" class="text-orange-500" />
               {{ t('admin.scheduledTests.schedule') }}
@@ -45,7 +49,7 @@
               <Icon name="shield" size="sm" />
               {{ t('admin.accounts.setPrivacy') }}
             </button>
-            <div v-if="hasRecoverableState" class="my-1 border-t border-gray-100 dark:border-dark-700"></div>
+            <div v-if="hasRecoverableState || hasRateLimitState" class="my-1 border-t border-gray-100 dark:border-dark-700"></div>
             <button v-if="hasRateLimitState" @click="$emit('clear-rate-limit', account); $emit('close')" class="flex w-full items-center gap-2 px-4 py-2 text-sm text-amber-700 hover:bg-gray-100 dark:text-amber-300 dark:hover:bg-dark-700">
               <Icon name="clock" size="sm" />
               {{ t('admin.accounts.rateLimit.action') }}
@@ -66,22 +70,25 @@
 </template>
 
 <script setup lang="ts">
-import { computed, watch, onUnmounted } from 'vue'
+import { computed, ref, watch, onUnmounted } from 'vue'
+import { useIntervalFn } from '@vueuse/core'
 import { useI18n } from 'vue-i18n'
 import { Icon } from '@/components/icons'
 import type { Account } from '@/types'
 import { getAccountRateLimitEntries } from './accountRateLimits'
 
 const props = defineProps<{ show: boolean; account: Account | null; position: { top: number; left: number } | null }>()
-const emit = defineEmits(['close', 'test', 'stats', 'schedule', 'duplicate', 'reauth', 'refresh-token', 'recover-state', 'clear-rate-limit', 'reset-quota', 'set-privacy', 'create-spark-shadow'])
+const emit = defineEmits(['close', 'test', 'stats', 'schedule', 'duplicate', 'reauth', 'refresh-token', 'recover-state', 'clear-rate-limit', 'image-resolution-cooldowns', 'reset-quota', 'set-privacy', 'create-spark-shadow'])
 const { t } = useI18n()
 const canDuplicate = computed(() => {
   if (!props.account || props.account.parent_account_id != null) return false
   return ['apikey', 'upstream', 'bedrock', 'service_account'].includes(props.account.type)
 })
-const hasRateLimitState = computed(() => getAccountRateLimitEntries(props.account).length > 0)
+const now = ref(Date.now())
+const { pause: pauseClock, resume: resumeClock } = useIntervalFn(() => { now.value = Date.now() }, 1000, { immediate: false })
+const hasRateLimitState = computed(() => getAccountRateLimitEntries(props.account, now.value).length > 0)
 const hasRecoverableState = computed(() => {
-  return props.account?.status === 'error' || hasRateLimitState.value
+  return props.account?.status === 'error'
 })
 const isAntigravityOAuth = computed(() => props.account?.platform === 'antigravity' && props.account?.type === 'oauth')
 const isOpenAIOAuth = computed(() => props.account?.platform === 'openai' && props.account?.type === 'oauth')
@@ -105,9 +112,12 @@ const handleKeydown = (event: KeyboardEvent) => {
 watch(
   () => props.show,
   (visible) => {
+    now.value = Date.now()
     if (visible) {
+      resumeClock()
       window.addEventListener('keydown', handleKeydown)
     } else {
+      pauseClock()
       window.removeEventListener('keydown', handleKeydown)
     }
   },

@@ -62,6 +62,7 @@ type SettingHandler struct {
 	notificationEmailService *service.NotificationEmailService
 	totpService              *service.TotpService
 	userService              *service.UserService
+	imageResolutionGuard     *service.ImageResolutionGuardService
 }
 
 // NewSettingHandler 创建系统设置处理器

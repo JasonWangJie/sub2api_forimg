@@ -45,6 +45,7 @@ const (
 const geminiDummyThoughtSignature = "skip_thought_signature_validator"
 
 type GeminiMessagesCompatService struct {
+	imageResolutionMonitor    *ImageResolutionMonitor
 	accountRepo               AccountRepository
 	groupRepo                 GroupRepository
 	cache                     GatewayCache
@@ -227,7 +228,7 @@ func (s *GeminiMessagesCompatService) tryStickySessionHit(
 	if err != nil || account == nil {
 		return nil
 	}
-	if IsImageAccountCircuitOpen(ctx, s.imageCircuitBreaker, account) {
+	if IsImageAccountCircuitOpen(ctx, s.imageCircuitBreaker, account, s.imageResolutionMonitor) {
 		return nil
 	}
 
@@ -349,7 +350,7 @@ func (s *GeminiMessagesCompatService) selectBestGeminiAccount(
 
 	for i := range accounts {
 		acc := &accounts[i]
-		if IsImageAccountCircuitOpen(ctx, s.imageCircuitBreaker, acc) {
+		if IsImageAccountCircuitOpen(ctx, s.imageCircuitBreaker, acc, s.imageResolutionMonitor) {
 			continue
 		}
 
@@ -599,7 +600,14 @@ func (s *GeminiMessagesCompatService) SelectAccountForAIStudioEndpoints(ctx cont
 	return s.hydrateSelectedAccount(ctx, selected)
 }
 
-func (s *GeminiMessagesCompatService) Forward(ctx context.Context, c *gin.Context, account *Account, body []byte) (*ForwardResult, error) {
+func (s *GeminiMessagesCompatService) Forward(ctx context.Context, c *gin.Context, account *Account, body []byte) (qualityResult *ForwardResult, qualityErr error) {
+	ctx, qualityCapture := beginImageResolutionCapture(ctx)
+	defer func() {
+		if qualityResult != nil {
+			qualityResult.ImageResolutionExpectation = qualityCapture.get()
+		}
+	}()
+
 	beginUpstreamResponseModelObservation(c)
 	beginGeminiImageOutputObservation(c)
 	startTime := time.Now()
@@ -800,7 +808,10 @@ func (s *GeminiMessagesCompatService) Forward(ctx context.Context, c *gin.Contex
 		}
 		requestIDHeader = idHeader
 
-		resp, err = s.httpUpstream.Do(upstreamReq, proxyURL, account.ID, account.Concurrency)
+		resp, err = s.imageResolutionMonitor.Do(s.httpUpstream, upstreamReq, proxyURL, account)
+		if isImageResolutionCooling(err) {
+			return nil, err
+		}
 		if err != nil {
 			if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
 				return nil, err
@@ -1147,7 +1158,14 @@ func isGeminiSignatureRelatedError(respBody []byte) bool {
 	return strings.Contains(msg, "thought_signature") || strings.Contains(msg, "signature")
 }
 
-func (s *GeminiMessagesCompatService) ForwardNative(ctx context.Context, c *gin.Context, account *Account, originalModel string, action string, stream bool, body []byte) (*ForwardResult, error) {
+func (s *GeminiMessagesCompatService) ForwardNative(ctx context.Context, c *gin.Context, account *Account, originalModel string, action string, stream bool, body []byte) (qualityResult *ForwardResult, qualityErr error) {
+	ctx, qualityCapture := beginImageResolutionCapture(ctx)
+	defer func() {
+		if qualityResult != nil {
+			qualityResult.ImageResolutionExpectation = qualityCapture.get()
+		}
+	}()
+
 	beginUpstreamResponseModelObservation(c)
 	beginGeminiImageOutputObservation(c)
 	startTime := time.Now()
@@ -1339,7 +1357,10 @@ func (s *GeminiMessagesCompatService) ForwardNative(ctx context.Context, c *gin.
 		}
 		requestIDHeader = idHeader
 
-		resp, err = s.httpUpstream.Do(upstreamReq, proxyURL, account.ID, account.Concurrency)
+		resp, err = s.imageResolutionMonitor.Do(s.httpUpstream, upstreamReq, proxyURL, account)
+		if isImageResolutionCooling(err) {
+			return nil, err
+		}
 		if err != nil {
 			if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
 				return nil, err
@@ -2828,7 +2849,10 @@ func (s *GeminiMessagesCompatService) ForwardAIStudioGET(ctx context.Context, ac
 		return nil, fmt.Errorf("unsupported account type: %s", account.Type)
 	}
 
-	resp, err := s.httpUpstream.Do(req, proxyURL, account.ID, account.Concurrency)
+	resp, err := s.imageResolutionMonitor.Do(s.httpUpstream, req, proxyURL, account)
+	if isImageResolutionCooling(err) {
+		return nil, err
+	}
 	if err != nil {
 		return nil, err
 	}

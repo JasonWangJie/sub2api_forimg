@@ -325,6 +325,10 @@ func (s *OpenAIGatewayService) forwardOpenAIWSV2(
 		return nil, err
 	}
 
+	qualityTurn, qualityErr := s.imageResolutionMonitor.beginWebSocketTurn(ctx, account, payloadAsJSONBytes(payload), originalModel, mappedModel, "")
+	if qualityErr != nil {
+		return nil, qualityErr
+	}
 	if err := lease.WriteJSONWithContextTimeout(ctx, payload, s.openAIWSWriteTimeout()); err != nil {
 		lease.MarkBroken()
 		logOpenAIWSModeInfo(
@@ -576,6 +580,7 @@ func (s *OpenAIGatewayService) forwardOpenAIWSV2(
 			parseOpenAIWSResponseUsageFromCompletedEvent(message, usage)
 		}
 		imageCounter.AddSSEData(message)
+		qualityTurn.websocketMessage(message)
 
 		if eventType == "response.failed" {
 			if hit, code, msg := detectOpenAICyberPolicy(message); hit {
@@ -761,6 +766,7 @@ func (s *OpenAIGatewayService) forwardOpenAIWSV2(
 		clientDisconnected,
 	)
 
+	qualityTurn.finishWebSocketTurn(responseID)
 	return &OpenAIForwardResult{
 		RequestID:                     responseID,
 		Usage:                         *usage,

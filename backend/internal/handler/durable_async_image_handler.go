@@ -41,6 +41,7 @@ type durableAsyncImagePayload struct {
 // The legacy Redis-only AsyncImageHandler remains separately wired and keeps
 // its routes and response contracts unchanged.
 type DurableAsyncImageHandler struct {
+	imageResolutionGuard   service.ImageResolutionGuardObserver
 	tasks                  *service.AsyncImageTaskService
 	queue                  service.AsyncImageQueue
 	storage                *service.ImageStorageSettingService

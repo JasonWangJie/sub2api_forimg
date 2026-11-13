@@ -5,6 +5,7 @@ package main
 
 import (
 	"context"
+	"database/sql"
 	"log"
 	"net/http"
 	"sync"
@@ -50,6 +51,8 @@ func initializeApplication(buildInfo handler.BuildInfo) (*Application, error) {
 		// Privacy client factory for OpenAI training opt-out
 		providePrivacyClientFactory,
 		provideImageAccountCircuitBreakerRuntime,
+		provideImageResolutionGuardService,
+		provideImageResolutionMonitor,
 
 		// BuildInfo provider
 		provideServiceBuildInfo,
@@ -67,6 +70,18 @@ func providePrivacyClientFactory() service.PrivacyClientFactory {
 	return repository.CreatePrivacyReqClient
 }
 
+func provideImageResolutionGuardService(db *sql.DB, settings service.SettingRepository, email *service.NotificationEmailService, users service.UserRepository, rdb *redis.Client) *service.ImageResolutionGuardService {
+	guard := service.NewImageResolutionGuardService(repository.NewImageResolutionGuardRepository(db), settings, email, users, rdb)
+	guard.Start()
+	return guard
+}
+
+func provideImageResolutionMonitor(guard *service.ImageResolutionGuardService, settings *service.ImageStorageSettingService) *service.ImageResolutionMonitor {
+	monitor := service.NewImageResolutionMonitor(guard)
+	monitor.SetRuntimeConfigProvider(settings)
+	return monitor
+}
+
 func provideServiceBuildInfo(buildInfo handler.BuildInfo) service.BuildInfo {
 	return service.BuildInfo{
 		Version:   buildInfo.Version,
@@ -82,11 +97,20 @@ func provideImageAccountCircuitBreakerRuntime(
 	gateway *service.GatewayService,
 	openAIGateway *service.OpenAIGatewayService,
 	geminiMessagesCompat *service.GeminiMessagesCompatService,
+	antigravityGateway *service.AntigravityGatewayService,
+	durableAsyncImage *handler.DurableAsyncImageHandler,
+	imageResolutionGuard *service.ImageResolutionGuardService,
+	imageResolutionMonitor *service.ImageResolutionMonitor,
 ) *imageAccountCircuitBreakerRuntime {
 	repository.ConfigureImageAccountCircuitBreaker(imageCircuitBreaker, imageStorageSettings)
 	gateway.SetImageAccountCircuitBreaker(imageCircuitBreaker)
 	openAIGateway.SetImageAccountCircuitBreaker(imageCircuitBreaker)
 	geminiMessagesCompat.SetImageAccountCircuitBreaker(imageCircuitBreaker)
+	gateway.SetImageResolutionGuard(imageResolutionMonitor)
+	openAIGateway.SetImageResolutionGuard(imageResolutionMonitor)
+	geminiMessagesCompat.SetImageResolutionGuard(imageResolutionMonitor)
+	antigravityGateway.SetImageResolutionGuard(imageResolutionMonitor)
+	durableAsyncImage.SetImageResolutionGuard(imageResolutionGuard)
 	return &imageAccountCircuitBreakerRuntime{}
 }
 
@@ -118,6 +142,8 @@ func provideCleanup(
 	imageLibraryMaintenance *service.ImageLibraryMaintenanceService,
 	pricing *service.PricingService,
 	emailQueue *service.EmailQueueService,
+	imageResolutionGuard *service.ImageResolutionGuardService,
+	imageResolutionMonitor *service.ImageResolutionMonitor,
 	billingCache *service.BillingCacheService,
 	usageRecordWorkerPool *service.UsageRecordWorkerPool,
 	subscriptionService *service.SubscriptionService,
@@ -308,6 +334,11 @@ func provideCleanup(
 			}},
 			{"EmailQueueService", func() error {
 				emailQueue.Stop()
+				return nil
+			}},
+			{"ImageResolutionGuardService", func() error {
+				imageResolutionMonitor.Close()
+				imageResolutionGuard.Stop()
 				return nil
 			}},
 			{"BillingCacheService", func() error {

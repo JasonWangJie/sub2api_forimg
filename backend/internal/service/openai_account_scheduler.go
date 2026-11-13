@@ -1401,22 +1401,26 @@ func (s *defaultOpenAIAccountScheduler) selectByLoadBalance(
 	loadReq := make([]AccountWithConcurrency, 0, len(accounts))
 	for i := range accounts {
 		account := &accounts[i]
+		exclude := func(reason string) {
+			filterStats.exclude(reason)
+			RecordImageCapacityDecision(ctx, "scheduler_filter", reason, account.ID, len(accounts))
+		}
 		if req.ExcludedIDs != nil {
 			if _, excluded := req.ExcludedIDs[account.ID]; excluded {
-				filterStats.exclude("excluded")
+				exclude("excluded")
 				continue
 			}
 		}
 		if !account.IsSchedulable() {
-			filterStats.exclude("not_schedulable")
+			exclude("not_schedulable")
 			continue
 		}
 		if account.Platform != normalizeOpenAICompatiblePlatform(req.Platform) || !account.IsOpenAICompatible() {
-			filterStats.exclude("platform_mismatch")
+			exclude("platform_mismatch")
 			continue
 		}
 		if s.service.isOpenAIAccountRequestRuntimeBlockedForRequest(ctx, account, req.RequestedModel) {
-			filterStats.exclude("runtime_blocked")
+			exclude("runtime_blocked")
 			continue
 		}
 		// require_privacy_set: 跳过 privacy 未设置的账号并标记异常
@@ -1424,15 +1428,15 @@ func (s *defaultOpenAIAccountScheduler) selectByLoadBalance(
 			s.service.BlockAccountScheduling(account, time.Time{}, "privacy_not_set")
 			_ = s.service.accountRepo.SetError(ctx, account.ID,
 				fmt.Sprintf("Privacy not set, required by group [%s]", schedGroup.Name))
-			filterStats.exclude("privacy_not_set")
+			exclude("privacy_not_set")
 			continue
 		}
 		if compatible, reason := s.isAccountRequestCompatibleReason(ctx, account, req); !compatible {
-			filterStats.exclude(reason)
+			exclude(reason)
 			continue
 		}
 		if !s.isAccountTransportCompatible(account, req.RequiredTransport) {
-			filterStats.exclude("transport_incompatible")
+			exclude("transport_incompatible")
 			continue
 		}
 		filtered = append(filtered, account)

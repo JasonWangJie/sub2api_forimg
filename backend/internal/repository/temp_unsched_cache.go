@@ -2,6 +2,8 @@ package repository
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"time"
@@ -24,7 +26,18 @@ var tempUnschedSetScript = redis.NewScript(`
 		if ok and existing_data and existing_data.until_unix then
 			local existing_until = tonumber(existing_data.until_unix)
 			if existing_until and new_until <= existing_until then
-				return 0
+                -- Preserve the longer deadline but record the new observation.
+                -- Otherwise a manual clear could mistake a fresh shorter/equal
+                -- limit for the old generation and delete it.
+                local new_data = cjson.decode(new_value)
+                existing_data.generation = new_data.generation
+                local ttl = redis.call('PTTL', key)
+                if ttl >= 0 then
+                    redis.call('SET', key, cjson.encode(existing_data), 'PX', math.max(ttl, 1))
+                else
+                    redis.call('SET', key, cjson.encode(existing_data))
+                end
+                return 0
 			end
 		end
 	end
@@ -45,7 +58,15 @@ func NewTempUnschedCache(rdb *redis.Client) service.TempUnschedCache {
 func (c *tempUnschedCache) SetTempUnsched(ctx context.Context, accountID int64, state *service.TempUnschedState) error {
 	key := fmt.Sprintf("%s%d", tempUnschedPrefix, accountID)
 
-	stateJSON, err := json.Marshal(state)
+	var generation [16]byte
+	if _, err := rand.Read(generation[:]); err != nil {
+		return err
+	}
+	payload := struct {
+		*service.TempUnschedState
+		Generation string `json:"generation"`
+	}{state, hex.EncodeToString(generation[:])}
+	stateJSON, err := json.Marshal(payload)
 	if err != nil {
 		return fmt.Errorf("marshal state: %w", err)
 	}
@@ -88,4 +109,33 @@ func (c *tempUnschedCache) GetTempUnsched(ctx context.Context, accountID int64) 
 func (c *tempUnschedCache) DeleteTempUnsched(ctx context.Context, accountID int64) error {
 	key := fmt.Sprintf("%s%d", tempUnschedPrefix, accountID)
 	return c.rdb.Del(ctx, key).Err()
+}
+
+var tempUnschedCompareDeleteScript = redis.NewScript(`
+ local current=redis.call('GET',KEYS[1])
+ if not current then return 1 end
+ if current ~= ARGV[1] then return 0 end
+ redis.call('DEL',KEYS[1])
+ return 1
+`)
+
+func (c *tempUnschedCache) SnapshotTempUnsched(ctx context.Context, id int64) (string, error) {
+	value, err := c.rdb.Get(ctx, fmt.Sprintf("%s%d", tempUnschedPrefix, id)).Result()
+	if err == redis.Nil {
+		return "", nil
+	}
+	return value, err
+}
+func (c *tempUnschedCache) DeleteTempUnschedIfObserved(ctx context.Context, id int64, token string) (bool, error) {
+	if token != "" {
+		var marker struct {
+			Generation string `json:"generation"`
+		}
+		if json.Unmarshal([]byte(token), &marker) != nil || marker.Generation == "" {
+			return false, nil
+		}
+	}
+
+	result, err := tempUnschedCompareDeleteScript.Run(ctx, c.rdb, []string{fmt.Sprintf("%s%d", tempUnschedPrefix, id)}, token).Int64()
+	return result == 1, err
 }

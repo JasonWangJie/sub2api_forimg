@@ -340,6 +340,11 @@ function localText(zh: string, en: string): string {
 }
 
 const eventDisplayMeta: Record<string, EventDisplayMeta> = {
+  "image.resolution_mismatch": {
+    label: "生图分辨率降档告警",
+    timing: "真实成品像素低于保护阈值、账号同模型同档位进入新一轮冷却时发送给管理员告警邮箱。",
+    categoryLabel: "管理告警",
+  },
   "auth.verify_code": {
     label: "邮箱验证码",
     timing: "注册、绑定邮箱、OAuth 补全邮箱或 TOTP 邮箱校验时发送。",
@@ -403,6 +408,11 @@ const eventDisplayMeta: Record<string, EventDisplayMeta> = {
 };
 
 const eventDisplayMetaEn: Record<string, EventDisplayMeta> = {
+  "image.resolution_mismatch": {
+    label: "Image Resolution Downgrade Alert",
+    timing: "Sent to administrator alert recipients when decoded output pixels fall below the protection threshold and a new cooldown starts for the account, model, and tier.",
+    categoryLabel: "Admin",
+  },
   "auth.verify_code": {
     label: "Email Verification Code",
     timing: "Sent for registration, email binding, OAuth pending email completion, or TOTP email verification.",

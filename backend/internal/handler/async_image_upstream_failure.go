@@ -34,8 +34,25 @@ func (h *DurableAsyncImageHandler) handleAsyncImageUpstreamFailure(parent, attem
 		zap.Int("status_code", statusCode),
 		zap.String("message", message),
 	)
+	if statusCode >= 400 && statusCode <= 599 {
+		switch gjson.GetBytes(body, "error.code").String() {
+		case service.AsyncImageTimeoutTerminalCode:
+			h.failAsyncImageTask(parent, task, "upstream_failed", message, false)
+			return asyncImageWorkerDisposition{}
+		case service.AsyncImageTimeoutUnknownCode:
+			h.markAsyncImageExecutionUnknown(parent, task, message)
+			return asyncImageWorkerDisposition{}
+		}
+	}
 	if asyncImageOpenAIReferenceRetryFromContext(attemptCtx).originalAccountID > 0 {
 		return h.finishAsyncImageOpenAIReferenceAttempt(parent, attemptCtx, task, cfg, statusCode, body, message, retryAfter)
+	}
+	if statusCode >= 400 && statusCode <= 599 && gjson.GetBytes(body, "error.code").String() == service.AsyncImageTimeoutRetryCode {
+		if canRetryAsyncImage(task, task.UpstreamRetryCount, cfg.UpstreamTransientMaxRetries, cfg.TotalMaxRetries) {
+			return h.retryAsyncImageUpstreamTransient(parent, task, cfg, message, retryAfter)
+		}
+		h.failAsyncImageTask(parent, task, "upstream_failed", message, false)
+		return asyncImageWorkerDisposition{}
 	}
 	if statusCode == http.StatusBadRequest &&
 		gjson.GetBytes(body, "error.code").String() == service.AsyncImageOpenAIReferenceURLTimeoutCode {
@@ -60,7 +77,7 @@ func (h *DurableAsyncImageHandler) handleAsyncImageUpstreamFailure(parent, attem
 		h.failAsyncImageTask(parent, task, "upstream_capacity_exhausted", message, false)
 		return asyncImageWorkerDisposition{}
 	}
-	if (statusCode == http.StatusBadRequest || statusCode == http.StatusUnprocessableEntity) &&
+	if (statusCode == http.StatusBadRequest || statusCode == http.StatusNotFound || statusCode == http.StatusUnprocessableEntity || statusCode == service.AsyncImageReferenceTimeoutStatus) &&
 		(gjson.GetBytes(body, "error.code").String() == service.AsyncImageRetryableRejectionCode ||
 			gjson.GetBytes(body, "error.code").String() == service.AsyncImageReferenceTransportRetryCode) {
 		if gjson.GetBytes(body, "error.code").String() == service.AsyncImageReferenceTransportRetryCode &&
@@ -79,7 +96,7 @@ func (h *DurableAsyncImageHandler) handleAsyncImageUpstreamFailure(parent, attem
 		h.failAsyncImageTask(parent, task, "upstream_failed", message, false)
 		return asyncImageWorkerDisposition{}
 	}
-	if statusCode == http.StatusBadRequest &&
+	if (statusCode == http.StatusBadRequest || statusCode == http.StatusNotFound || statusCode == service.AsyncImageReferenceTimeoutStatus) &&
 		gjson.GetBytes(body, "error.code").String() == service.AsyncImageReferenceLocalFallbackCode {
 		if canFallbackAsyncImageReferenceLocally(task, cfg) &&
 			hasAsyncImageReferenceFallbackAccount(task, attemptCtx) &&
@@ -92,7 +109,7 @@ func (h *DurableAsyncImageHandler) handleAsyncImageUpstreamFailure(parent, attem
 		h.failAsyncImageTask(parent, task, "upstream_failed", message, false)
 		return asyncImageWorkerDisposition{}
 	}
-	if statusCode == http.StatusBadRequest &&
+	if (statusCode == http.StatusBadRequest || statusCode == http.StatusNotFound || statusCode == service.AsyncImageReferenceTimeoutStatus) &&
 		(gjson.GetBytes(body, "error.code").String() == service.AsyncImageReferenceBudgetExceededCode ||
 			gjson.GetBytes(body, "error.code").String() == service.AsyncImageReferenceAccountFailoverCode ||
 			service.IsAsyncImageReferenceAccountFailoverMessage(statusCode, service.ExtractUpstreamErrorMessage(body))) {

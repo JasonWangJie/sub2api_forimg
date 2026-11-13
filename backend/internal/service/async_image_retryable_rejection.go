@@ -33,8 +33,12 @@ func AsyncImageProviderRetryPolicyEnabled(ctx context.Context) bool {
 }
 
 func (e *UpstreamFailoverError) IsAsyncImageBoundedRetryFailure() bool {
+	if e.IsAsyncImageTimeoutRejection() {
+		return e.ShouldRetryNextAccount()
+	}
 	return e != nil && e.ShouldRetryNextAccount() &&
-		(e.StatusCode == http.StatusBadRequest || e.StatusCode == http.StatusUnprocessableEntity) &&
+		(e.StatusCode == http.StatusBadRequest || e.StatusCode == http.StatusUnprocessableEntity ||
+			((e.StatusCode == AsyncImageReferenceTimeoutStatus || e.StatusCode == http.StatusNotFound) && e.IsAsyncImageReferenceAccountFailover())) &&
 		(e.IsAsyncImageRetryableRejection() || e.IsAsyncImageReferenceAccountFailover() ||
 			e.IsAsyncImageServiceTimeout400() || e.IsAsyncImageInternalError422() || e.IsAsyncImageSizeCapabilityMismatch())
 }
@@ -94,6 +98,8 @@ func isAsyncImageTerminalRejection(providerCode, message string) bool {
 		"do not automatically regenerate", "do not regenerate", "do not retry",
 		"content policy", "content filter", "content rejected", "safety", "guardrail", "moderation", "nsfw",
 		"禁止自动再生成", "不要自动再生成", "内容审核", "安全审核",
+		"执行结果未知", "生成结果未知", "已收费", "已扣费", "已生成图片", "已生成结果", "禁止重试", "不要重试",
+		"已经扣费", "已经收费", "已产图", "已经生成图片", "已经生成结果", "图片已生成", "请勿重试",
 		"generated result", "generated image", "image output", "output image", "result image",
 		"invalid base64", "invalid image data uri", "invalid image data", "corrupt image", "corrupted image", "image is corrupt",
 		"unsupported image format", "unsupported image type",
@@ -121,6 +127,9 @@ func containsAsyncImageRejectionPart(text string, parts ...string) bool {
 func newAsyncImageRetryableRejectionForContext(ctx context.Context, status int, body []byte, headers http.Header) *UpstreamFailoverError {
 	if AsyncImageAccountAttemptCaptureFromContext(ctx) == nil && !IsGeminiAsyncImageGeneration(ctx) {
 		return nil
+	}
+	if timeout := newAsyncImageTimeoutRejectionForContext(ctx, status, body, headers); timeout != nil {
+		return timeout
 	}
 	message, code, requestID := geminiAsyncUpstreamDiagnostics(body, geminiRequestIDFromHeaders(headers))
 	upstreamMessage := extractUpstreamErrorMessage(body)

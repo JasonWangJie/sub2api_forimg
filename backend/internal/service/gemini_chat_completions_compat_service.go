@@ -72,6 +72,13 @@ func (s *GeminiMessagesCompatService) forwardClaudeBodyAsChatCompletions(
 	startTime time.Time,
 	originalChatBody []byte,
 ) (forwardResult *ForwardResult, forwardErr error) {
+	ctx, qualityCapture := beginImageResolutionCapture(ctx)
+	defer func() {
+		if forwardResult != nil {
+			forwardResult.ImageResolutionExpectation = qualityCapture.get()
+		}
+	}()
+
 	beginGeminiImageOutputObservation(c)
 	var req struct {
 		Model  string `json:"model"`
@@ -152,10 +159,15 @@ func (s *GeminiMessagesCompatService) forwardClaudeBodyAsChatCompletions(
 				return nil, gateErr
 			}
 		}
+		var qualityAdmissionErr error
+		upstreamReq, qualityAdmissionErr = s.imageResolutionMonitor.Admit(upstreamReq, account)
+		if qualityAdmissionErr != nil {
+			return nil, qualityAdmissionErr
+		}
 		if budgetErr := BeginAsyncImageUpstreamAttempt(ctx, account.ID); budgetErr != nil {
 			return nil, budgetErr
 		}
-		resp, err = s.httpUpstream.Do(upstreamReq, proxyURL, account.ID, account.Concurrency)
+		resp, err = s.imageResolutionMonitor.Do(s.httpUpstream, upstreamReq, proxyURL, account)
 		if err != nil {
 			safeErr := sanitizeUpstreamErrorMessage(err.Error())
 			appendOpsUpstreamError(c, OpsUpstreamErrorEvent{
@@ -182,6 +194,7 @@ func (s *GeminiMessagesCompatService) forwardClaudeBodyAsChatCompletions(
 			return nil, s.writeChatCompletionsError(c, http.StatusBadGateway, "upstream_error", "Upstream request failed after retries: "+safeErr)
 		}
 
+		ctx = trackAsyncImageErrorResponse(ctx, resp)
 		if matched, rebuilt := s.checkErrorPolicyInLoop(ctx, account, resp, mappedModel); matched {
 			resp = rebuilt
 			break
@@ -279,7 +292,7 @@ func (s *GeminiMessagesCompatService) forwardClaudeBodyAsChatCompletions(
 				http.StatusBadGateway, "upstream_error", "Upstream request failed"); matched {
 				return nil, s.writeChatCompletionsError(c, status, errType, errMsg)
 			}
-			return nil, newAsyncImageReferenceAccountFailoverError(evBody, resp.Header)
+			return nil, newAsyncImageReferenceAccountFailoverErrorWithStatus(resp.StatusCode, evBody, resp.Header)
 		}
 		if asyncImageGeneration && isAsyncImageInternalError422(resp.StatusCode, evBody) {
 			if status, errType, errMsg, matched := applyErrorPassthroughRule(c, account.Platform, resp.StatusCode, evBody,

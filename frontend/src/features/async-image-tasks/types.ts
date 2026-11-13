@@ -34,7 +34,25 @@ export interface AsyncImageTaskResult {
   created_at?: string | null
 }
 
+export interface AsyncImageCapacityDiagnostics {
+  observed_at: string
+  group_id: number
+  model: string
+  size_tier: string
+  observations: Array<{
+    source: string
+    observed_at?: string
+    pool_mode?: string
+    pool_model?: string
+    pool_size_tier?: string
+    candidate_count: number
+    candidates_truncated: boolean
+    reasons: Array<{ code: string; count: number; account_ids?: number[]; earliest_recovery_at?: string }>
+  }>
+}
+
 export interface AsyncImageTaskEvent {
+  capacity_diagnostics?: AsyncImageCapacityDiagnostics | null
   id?: string | number
   status: AsyncImageTaskStatus | string
   message?: string | null

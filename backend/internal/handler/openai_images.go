@@ -368,7 +368,8 @@ func (h *OpenAIGatewayHandler) Images(c *gin.Context) {
 						}
 						if referenceRetry.originalAccountID > 0 || failoverErr.IsAsyncImageSizeCapabilityMismatch() || failoverErr.IsAsyncImageReferenceAccountFailover() ||
 							failoverErr.IsAsyncImageInternalError422() || failoverErr.IsAsyncImageServiceTimeout400() ||
-							failoverErr.IsAsyncImageRetryableRejection() || failoverErr.IsAsyncImageOpenAIReferenceURLTimeout() {
+							failoverErr.IsAsyncImageRetryableRejection() || failoverErr.IsAsyncImageOpenAIReferenceURLTimeout() ||
+							failoverErr.IsAsyncImageTimeoutRejection() || failoverErr.IsAsyncImageTimeoutTerminal() {
 							attempt = asyncImageFailedAccountAttempt(account, failoverErr)
 						}
 						if referenceRetry.originalAccountID > 0 && service.IsAsyncImageOpenAIReferenceOutcomeUnknown(failoverErr.StatusCode, service.ExtractUpstreamErrorMessage(failoverErr.ResponseBody)) {
@@ -392,7 +393,7 @@ func (h *OpenAIGatewayHandler) Images(c *gin.Context) {
 						)
 						return
 					}
-					if referenceRetry.originalAccountID > 0 || failoverErr.IsAsyncImageOpenAIReferenceURLTimeout() || asyncImageReferenceLocalFallbackRequested(c, failoverErr) {
+					if referenceRetry.originalAccountID > 0 || !failoverErr.ShouldRetryNextAccount() || failoverErr.IsAsyncImageOpenAIReferenceURLTimeout() || asyncImageReferenceLocalFallbackRequested(c, failoverErr) {
 						h.handleFailoverExhausted(c, failoverErr, streamStarted)
 						return
 					}

@@ -78,6 +78,8 @@ func TestProvideCleanup_WithMinimalDependencies_NoPanic(t *testing.T) {
 		nil, // imageLibraryMaintenance
 		pricingSvc,
 		emailQueueSvc,
+		nil, // imageResolutionGuard
+		nil, // imageResolutionMonitor
 		billingCacheSvc,
 		&service.UsageRecordWorkerPool{},
 		&service.SubscriptionService{},

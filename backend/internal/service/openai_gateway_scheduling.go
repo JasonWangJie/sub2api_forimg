@@ -1292,6 +1292,7 @@ func (s *OpenAIGatewayService) listSchedulableAccounts(ctx context.Context, grou
 		return filtered, nil
 	}
 	platform = normalizeOpenAICompatiblePlatform(platform)
+	captureDefaultImageCapacityPool(ctx, s.accountRepo, groupID, []string{platform}, s.cfg != nil && s.cfg.RunMode == config.RunModeSimple)
 	if s.schedulerSnapshot != nil {
 		accounts, _, err := s.schedulerSnapshot.ListSchedulableAccounts(ctx, groupID, platform, false)
 		if err != nil {
@@ -1326,7 +1327,13 @@ func (s *OpenAIGatewayService) tryAcquireAccountSlot(ctx context.Context, accoun
 	if s.concurrencyService == nil {
 		return &AcquireResult{Acquired: true, ReleaseFunc: func() {}}, nil
 	}
-	return s.concurrencyService.AcquireAccountSlot(ctx, accountID, maxConcurrency)
+	result, err := s.concurrencyService.AcquireAccountSlot(ctx, accountID, maxConcurrency)
+	if err != nil {
+		RecordImageCapacityDecision(ctx, "concurrency", "unknown", accountID, 0)
+	} else if result != nil && !result.Acquired {
+		RecordImageCapacityDecision(ctx, "concurrency", "concurrency_full", accountID, 0)
+	}
+	return result, err
 }
 
 func (s *OpenAIGatewayService) resolveFreshSchedulableOpenAIAccount(ctx context.Context, account *Account, platform string, requestedModel string, requireCompact bool, requiredCapability OpenAIEndpointCapability) *Account {
@@ -1482,7 +1489,7 @@ func (s *OpenAIGatewayService) getSchedulableAccount(ctx context.Context, accoun
 	if s.isOpenAIAccountBlockedBySchedulingThreshold(ctx, account) {
 		return nil, nil
 	}
-	if IsImageAccountCircuitOpen(ctx, s.imageCircuitBreaker, account) {
+	if IsImageAccountCircuitOpen(ctx, s.imageCircuitBreaker, account, s.imageResolutionMonitor) {
 		return nil, nil
 	}
 	// Legacy sticky (advanced scheduler off) must still free-gate Grok OAuth.
@@ -1521,13 +1528,15 @@ func (s *OpenAIGatewayService) filterOpenAIAccountsBySchedulingThreshold(ctx con
 func (s *OpenAIGatewayService) filterImageCircuitOpenAccounts(ctx context.Context, accounts []Account) []Account {
 	accounts = filterImageInputCapableAccounts(ctx, accounts)
 	_, ok := ImageCircuitScopeFromContext(ctx)
-	if !ok || s == nil || s.imageCircuitBreaker == nil || len(accounts) == 0 {
+	if s == nil || (!ok && ctx.Value(imageResolutionRequestKey{}) == nil) || (s.imageCircuitBreaker == nil && s.imageResolutionMonitor == nil) || len(accounts) == 0 {
 		return accounts
 	}
 	filtered := make([]Account, 0, len(accounts))
 	for i := range accounts {
-		if !IsImageAccountCircuitOpen(ctx, s.imageCircuitBreaker, &accounts[i]) {
+		if !IsImageAccountCircuitOpen(ctx, s.imageCircuitBreaker, &accounts[i], s.imageResolutionMonitor) {
 			filtered = append(filtered, accounts[i])
+		} else {
+			RecordImageCapacityDecision(ctx, "scheduler_filter", "circuit_open", accounts[i].ID, len(accounts))
 		}
 	}
 	return filtered
@@ -1537,7 +1546,7 @@ func (s *OpenAIGatewayService) isImageCircuitOpen(ctx context.Context, account *
 	if s == nil {
 		return false
 	}
-	return IsImageAccountCircuitOpen(ctx, s.imageCircuitBreaker, account)
+	return IsImageAccountCircuitOpen(ctx, s.imageCircuitBreaker, account, s.imageResolutionMonitor)
 }
 
 func (s *OpenAIGatewayService) isOpenAIAccountBlockedBySchedulingThreshold(ctx context.Context, account *Account) bool {

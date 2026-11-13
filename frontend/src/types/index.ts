@@ -1120,6 +1120,25 @@ export interface OllamaCloudUsageSettings {
   debounce_minutes: number
 }
 
+export interface ImageResolutionCooldown {
+  account_id: number
+  model: string
+  size_tier: string
+  cycle_id: string
+  cooldown_until: string
+  reason: string
+  requested_width?: number
+  requested_height?: number
+  actual_width?: number
+  actual_height?: number
+  area_percent?: number
+}
+
+export interface AccountImageResolutionGuard {
+  enabled: boolean
+  cooldowns: ImageResolutionCooldown[]
+}
+
 export interface Account {
   id: number
   name: string
@@ -1178,6 +1197,8 @@ export interface Account {
   overload_until: string | null
   temp_unschedulable_until: string | null
   temp_unschedulable_reason: string | null
+  // Omitted when the administrator-only runtime quality state could not be read.
+  image_resolution_guard?: AccountImageResolutionGuard
 
   // Session window fields (5-hour window)
   session_window_start: string | null

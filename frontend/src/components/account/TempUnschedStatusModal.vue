@@ -30,7 +30,7 @@
 
       <div v-else class="space-y-4">
         <div class="rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-800 dark:border-emerald-500/30 dark:bg-emerald-500/10 dark:text-emerald-300">
-          {{ t('admin.accounts.recoverStateHint') }}
+          {{ t('admin.accounts.rateLimit.previewHint') }}
         </div>
 
         <div class="rounded-lg border border-gray-200 p-4 dark:border-dark-600">
@@ -120,30 +120,11 @@
         <button
           type="button"
           class="btn btn-primary"
-          :disabled="!isActive || resetting"
+          :disabled="!isActive"
           @click="handleReset"
         >
-          <svg
-            v-if="resetting"
-            class="-ml-1 mr-2 h-4 w-4 animate-spin"
-            fill="none"
-            viewBox="0 0 24 24"
-          >
-            <circle
-              class="opacity-25"
-              cx="12"
-              cy="12"
-              r="10"
-              stroke="currentColor"
-              stroke-width="4"
-            ></circle>
-            <path
-              class="opacity-75"
-              fill="currentColor"
-              d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
-            ></path>
-          </svg>
-          {{ t('admin.accounts.recoverState') }}
+
+          {{ t('admin.accounts.rateLimit.action') }}
         </button>
       </div>
     </template>
@@ -166,14 +147,13 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   close: []
-  reset: [account: Account]
+  'preview-clear': [account: Account]
 }>()
 
 const { t } = useI18n()
 const appStore = useAppStore()
 
 const loading = ref(false)
-const resetting = ref(false)
 const status = ref<TempUnschedulableStatus | null>(null)
 
 const state = computed(() => status.value?.state || null)
@@ -251,19 +231,9 @@ const handleClose = () => {
   emit('close')
 }
 
-const handleReset = async () => {
-  if (!props.account) return
-  resetting.value = true
-  try {
-    const updated = await adminAPI.accounts.recoverState(props.account.id)
-    appStore.showSuccess(t('admin.accounts.recoverStateSuccess'))
-    emit('reset', updated)
-    handleClose()
-  } catch (error: any) {
-    appStore.showError(error?.message || t('admin.accounts.recoverStateFailed'))
-  } finally {
-    resetting.value = false
-  }
+const handleReset = () => {
+  if (!props.account || loading.value) return
+  emit('preview-clear', props.account)
 }
 
 watch(

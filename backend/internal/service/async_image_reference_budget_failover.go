@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/Wei-Shaw/sub2api/internal/util/logredact"
+	"github.com/tidwall/gjson"
 )
 
 // AsyncImageReferenceBudgetExceededCode identifies a definite upstream reference
@@ -23,6 +24,9 @@ const AsyncImageReferenceAccountFailoverCode = "async_image_reference_account_fa
 // AsyncImageReferenceLocalFallbackCode is an internal gateway handoff to the
 // worker, distinct from an exhausted account-switch loop.
 const AsyncImageReferenceLocalFallbackCode = "async_image_reference_local_fallback"
+
+// A provider-specific rejection, not a blanket retry policy for HTTP 454.
+const AsyncImageReferenceTimeoutStatus = 454
 
 var asyncImageReferenceBudgetExceededPattern = regexp.MustCompile(`(?i)^reference image download exceeded its total time budget for (https://[^\s]+) \(budgetms=([1-9][0-9]{0,8}); reason=timeout\)$`)
 var asyncImageReferenceNetworkDownloadPattern = regexp.MustCompile(`(?i)^error while downloading (https://[^\s]+?):? get "(https://[^"\s]+)": dial tcp [^"\s]+: i/o timeout$`)
@@ -53,10 +57,17 @@ func isAsyncImageReferenceBudgetExceeded(statusCode int, body []byte) bool {
 	return IsAsyncImageReferenceBudgetExceededMessage(statusCode, extractUpstreamErrorMessage(body))
 }
 
-// IsAsyncImageReferenceAccountFailoverMessage only handles complete HTTP 400
-// input-reference failures. HTTP 502/504 execution ambiguity and result fetching
-// remain outside this account-switch rule.
+// IsAsyncImageReferenceAccountFailoverMessage handles known HTTP 400 reference
+// failures, missing-file HTTP 404 and one exact HTTP 454 message. The latter two
+// require provider-code and durable image-to-image checks at the upstream entry.
+// HTTP 502/504 execution ambiguity and result fetching stay outside this rule.
 func IsAsyncImageReferenceAccountFailoverMessage(statusCode int, message string) bool {
+	if statusCode == http.StatusNotFound {
+		return isAsyncImageMissingFileReferenceMessage(message)
+	}
+	if statusCode == AsyncImageReferenceTimeoutStatus {
+		return normalizeAsyncImageOperationalMessage(message) == "下载参考图超时，请稍后重试"
+	}
 	if statusCode != http.StatusBadRequest || !IsAsyncImageReferenceFetchFailureMessage(message) {
 		return false
 	}
@@ -72,6 +83,20 @@ func isAsyncImageReferenceAccountFailover(statusCode int, body []byte) bool {
 
 func isAsyncImageReferenceAccountFailoverForContext(ctx context.Context, statusCode int, body []byte) bool {
 	message := extractUpstreamErrorMessage(body)
+	if statusCode == http.StatusNotFound {
+		return AsyncImageAccountAttemptCaptureFromContext(ctx) != nil && asyncImageErrorBodyComplete(ctx) && gjson.ValidBytes(body) && IsAsyncImageInputReferenceTask(ctx) &&
+			strings.TrimSpace(extractUpstreamErrorCode(body)) == "404" &&
+			!isAsyncImageTerminalRejection("", message) && !hasAsyncImageTerminalRejectionDetail(gjson.ParseBytes(body)) &&
+			!asyncImageErrorContainsOutput(gjson.ParseBytes(body)) &&
+			isAsyncImageMissingFileReferenceMessage(message)
+	}
+	if statusCode == AsyncImageReferenceTimeoutStatus {
+		return AsyncImageAccountAttemptCaptureFromContext(ctx) != nil && IsAsyncImageInputReferenceTask(ctx) &&
+			strings.EqualFold(strings.TrimSpace(gjson.GetBytes(body, "error.code").String()), "asset_download_timeout") &&
+			!hasAsyncImageTerminalRejectionDetail(gjson.ParseBytes(body)) &&
+			!asyncImageErrorContainsOutput(gjson.ParseBytes(body)) &&
+			IsAsyncImageReferenceAccountFailoverMessage(statusCode, message)
+	}
 	// This provider format does not identify the image as an input reference.
 	// Require the durable task's explicit image-to-image context so an output
 	// download failure during text-to-image cannot restart generation.
@@ -79,6 +104,22 @@ func isAsyncImageReferenceAccountFailoverForContext(ctx context.Context, statusC
 		return false
 	}
 	return IsAsyncImageReferenceAccountFailoverMessage(statusCode, message)
+}
+
+func isAsyncImageMissingFileReferenceMessage(message string) bool {
+	text := strings.TrimSpace(message)
+	var source string
+	for _, prefix := range []string{"文件引用不存在:", "文件引用不存在："} {
+		if strings.HasPrefix(text, prefix) {
+			source = strings.TrimSpace(strings.TrimPrefix(text, prefix))
+			break
+		}
+	}
+	if source == "" || strings.ContainsAny(source, " \t\r\n") {
+		return false
+	}
+	parsed, err := url.Parse(source)
+	return err == nil && strings.EqualFold(parsed.Scheme, "https") && parsed.Hostname() != "" && parsed.User == nil && parsed.Fragment == ""
 }
 
 func isAsyncImageReferenceNetworkDownloadFailure(message string) bool {
@@ -108,7 +149,11 @@ func isAsyncImageReferenceNetworkDownloadFailure(message string) bool {
 }
 
 func newAsyncImageReferenceAccountFailoverError(body []byte, headers http.Header) *UpstreamFailoverError {
-	if isAsyncImageReferenceBudgetExceeded(http.StatusBadRequest, body) {
+	return newAsyncImageReferenceAccountFailoverErrorWithStatus(http.StatusBadRequest, body, headers)
+}
+
+func newAsyncImageReferenceAccountFailoverErrorWithStatus(statusCode int, body []byte, headers http.Header) *UpstreamFailoverError {
+	if isAsyncImageReferenceBudgetExceeded(statusCode, body) {
 		return newAsyncImageReferenceBudgetFailoverError(body, headers)
 	}
 	_, providerCode, requestID := geminiAsyncUpstreamDiagnostics(body, geminiRequestIDFromHeaders(headers))
@@ -127,12 +172,12 @@ func newAsyncImageReferenceAccountFailoverError(body []byte, headers http.Header
 		message = asyncImageReferenceDiagnosticURLPattern.ReplaceAllString(message, "https://***")
 		message = logredact.RedactText(sanitizeUpstreamErrorMessage(message), "api_key", "apikey", "secret", "token", "authorization")
 		message = truncateGeminiAsyncDiagnostic(message, geminiAsyncUpstreamMessageMaxRunes)
-		if !IsAsyncImageReferenceAccountFailoverMessage(http.StatusBadRequest, message) {
+		if !IsAsyncImageReferenceAccountFailoverMessage(statusCode, message) {
 			message = "Reference image fetch failed"
 		}
 	}
 	return &UpstreamFailoverError{
-		StatusCode: http.StatusBadRequest, ResponseBody: body, ResponseHeaders: headers.Clone(),
+		StatusCode: statusCode, ResponseBody: body, ResponseHeaders: headers.Clone(),
 		ProviderErrorCode: providerCode, ProviderErrorMessage: message, UpstreamRequestID: requestID,
 		Scope: GatewayFailureScopeAccount, Reason: GatewayFailureReason(AsyncImageReferenceAccountFailoverCode),
 		NextAccountAction: NextAccountRetry, RetryableOnSameAccount: false,

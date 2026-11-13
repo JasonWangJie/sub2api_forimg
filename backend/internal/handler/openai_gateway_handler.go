@@ -312,6 +312,7 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 		return
 	}
 	reqModel := modelResult.String()
+	c.Request = c.Request.WithContext(service.WithImageResolutionRequest(c.Request.Context(), body, "application/json", reqModel))
 	ensureCompositeTargetPlatform(c, apiKey, reqModel)
 	if !compositeTargetPlatformAllowed(c, apiKey, reqModel, service.PlatformOpenAI, service.PlatformGrok) {
 		h.errorResponse(c, http.StatusBadRequest, "invalid_request_error", "Model is not supported by this OpenAI-compatible endpoint for composite groups")
@@ -2575,7 +2576,7 @@ func (h *OpenAIGatewayHandler) handleFailoverExhausted(c *gin.Context, failoverE
 		return
 	}
 	if errType, code, message, ok := asyncImageReferenceAccountErrorDetails(c, failoverErr); ok {
-		h.handleStreamingAwareErrorWithCode(c, http.StatusBadRequest, errType, code, message, streamStarted, false)
+		h.handleStreamingAwareErrorWithCode(c, failoverErr.StatusCode, errType, code, message, streamStarted, false)
 		return
 	}
 	if errType, code, message, ok := asyncImageInternalError422ErrorDetails(c, failoverErr); ok {

@@ -175,6 +175,16 @@ describe('AsyncImageTasksView current-page termination', () => {
     expect(wrapper.findComponent(AsyncImageReliabilitySummary).exists()).toBe(false)
   })
 
+  it.each([true, false])('guards capacity diagnostics at the task detail boundary (admin=%s)', async (isAdmin) => {
+    mocks.get.mockResolvedValue({ id: 'asyncimg_queued', platform: 'gemini', request_type: 'text_to_image', model: 'gemini-image', status: 'queued', created_at: '2026-11-13T09:00:00Z', events: [{ status: 'capacity_diagnostic', created_at: '2026-11-13T09:00:00Z', capacity_diagnostics: { observed_at: '2026-11-13T09:00:00Z', group_id: 2, model: 'gemini-image', size_tier: '2K', observations: [] } }] })
+    const wrapper = mountView(isAdmin)
+    await flushPromises()
+    await wrapper.findAll('[data-test="view-task"]')[0].trigger('click')
+    await flushPromises()
+    expect(wrapper.find('[data-testid="capacity-diagnostics"]').exists()).toBe(isAdmin)
+    wrapper.unmount()
+  })
+
   it.each([
     { name: 'one successful request', status: 'succeeded', statuses: ['selected', 'invocation_started', 'succeeded'], calls: '1' },
     { name: 'a genuine same-account retry', status: 'succeeded', statuses: ['selected', 'invocation_started', 'failed', 'invocation_started', 'succeeded'], calls: '2' },

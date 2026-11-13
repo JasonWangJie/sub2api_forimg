@@ -133,6 +133,7 @@ func ResolveImageAccountPool(ctx context.Context, repo AccountRepository, groupI
 	if !configured {
 		return nil, false, nil
 	}
+	captureImageCapacityPool(ctx, repo, groupID, mode, model, tier, platforms)
 	accounts, err := store.ListSchedulableByGroupImageAccountPool(ctx, groupID, model, tier, platforms)
 	if err != nil {
 		return nil, true, fmt.Errorf("list image account pool: %w", err)
@@ -155,6 +156,7 @@ func filterImageAccountPoolGroupRequirements(ctx context.Context, groupID int64,
 	filtered := make([]Account, 0, len(accounts))
 	for i := range accounts {
 		if accounts[i].Type == AccountTypeAPIKey {
+			RecordImageCapacityDecision(ctx, "scheduler_filter", "oauth_required", accounts[i].ID, len(accounts))
 			continue
 		}
 		filtered = append(filtered, accounts[i])

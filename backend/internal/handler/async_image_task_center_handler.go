@@ -460,13 +460,14 @@ type asyncImageTaskResultView struct {
 }
 
 type asyncImageTaskEventView struct {
-	ID         int64     `json:"id"`
-	EventType  string    `json:"event_type"`
-	Status     string    `json:"status"`
-	FromStatus *string   `json:"from_status,omitempty"`
-	ToStatus   *string   `json:"to_status,omitempty"`
-	Message    string    `json:"message,omitempty"`
-	CreatedAt  time.Time `json:"created_at"`
+	CapacityDiagnostics *service.ImageCapacityDiagnostics `json:"capacity_diagnostics,omitempty"`
+	ID                  int64                             `json:"id"`
+	EventType           string                            `json:"event_type"`
+	Status              string                            `json:"status"`
+	FromStatus          *string                           `json:"from_status,omitempty"`
+	ToStatus            *string                           `json:"to_status,omitempty"`
+	Message             string                            `json:"message,omitempty"`
+	CreatedAt           time.Time                         `json:"created_at"`
 }
 
 type asyncImageTaskDetailsView struct {
@@ -522,6 +523,16 @@ func (h *AsyncImageTaskCenterHandler) detailView(ctx context.Context, details *s
 		}
 	}
 	for _, event := range details.Events {
+		if event.EventType == "capacity_diagnostic" && !admin {
+			continue
+		}
+		var capacityDiagnostics *service.ImageCapacityDiagnostics
+		if admin && event.EventType == "capacity_diagnostic" && len(event.Payload) <= 65536 {
+			var diagnostic service.ImageCapacityDiagnostics
+			if json.Unmarshal(event.Payload, &diagnostic) == nil {
+				capacityDiagnostics = &diagnostic
+			}
+		}
 		// Legacy result recovery wrote a second success event when the already
 		// successful task's images and billing command became durable. The fetch
 		// completion describes that step without implying another upstream call.
@@ -541,7 +552,8 @@ func (h *AsyncImageTaskCenterHandler) detailView(ctx context.Context, details *s
 		}
 		events = append(events, asyncImageTaskEventView{
 			ID: event.ID, EventType: event.EventType, Status: status,
-			FromStatus: event.FromStatus, ToStatus: event.ToStatus,
+			CapacityDiagnostics: capacityDiagnostics,
+			FromStatus:          event.FromStatus, ToStatus: event.ToStatus,
 			Message: asyncImageEventMessage(event.Payload, admin), CreatedAt: event.CreatedAt,
 		})
 	}

@@ -41,7 +41,14 @@ func WithForwardGeminiSession(groupID int64, sessionHash string) ForwardGeminiOp
 	}
 }
 
-func (s *AntigravityGatewayService) ForwardGemini(ctx context.Context, c *gin.Context, account *Account, originalModel string, action string, stream bool, body []byte, isStickySession bool, options ...ForwardGeminiOption) (*ForwardResult, error) {
+func (s *AntigravityGatewayService) ForwardGemini(ctx context.Context, c *gin.Context, account *Account, originalModel string, action string, stream bool, body []byte, isStickySession bool, options ...ForwardGeminiOption) (qualityResult *ForwardResult, qualityErr error) {
+	ctx, qualityCapture := beginImageResolutionCapture(ctx)
+	defer func() {
+		if qualityResult != nil {
+			qualityResult.ImageResolutionExpectation = qualityCapture.get()
+		}
+	}()
+
 	beginUpstreamResponseModelObservation(c)
 	startTime := time.Now()
 	forwardOpts := forwardGeminiOptions{}
@@ -143,22 +150,23 @@ func (s *AntigravityGatewayService) ForwardGemini(ctx context.Context, c *gin.Co
 
 	// 执行带重试的请求
 	result, err := s.antigravityRetryLoop(antigravityRetryLoopParams{
-		ctx:             ctx,
-		prefix:          prefix,
-		account:         account,
-		proxyURL:        proxyURL,
-		accessToken:     accessToken,
-		action:          upstreamAction,
-		body:            wrappedBody,
-		c:               c,
-		httpUpstream:    s.httpUpstream,
-		settingService:  s.settingService,
-		accountRepo:     s.accountRepo,
-		handleError:     s.handleUpstreamError,
-		requestedModel:  originalModel,
-		isStickySession: isStickySession, // ForwardGemini 由上层判断粘性会话
-		groupID:         forwardOpts.groupID,
-		sessionHash:     forwardOpts.sessionHash,
+		ctx:                    ctx,
+		prefix:                 prefix,
+		account:                account,
+		proxyURL:               proxyURL,
+		accessToken:            accessToken,
+		action:                 upstreamAction,
+		body:                   wrappedBody,
+		c:                      c,
+		httpUpstream:           s.httpUpstream,
+		imageResolutionMonitor: s.imageResolutionMonitor,
+		settingService:         s.settingService,
+		accountRepo:            s.accountRepo,
+		handleError:            s.handleUpstreamError,
+		requestedModel:         originalModel,
+		isStickySession:        isStickySession, // ForwardGemini 由上层判断粘性会话
+		groupID:                forwardOpts.groupID,
+		sessionHash:            forwardOpts.sessionHash,
 	})
 	if err != nil {
 		// 检查是否是账号切换信号，转换为 UpstreamFailoverError 让 Handler 切换账号
@@ -200,7 +208,10 @@ func (s *AntigravityGatewayService) ForwardGemini(ctx context.Context, c *gin.Co
 				if err == nil {
 					fallbackReq, err := antigravity.NewAPIRequest(ctx, upstreamAction, accessToken, fallbackWrapped)
 					if err == nil {
-						fallbackResp, err := s.httpUpstream.Do(fallbackReq, proxyURL, account.ID, account.Concurrency)
+						fallbackResp, err := s.imageResolutionMonitor.Do(s.httpUpstream, fallbackReq, proxyURL, account)
+						if isImageResolutionCooling(err) {
+							return nil, err
+						}
 						if err == nil && fallbackResp.StatusCode < 400 {
 							_ = resp.Body.Close()
 							resp = fallbackResp
@@ -243,22 +254,23 @@ func (s *AntigravityGatewayService) ForwardGemini(ctx context.Context, c *gin.Co
 			retryWrappedBody, wrapErr := s.wrapV1InternalRequest(projectID, mappedModel, cleanedInjectedBody)
 			if wrapErr == nil {
 				retryResult, retryErr := s.antigravityRetryLoop(antigravityRetryLoopParams{
-					ctx:             ctx,
-					prefix:          prefix,
-					account:         account,
-					proxyURL:        proxyURL,
-					accessToken:     accessToken,
-					action:          upstreamAction,
-					body:            retryWrappedBody,
-					c:               c,
-					httpUpstream:    s.httpUpstream,
-					settingService:  s.settingService,
-					accountRepo:     s.accountRepo,
-					handleError:     s.handleUpstreamError,
-					requestedModel:  originalModel,
-					isStickySession: isStickySession,
-					groupID:         forwardOpts.groupID,
-					sessionHash:     forwardOpts.sessionHash,
+					ctx:                    ctx,
+					prefix:                 prefix,
+					account:                account,
+					proxyURL:               proxyURL,
+					accessToken:            accessToken,
+					action:                 upstreamAction,
+					body:                   retryWrappedBody,
+					c:                      c,
+					httpUpstream:           s.httpUpstream,
+					imageResolutionMonitor: s.imageResolutionMonitor,
+					settingService:         s.settingService,
+					accountRepo:            s.accountRepo,
+					handleError:            s.handleUpstreamError,
+					requestedModel:         originalModel,
+					isStickySession:        isStickySession,
+					groupID:                forwardOpts.groupID,
+					sessionHash:            forwardOpts.sessionHash,
 				})
 				if retryErr == nil {
 					retryResp := retryResult.resp

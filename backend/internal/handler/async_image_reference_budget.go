@@ -16,6 +16,19 @@ func isAsyncImageReferenceAccountFailure(attempt service.AsyncImageAccountAttemp
 		return false
 	}
 	statusCode, message := attempt.StatusCode, attempt.Error
+	if statusCode == http.StatusNotFound {
+		message = strings.TrimPrefix(message, "上游生图失败（HTTP 404）：")
+		return (attempt.ProviderErrorCode == "404" || attempt.ProviderErrorCode == service.AsyncImageReferenceAccountFailoverCode ||
+			attempt.FailureReason == service.AsyncImageReferenceAccountFailoverCode) &&
+			service.IsAsyncImageReferenceAccountFailoverMessage(statusCode, message)
+	}
+	if statusCode == service.AsyncImageReferenceTimeoutStatus {
+		message = strings.TrimPrefix(message, "上游生图失败（HTTP 454）：")
+		return (attempt.ProviderErrorCode == "asset_download_timeout" ||
+			attempt.ProviderErrorCode == service.AsyncImageReferenceAccountFailoverCode ||
+			attempt.FailureReason == service.AsyncImageReferenceAccountFailoverCode) &&
+			service.IsAsyncImageReferenceAccountFailoverMessage(statusCode, message)
+	}
 	const worker400Prefix = "上游生图失败（HTTP 400）："
 	if strings.HasPrefix(message, worker400Prefix) {
 		message = strings.TrimPrefix(message, worker400Prefix)
@@ -62,9 +75,10 @@ func asyncImageNonRetryableAccountIDs(task *service.AsyncImageTask) map[int64]st
 }
 
 // Only the private durable worker receives this exhaustion marker. It keeps the
-// upstream's definite 400 and safe diagnostics while preventing worker replay.
+// upstream's definite status and safe diagnostics while preventing worker replay.
 func asyncImageReferenceAccountErrorDetails(c *gin.Context, err *service.UpstreamFailoverError) (errType, code, message string, ok bool) {
-	if c == nil || c.Request == nil || err == nil || err.StatusCode != http.StatusBadRequest || !err.IsAsyncImageReferenceAccountFailover() {
+	if c == nil || c.Request == nil || err == nil ||
+		(err.StatusCode != http.StatusBadRequest && err.StatusCode != http.StatusNotFound && err.StatusCode != service.AsyncImageReferenceTimeoutStatus) || !err.IsAsyncImageReferenceAccountFailover() {
 		return "", "", "", false
 	}
 	ctx := c.Request.Context()
@@ -92,7 +106,8 @@ func asyncImageReferenceAccountErrorDetails(c *gin.Context, err *service.Upstrea
 // The worker owns transport changes and persists them together with the failed
 // account. Stop before consuming the remaining accounts with the same URL body.
 func asyncImageReferenceLocalFallbackRequested(c *gin.Context, err *service.UpstreamFailoverError) bool {
-	if c == nil || c.Request == nil || err == nil || err.StatusCode != http.StatusBadRequest ||
+	if c == nil || c.Request == nil || err == nil ||
+		(err.StatusCode != http.StatusBadRequest && err.StatusCode != http.StatusNotFound && err.StatusCode != service.AsyncImageReferenceTimeoutStatus) ||
 		(!err.IsAsyncImageReferenceAccountFailover() && err.Reason != service.AsyncImageReferenceTransportRejectionReason) {
 		return false
 	}

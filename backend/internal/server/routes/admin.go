@@ -434,7 +434,10 @@ func registerAccountRoutes(admin *gin.RouterGroup, h *handler.Handlers, stepUpAu
 		accounts.GET("/:id/today-stats", h.Admin.Account.GetTodayStats)
 		accounts.POST("/usage/batch", h.Admin.Account.GetBatchUsage)
 		accounts.POST("/today-stats/batch", h.Admin.Account.GetBatchTodayStats)
+		accounts.GET("/:id/rate-limit-state", h.Admin.Account.GetRateLimitState)
 		accounts.POST("/:id/clear-rate-limit", h.Admin.Account.ClearRateLimit)
+		accounts.GET("/:id/image-resolution-cooldowns", h.Admin.Account.ListImageResolutionCooldowns)
+		accounts.POST("/:id/image-resolution-cooldowns/:cycle_id/clear", h.Admin.Account.ClearImageResolutionCooldown)
 		accounts.POST("/:id/reset-quota", h.Admin.Account.ResetQuota)
 		accounts.GET("/:id/temp-unschedulable", h.Admin.Account.GetTempUnschedulable)
 		accounts.DELETE("/:id/temp-unschedulable", h.Admin.Account.ClearTempUnschedulable)
@@ -608,6 +611,8 @@ func registerSettingsRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
 		// 429默认回避配置
 		adminSettings.GET("/rate-limit-429-cooldown", h.Admin.Setting.GetRateLimit429CooldownSettings)
 		adminSettings.PUT("/rate-limit-429-cooldown", h.Admin.Setting.UpdateRateLimit429CooldownSettings)
+		adminSettings.GET("/image-resolution-guard", h.Admin.Setting.GetImageResolutionGuardSettings)
+		adminSettings.PUT("/image-resolution-guard", h.Admin.Setting.UpdateImageResolutionGuardSettings)
 		// 面板 API 限流配置
 		adminSettings.GET("/panel-rate-limit", h.Admin.Setting.GetPanelRateLimitSettings)
 		adminSettings.PUT("/panel-rate-limit", h.Admin.Setting.UpdatePanelRateLimitSettings)

@@ -657,36 +657,45 @@ func (s *GatewayService) selectAccountWithLoadAwarenessCore(ctx context.Context,
 	for i := range accounts {
 		acc := &accounts[i]
 		if isExcluded(acc.ID) {
+			RecordImageCapacityDecision(ctx, "scheduler_filter", "excluded", acc.ID, len(accounts))
 			continue
 		}
 		// Scheduler snapshots can be temporarily stale (bucket rebuild is throttled);
 		// re-check schedulability here so recently rate-limited/overloaded accounts
 		// are not selected again before the bucket is rebuilt.
 		if !s.isAccountSchedulableForSelection(acc) {
+			RecordImageCapacityDecision(ctx, "scheduler_filter", "not_schedulable", acc.ID, len(accounts))
 			continue
 		}
 		if !s.isGatewayAccountProfitEligible(ctx, acc) {
+			RecordImageCapacityDecision(ctx, "scheduler_filter", "profit_control", acc.ID, len(accounts))
 			continue
 		}
 		if !s.isAccountAllowedForPlatform(acc, platform, useMixed) {
+			RecordImageCapacityDecision(ctx, "scheduler_filter", "platform_mismatch", acc.ID, len(accounts))
 			continue
 		}
 		if requestedModel != "" && !s.isModelSupportedByAccountWithContext(ctx, acc, requestedModel) {
+			RecordImageCapacityDecision(ctx, "scheduler_filter", "model_not_supported", acc.ID, len(accounts))
 			continue
 		}
 		if !s.isAccountSchedulableForModelSelection(ctx, acc, requestedModel) {
+			RecordImageCapacityDecision(ctx, "scheduler_filter", "model_rate_limited", acc.ID, len(accounts))
 			continue
 		}
 		// 配额检查
 		if !s.isAccountSchedulableForQuota(acc) {
+			RecordImageCapacityDecision(ctx, "scheduler_filter", "quota", acc.ID, len(accounts))
 			continue
 		}
 		// 窗口费用检查（非粘性会话路径）
 		if !s.isAccountSchedulableForWindowCost(ctx, acc, false) {
+			RecordImageCapacityDecision(ctx, "scheduler_filter", "window_cost", acc.ID, len(accounts))
 			continue
 		}
 		// RPM 检查（非粘性会话路径）
 		if !s.isAccountSchedulableForRPM(ctx, acc, false) {
+			RecordImageCapacityDecision(ctx, "scheduler_filter", "rpm", acc.ID, len(accounts))
 			continue
 		}
 		candidates = append(candidates, acc)
@@ -992,6 +1001,13 @@ func (s *GatewayService) listSchedulableAccounts(ctx context.Context, groupID *i
 		}
 		return filtered, useMixed, nil
 	}
+	if imageCapacityCaptureFrom(ctx) != nil {
+		platforms := []string{platform}
+		if (platform == PlatformAnthropic || platform == PlatformGemini) && !hasForcePlatform {
+			platforms = append(platforms, PlatformAntigravity)
+		}
+		captureDefaultImageCapacityPool(ctx, s.accountRepo, groupID, platforms, s.cfg != nil && s.cfg.RunMode == config.RunModeSimple)
+	}
 	if s.schedulerSnapshot != nil {
 		accounts, useMixed, err := s.schedulerSnapshot.ListSchedulableAccounts(ctx, groupID, platform, hasForcePlatform)
 		if err == nil {
@@ -1105,13 +1121,15 @@ func (s *GatewayService) listSchedulableAccounts(ctx context.Context, groupID *i
 func (s *GatewayService) filterImageCircuitOpenAccounts(ctx context.Context, accounts []Account) []Account {
 	accounts = filterImageInputCapableAccounts(ctx, accounts)
 	_, ok := ImageCircuitScopeFromContext(ctx)
-	if !ok || s == nil || s.imageCircuitBreaker == nil || len(accounts) == 0 {
+	if s == nil || (!ok && ctx.Value(imageResolutionRequestKey{}) == nil) || (s.imageCircuitBreaker == nil && s.imageResolutionMonitor == nil) || len(accounts) == 0 {
 		return accounts
 	}
 	filtered := make([]Account, 0, len(accounts))
 	for i := range accounts {
-		if !IsImageAccountCircuitOpen(ctx, s.imageCircuitBreaker, &accounts[i]) {
+		if !IsImageAccountCircuitOpen(ctx, s.imageCircuitBreaker, &accounts[i], s.imageResolutionMonitor) {
 			filtered = append(filtered, accounts[i])
+		} else {
+			RecordImageCapacityDecision(ctx, "scheduler_filter", "circuit_open", accounts[i].ID, len(accounts))
 		}
 	}
 	return filtered
@@ -1121,6 +1139,10 @@ func (s *GatewayService) filterImageCircuitOpenAccounts(ctx context.Context, acc
 // 用于 Handler 层在首次请求时提前设置 SingleAccountRetry context，
 // 避免单账号分组收到 503 时错误地设置模型限流标记导致后续请求连续快速失败。
 func (s *GatewayService) IsSingleAntigravityAccountGroup(ctx context.Context, groupID *int64) bool {
+	// A single-account capability probe is not an actual scheduling attempt.
+	if imageCapacityCaptureFrom(ctx) != nil {
+		ctx = context.WithValue(ctx, imageCapacityCaptureKey{}, (*imageCapacityCapture)(nil))
+	}
 	if _, imageRoute := ImageAccountPoolRouteFromContext(ctx); imageRoute && groupID != nil && *groupID > 0 {
 		accounts, configured, err := ResolveImageAccountPool(ctx, s.accountRepo, *groupID, []string{PlatformAntigravity})
 		if err != nil {
@@ -1194,7 +1216,13 @@ func (s *GatewayService) tryAcquireAccountSlot(ctx context.Context, accountID in
 	if s.concurrencyService == nil {
 		return &AcquireResult{Acquired: true, ReleaseFunc: func() {}}, nil
 	}
-	return s.concurrencyService.AcquireAccountSlot(ctx, accountID, maxConcurrency)
+	result, err := s.concurrencyService.AcquireAccountSlot(ctx, accountID, maxConcurrency)
+	if err != nil {
+		RecordImageCapacityDecision(ctx, "concurrency", "unknown", accountID, 0)
+	} else if result != nil && !result.Acquired {
+		RecordImageCapacityDecision(ctx, "concurrency", "concurrency_full", accountID, 0)
+	}
+	return result, err
 }
 
 type usageLogWindowStatsBatchProvider interface {
@@ -1572,7 +1600,7 @@ func (s *GatewayService) getSchedulableAccount(ctx context.Context, accountID in
 	if s.isAccountBlockedBySchedulingThreshold(ctx, account) {
 		return nil, nil
 	}
-	if IsImageAccountCircuitOpen(ctx, s.imageCircuitBreaker, account) {
+	if IsImageAccountCircuitOpen(ctx, s.imageCircuitBreaker, account, s.imageResolutionMonitor) {
 		return nil, nil
 	}
 	// Sticky / non-list selection must honor free soft-gate (same as listSchedulableAccounts).
@@ -2024,9 +2052,11 @@ func (s *GatewayService) selectAccountForModelWithPlatform(ctx context.Context, 
 			// Scheduler snapshots can be temporarily stale; re-check schedulability here to
 			// avoid selecting accounts that were recently rate-limited/overloaded.
 			if !s.isAccountSchedulableForSelection(acc) {
+				RecordImageCapacityDecision(ctx, "scheduler_filter", "not_schedulable", acc.ID, 0)
 				continue
 			}
 			if !s.isGatewayAccountProfitEligible(ctx, acc) {
+				RecordImageCapacityDecision(ctx, "scheduler_filter", "profit_control", acc.ID, 0)
 				continue
 			}
 			// require_privacy_set: 跳过 privacy 未设置的账号并标记异常
@@ -2036,18 +2066,23 @@ func (s *GatewayService) selectAccountForModelWithPlatform(ctx context.Context, 
 				continue
 			}
 			if requestedModel != "" && !s.isModelSupportedByAccountWithContext(ctx, acc, requestedModel) {
+				RecordImageCapacityDecision(ctx, "scheduler_filter", "model_not_supported", acc.ID, 0)
 				continue
 			}
 			if !s.isAccountSchedulableForModelSelection(ctx, acc, requestedModel) {
+				RecordImageCapacityDecision(ctx, "scheduler_filter", "model_rate_limited", acc.ID, 0)
 				continue
 			}
 			if !s.isAccountSchedulableForQuota(acc) {
+				RecordImageCapacityDecision(ctx, "scheduler_filter", "quota", acc.ID, 0)
 				continue
 			}
 			if !s.isAccountSchedulableForWindowCost(ctx, acc, false) {
+				RecordImageCapacityDecision(ctx, "scheduler_filter", "window_cost", acc.ID, 0)
 				continue
 			}
 			if !s.isAccountSchedulableForRPM(ctx, acc, false) {
+				RecordImageCapacityDecision(ctx, "scheduler_filter", "rpm", acc.ID, 0)
 				continue
 			}
 			if selected == nil {
@@ -2138,9 +2173,11 @@ func (s *GatewayService) selectAccountForModelWithPlatform(ctx context.Context, 
 		// Scheduler snapshots can be temporarily stale; re-check schedulability here to
 		// avoid selecting accounts that were recently rate-limited/overloaded.
 		if !s.isAccountSchedulableForSelection(acc) {
+			RecordImageCapacityDecision(ctx, "scheduler_filter", "not_schedulable", acc.ID, 0)
 			continue
 		}
 		if !s.isGatewayAccountProfitEligible(ctx, acc) {
+			RecordImageCapacityDecision(ctx, "scheduler_filter", "profit_control", acc.ID, 0)
 			continue
 		}
 		// require_privacy_set: 跳过 privacy 未设置的账号并标记异常
@@ -2150,21 +2187,26 @@ func (s *GatewayService) selectAccountForModelWithPlatform(ctx context.Context, 
 			continue
 		}
 		if requestedModel != "" && !s.isModelSupportedByAccountWithContext(ctx, acc, requestedModel) {
+			RecordImageCapacityDecision(ctx, "scheduler_filter", "model_not_supported", acc.ID, 0)
 			continue
 		}
 		if needsUpstreamCheck && s.isUpstreamModelRestrictedByChannel(ctx, *groupID, acc, requestedModel) {
 			continue
 		}
 		if !s.isAccountSchedulableForModelSelection(ctx, acc, requestedModel) {
+			RecordImageCapacityDecision(ctx, "scheduler_filter", "model_rate_limited", acc.ID, 0)
 			continue
 		}
 		if !s.isAccountSchedulableForQuota(acc) {
+			RecordImageCapacityDecision(ctx, "scheduler_filter", "quota", acc.ID, 0)
 			continue
 		}
 		if !s.isAccountSchedulableForWindowCost(ctx, acc, false) {
+			RecordImageCapacityDecision(ctx, "scheduler_filter", "window_cost", acc.ID, 0)
 			continue
 		}
 		if !s.isAccountSchedulableForRPM(ctx, acc, false) {
+			RecordImageCapacityDecision(ctx, "scheduler_filter", "rpm", acc.ID, 0)
 			continue
 		}
 		if selected == nil {
@@ -2286,9 +2328,11 @@ func (s *GatewayService) selectAccountWithMixedScheduling(ctx context.Context, g
 			// Scheduler snapshots can be temporarily stale; re-check schedulability here to
 			// avoid selecting accounts that were recently rate-limited/overloaded.
 			if !s.isAccountSchedulableForSelection(acc) {
+				RecordImageCapacityDecision(ctx, "scheduler_filter", "not_schedulable", acc.ID, 0)
 				continue
 			}
 			if !s.isGatewayAccountProfitEligible(ctx, acc) {
+				RecordImageCapacityDecision(ctx, "scheduler_filter", "profit_control", acc.ID, 0)
 				continue
 			}
 			// require_privacy_set: 跳过 privacy 未设置的账号并标记异常
@@ -2302,18 +2346,23 @@ func (s *GatewayService) selectAccountWithMixedScheduling(ctx context.Context, g
 				continue
 			}
 			if requestedModel != "" && !s.isModelSupportedByAccountWithContext(ctx, acc, requestedModel) {
+				RecordImageCapacityDecision(ctx, "scheduler_filter", "model_not_supported", acc.ID, 0)
 				continue
 			}
 			if !s.isAccountSchedulableForModelSelection(ctx, acc, requestedModel) {
+				RecordImageCapacityDecision(ctx, "scheduler_filter", "model_rate_limited", acc.ID, 0)
 				continue
 			}
 			if !s.isAccountSchedulableForQuota(acc) {
+				RecordImageCapacityDecision(ctx, "scheduler_filter", "quota", acc.ID, 0)
 				continue
 			}
 			if !s.isAccountSchedulableForWindowCost(ctx, acc, false) {
+				RecordImageCapacityDecision(ctx, "scheduler_filter", "window_cost", acc.ID, 0)
 				continue
 			}
 			if !s.isAccountSchedulableForRPM(ctx, acc, false) {
+				RecordImageCapacityDecision(ctx, "scheduler_filter", "rpm", acc.ID, 0)
 				continue
 			}
 			if selected == nil {
@@ -2401,9 +2450,11 @@ func (s *GatewayService) selectAccountWithMixedScheduling(ctx context.Context, g
 		// Scheduler snapshots can be temporarily stale; re-check schedulability here to
 		// avoid selecting accounts that were recently rate-limited/overloaded.
 		if !s.isAccountSchedulableForSelection(acc) {
+			RecordImageCapacityDecision(ctx, "scheduler_filter", "not_schedulable", acc.ID, 0)
 			continue
 		}
 		if !s.isGatewayAccountProfitEligible(ctx, acc) {
+			RecordImageCapacityDecision(ctx, "scheduler_filter", "profit_control", acc.ID, 0)
 			continue
 		}
 		// require_privacy_set: 跳过 privacy 未设置的账号并标记异常
@@ -2417,21 +2468,26 @@ func (s *GatewayService) selectAccountWithMixedScheduling(ctx context.Context, g
 			continue
 		}
 		if requestedModel != "" && !s.isModelSupportedByAccountWithContext(ctx, acc, requestedModel) {
+			RecordImageCapacityDecision(ctx, "scheduler_filter", "model_not_supported", acc.ID, 0)
 			continue
 		}
 		if needsUpstreamCheck && s.isUpstreamModelRestrictedByChannel(ctx, *groupID, acc, requestedModel) {
 			continue
 		}
 		if !s.isAccountSchedulableForModelSelection(ctx, acc, requestedModel) {
+			RecordImageCapacityDecision(ctx, "scheduler_filter", "model_rate_limited", acc.ID, 0)
 			continue
 		}
 		if !s.isAccountSchedulableForQuota(acc) {
+			RecordImageCapacityDecision(ctx, "scheduler_filter", "quota", acc.ID, 0)
 			continue
 		}
 		if !s.isAccountSchedulableForWindowCost(ctx, acc, false) {
+			RecordImageCapacityDecision(ctx, "scheduler_filter", "window_cost", acc.ID, 0)
 			continue
 		}
 		if !s.isAccountSchedulableForRPM(ctx, acc, false) {
+			RecordImageCapacityDecision(ctx, "scheduler_filter", "rpm", acc.ID, 0)
 			continue
 		}
 		if selected == nil {

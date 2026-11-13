@@ -23,22 +23,23 @@ import (
 
 // antigravityRetryLoopParams 重试循环的参数
 type antigravityRetryLoopParams struct {
-	ctx             context.Context
-	prefix          string
-	account         *Account
-	proxyURL        string
-	accessToken     string
-	action          string
-	body            []byte
-	c               *gin.Context
-	httpUpstream    HTTPUpstream
-	settingService  *SettingService
-	accountRepo     AccountRepository // 用于智能重试的模型级别限流
-	handleError     func(ctx context.Context, prefix string, account *Account, statusCode int, headers http.Header, body []byte, requestedModel string, groupID int64, sessionHash string, isStickySession bool) *handleModelRateLimitResult
-	requestedModel  string // 用于限流检查的原始请求模型
-	isStickySession bool   // 是否为粘性会话（用于账号切换时的缓存计费判断）
-	groupID         int64  // 用于模型级限流时清除粘性会话
-	sessionHash     string // 用于模型级限流时清除粘性会话
+	imageResolutionMonitor *ImageResolutionMonitor
+	ctx                    context.Context
+	prefix                 string
+	account                *Account
+	proxyURL               string
+	accessToken            string
+	action                 string
+	body                   []byte
+	c                      *gin.Context
+	httpUpstream           HTTPUpstream
+	settingService         *SettingService
+	accountRepo            AccountRepository // 用于智能重试的模型级别限流
+	handleError            func(ctx context.Context, prefix string, account *Account, statusCode int, headers http.Header, body []byte, requestedModel string, groupID int64, sessionHash string, isStickySession bool) *handleModelRateLimitResult
+	requestedModel         string // 用于限流检查的原始请求模型
+	isStickySession        bool   // 是否为粘性会话（用于账号切换时的缓存计费判断）
+	groupID                int64  // 用于模型级限流时清除粘性会话
+	sessionHash            string // 用于模型级限流时清除粘性会话
 }
 
 // antigravityRetryLoopResult 重试循环的结果
@@ -212,7 +213,10 @@ func (s *AntigravityGatewayService) handleSmartRetry(p antigravityRetryLoopParam
 				}
 			}
 
-			retryResp, retryErr := p.httpUpstream.Do(retryReq, p.proxyURL, p.account.ID, p.account.Concurrency)
+			retryResp, retryErr := p.imageResolutionMonitor.Do(p.httpUpstream, retryReq, p.proxyURL, p.account)
+			if isImageResolutionCooling(retryErr) {
+				return &smartRetryResult{err: retryErr}
+			}
 			if retryErr == nil && retryResp != nil && retryResp.StatusCode != http.StatusTooManyRequests && retryResp.StatusCode != http.StatusServiceUnavailable {
 				log.Printf("%s status=%d smart_retry_success attempt=%d/%d", p.prefix, retryResp.StatusCode, attempt, maxAttempts)
 				// 重试成功，清除 MODEL_CAPACITY_EXHAUSTED cooldown
@@ -387,7 +391,10 @@ func (s *AntigravityGatewayService) handleSingleAccountRetryInPlace(
 			break
 		}
 
-		retryResp, retryErr := p.httpUpstream.Do(retryReq, p.proxyURL, p.account.ID, p.account.Concurrency)
+		retryResp, retryErr := p.imageResolutionMonitor.Do(p.httpUpstream, retryReq, p.proxyURL, p.account)
+		if isImageResolutionCooling(retryErr) {
+			return &smartRetryResult{err: retryErr}
+		}
 		if retryErr == nil && retryResp != nil && retryResp.StatusCode != http.StatusTooManyRequests && retryResp.StatusCode != http.StatusServiceUnavailable {
 			logger.LegacyPrintf("service.antigravity_gateway", "%s status=%d single_account_503_retry_success attempt=%d/%d total_waited=%v",
 				p.prefix, retryResp.StatusCode, attempt, antigravitySingleAccountSmartRetryMaxAttempts, totalWaited)
@@ -525,7 +532,10 @@ urlFallbackLoop:
 				return nil, err
 			}
 
-			resp, err = p.httpUpstream.Do(upstreamReq, p.proxyURL, p.account.ID, p.account.Concurrency)
+			resp, err = p.imageResolutionMonitor.Do(p.httpUpstream, upstreamReq, p.proxyURL, p.account)
+			if isImageResolutionCooling(err) {
+				return nil, err
+			}
 			if err == nil && resp == nil {
 				err = errors.New("upstream returned nil response")
 			}

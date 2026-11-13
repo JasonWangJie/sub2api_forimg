@@ -1912,6 +1912,17 @@ func (s *RateLimitService) samplePassiveUsageFromHeaders(ctx context.Context, ac
 
 // ClearRateLimit 清除账号的限流状态
 func (s *RateLimitService) ClearRateLimit(ctx context.Context, accountID int64) error {
+	if repo, ok := s.accountRepo.(AccountRateLimitStateRepository); ok {
+		if _, _, err := repo.ClearAccountRateLimitState(ctx, accountID, ""); err != nil {
+			return err
+		}
+		sync := s.syncClearedRateLimitState(ctx, accountID, repo)
+		if sync.Status == "warning" {
+			slog.Warn("rate_limit_clear_cache_sync_incomplete", "account_id", accountID, "components", sync.FailedComponents)
+		}
+		return nil
+	}
+	// Compatibility for repository adapters without the optional atomic capability.
 	if err := s.accountRepo.ClearRateLimit(ctx, accountID); err != nil {
 		return err
 	}

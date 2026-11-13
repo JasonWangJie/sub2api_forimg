@@ -590,9 +590,10 @@ type AudioUsage struct {
 }
 
 type ForwardResult struct {
-	RequestID string
-	Usage     ClaudeUsage
-	Model     string
+	ImageResolutionExpectation *ImageResolutionExpectation `json:"image_resolution_expectation,omitempty"`
+	RequestID                  string
+	Usage                      ClaudeUsage
+	Model                      string
 	// AccountMappingApplied is true only when an explicit credentials.model_mapping
 	// rule changed the concrete model entering account-level mapping.
 	AccountMappingApplied     bool
@@ -734,44 +735,45 @@ func (s *GatewayService) TempUnscheduleRetryableError(ctx context.Context, accou
 
 // GatewayService handles API gateway operations
 type GatewayService struct {
-	accountRepo           AccountRepository
-	groupRepo             GroupRepository
-	usageLogRepo          UsageLogRepository
-	usageBillingRepo      UsageBillingRepository
-	userRepo              UserRepository
-	userSubRepo           UserSubscriptionRepository
-	userGroupRateRepo     UserGroupRateRepository
-	cache                 GatewayCache
-	digestStore           *DigestSessionStore
-	cfg                   *config.Config
-	schedulerSnapshot     *SchedulerSnapshotService
-	billingService        *BillingService
-	rateLimitService      *RateLimitService
-	billingCacheService   *BillingCacheService
-	identityService       *IdentityService
-	httpUpstream          HTTPUpstream
-	deferredService       *DeferredService
-	concurrencyService    *ConcurrencyService
-	claudeTokenProvider   *ClaudeTokenProvider
-	sessionLimitCache     SessionLimitCache // 会话数量限制缓存（仅 Anthropic OAuth/SetupToken）
-	rpmCache              RPMCache          // RPM 计数缓存（仅 Anthropic OAuth/SetupToken）
-	userGroupRateResolver *userGroupRateResolver
-	userGroupRateCache    *gocache.Cache
-	userGroupRateSF       singleflight.Group
-	modelsListCache       *gocache.Cache
-	modelsListCacheTTL    time.Duration
-	settingService        *SettingService
-	responseHeaderFilter  *responseheaders.CompiledHeaderFilter
-	debugModelRouting     atomic.Bool
-	debugClaudeMimic      atomic.Bool
-	channelService        *ChannelService
-	resolver              *ModelPricingResolver
-	compositeResolver     *CompositeRouteResolver
-	debugGatewayBodyFile  atomic.Pointer[os.File] // non-nil when SUB2API_DEBUG_GATEWAY_BODY is set
-	tlsFPProfileService   *TLSFingerprintProfileService
-	balanceNotifyService  *BalanceNotifyService
-	userPlatformQuotaRepo UserPlatformQuotaRepository
-	imageCircuitBreaker   ImageAccountCircuitBreaker
+	imageResolutionMonitor *ImageResolutionMonitor
+	accountRepo            AccountRepository
+	groupRepo              GroupRepository
+	usageLogRepo           UsageLogRepository
+	usageBillingRepo       UsageBillingRepository
+	userRepo               UserRepository
+	userSubRepo            UserSubscriptionRepository
+	userGroupRateRepo      UserGroupRateRepository
+	cache                  GatewayCache
+	digestStore            *DigestSessionStore
+	cfg                    *config.Config
+	schedulerSnapshot      *SchedulerSnapshotService
+	billingService         *BillingService
+	rateLimitService       *RateLimitService
+	billingCacheService    *BillingCacheService
+	identityService        *IdentityService
+	httpUpstream           HTTPUpstream
+	deferredService        *DeferredService
+	concurrencyService     *ConcurrencyService
+	claudeTokenProvider    *ClaudeTokenProvider
+	sessionLimitCache      SessionLimitCache // 会话数量限制缓存（仅 Anthropic OAuth/SetupToken）
+	rpmCache               RPMCache          // RPM 计数缓存（仅 Anthropic OAuth/SetupToken）
+	userGroupRateResolver  *userGroupRateResolver
+	userGroupRateCache     *gocache.Cache
+	userGroupRateSF        singleflight.Group
+	modelsListCache        *gocache.Cache
+	modelsListCacheTTL     time.Duration
+	settingService         *SettingService
+	responseHeaderFilter   *responseheaders.CompiledHeaderFilter
+	debugModelRouting      atomic.Bool
+	debugClaudeMimic       atomic.Bool
+	channelService         *ChannelService
+	resolver               *ModelPricingResolver
+	compositeResolver      *CompositeRouteResolver
+	debugGatewayBodyFile   atomic.Pointer[os.File] // non-nil when SUB2API_DEBUG_GATEWAY_BODY is set
+	tlsFPProfileService    *TLSFingerprintProfileService
+	balanceNotifyService   *BalanceNotifyService
+	userPlatformQuotaRepo  UserPlatformQuotaRepository
+	imageCircuitBreaker    ImageAccountCircuitBreaker
 }
 
 func (s *GatewayService) SetImageAccountCircuitBreaker(b ImageAccountCircuitBreaker) {

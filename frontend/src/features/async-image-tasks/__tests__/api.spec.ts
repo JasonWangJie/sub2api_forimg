@@ -33,6 +33,14 @@ describe('async image task API', () => {
     expect(response.stats?.average_duration_ms).toBeNull()
   })
 
+  it('preserves admin capacity observations with a diagnostic label rather than a fake queued transition', async () => {
+    const snapshot = { observed_at: '2026-11-13T09:00:00Z', group_id: 2, model: 'image', size_tier: '2K', observations: [] }
+    client.get.mockResolvedValue({ data: { task: { task_id: 'imgtask_capacity', platform: 'gemini', model: 'image', status: 'queued' }, events: [{ event_type: 'capacity_diagnostic', to_status: 'queued', capacity_diagnostics: snapshot, created_at: snapshot.observed_at }] } })
+    const detail = await asyncImageTasksAPI.admin.get('imgtask_capacity')
+    expect(detail.events?.[0].status).toBe('capacity_diagnostic')
+    expect(detail.events?.[0].capacity_diagnostics).toEqual(snapshot)
+  })
+
   it('normalizes the durable task detail envelope for the shared task view', async () => {
     client.get.mockResolvedValue({
       data: {

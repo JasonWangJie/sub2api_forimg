@@ -64,6 +64,7 @@ type AccountHandler struct {
 	grokImportProber        grokImportProber
 	upstreamBillingProbe    *service.UpstreamBillingProbeService
 	ollamaCloudUsage        *service.OllamaCloudUsageService
+	imageResolutionGuard    *service.ImageResolutionGuardService
 }
 
 // SetUpstreamBillingProbeService attaches the optional remote billing probe service.
@@ -190,9 +191,10 @@ type CheckMixedChannelRequest struct {
 // AccountWithConcurrency extends Account with real-time concurrency info
 type AccountWithConcurrency struct {
 	*dto.Account
-	CurrentConcurrency int                          `json:"current_concurrency"`
-	SchedulerScore     *AccountSchedulerScore       `json:"scheduler_score,omitempty"`
-	SchedulerScores    []AccountSchedulerGroupScore `json:"scheduler_scores,omitempty"`
+	CurrentConcurrency   int                                   `json:"current_concurrency"`
+	SchedulerScore       *AccountSchedulerScore                `json:"scheduler_score,omitempty"`
+	SchedulerScores      []AccountSchedulerGroupScore          `json:"scheduler_scores,omitempty"`
+	ImageResolutionGuard *service.ImageResolutionAccountStatus `json:"image_resolution_guard,omitempty"`
 	// 以下字段仅对 Anthropic OAuth/SetupToken 账号有效，且仅在启用相应功能时返回
 	CurrentWindowCost *float64 `json:"current_window_cost,omitempty"` // 当前窗口费用
 	ActiveSessions    *int     `json:"active_sessions,omitempty"`     // 当前活跃会话数
@@ -231,6 +233,7 @@ func (h *AccountHandler) buildAccountResponseWithRuntime(ctx context.Context, ac
 	if account == nil {
 		return item
 	}
+	item.ImageResolutionGuard = h.imageResolutionAccountStatuses(ctx, []int64{account.ID})[account.ID]
 
 	if h.concurrencyService != nil {
 		if counts, err := h.concurrencyService.GetAccountConcurrencyBatch(ctx, []int64{account.ID}); err == nil {
@@ -647,14 +650,16 @@ func (h *AccountHandler) List(c *gin.Context) {
 	}
 
 	// Build response with concurrency info
+	imageResolutionStatuses := h.imageResolutionAccountStatuses(c.Request.Context(), accountIDs)
 	result := make([]AccountWithConcurrency, len(accounts))
 	for i := range accounts {
 		acc := &accounts[i]
 		item := AccountWithConcurrency{
-			Account:            h.accountResponseFromService(acc),
-			CurrentConcurrency: concurrencyCounts[acc.ID],
-			SchedulerScore:     schedulerScores[acc.ID],
-			SchedulerScores:    schedulerGroupScores[acc.ID],
+			Account:              h.accountResponseFromService(acc),
+			CurrentConcurrency:   concurrencyCounts[acc.ID],
+			SchedulerScore:       schedulerScores[acc.ID],
+			SchedulerScores:      schedulerGroupScores[acc.ID],
+			ImageResolutionGuard: imageResolutionStatuses[acc.ID],
 		}
 
 		// 添加窗口费用（仅当启用时）
@@ -1130,9 +1135,7 @@ func (h *AccountHandler) RecoverState(c *gin.Context) {
 		return
 	}
 
-	if _, err := h.rateLimitService.RecoverAccountState(c.Request.Context(), accountID, service.AccountRecoveryOptions{
-		InvalidateToken: true,
-	}); err != nil {
+	if err := h.rateLimitService.RecoverAccountErrorManually(c.Request.Context(), accountID); err != nil {
 		response.ErrorFrom(c, err)
 		return
 	}
@@ -2335,30 +2338,6 @@ func (h *AccountHandler) GetUsage(c *gin.Context) {
 	response.Success(c, usage)
 }
 
-// ClearRateLimit handles clearing account rate limit status
-// POST /api/v1/admin/accounts/:id/clear-rate-limit
-func (h *AccountHandler) ClearRateLimit(c *gin.Context) {
-	accountID, err := strconv.ParseInt(c.Param("id"), 10, 64)
-	if err != nil {
-		response.BadRequest(c, "Invalid account ID")
-		return
-	}
-
-	err = h.rateLimitService.ClearRateLimit(c.Request.Context(), accountID)
-	if err != nil {
-		response.ErrorFrom(c, err)
-		return
-	}
-
-	account, err := h.adminService.GetAccount(c.Request.Context(), accountID)
-	if err != nil {
-		response.ErrorFrom(c, err)
-		return
-	}
-
-	response.Success(c, h.buildAccountResponseWithRuntime(c.Request.Context(), account))
-}
-
 // ResetQuota handles resetting account quota usage
 // POST /api/v1/admin/accounts/:id/reset-quota
 func (h *AccountHandler) ResetQuota(c *gin.Context) {
@@ -2411,18 +2390,12 @@ func (h *AccountHandler) GetTempUnschedulable(c *gin.Context) {
 // ClearTempUnschedulable handles clearing temporary unschedulable status
 // DELETE /api/v1/admin/accounts/:id/temp-unschedulable
 func (h *AccountHandler) ClearTempUnschedulable(c *gin.Context) {
-	accountID, err := strconv.ParseInt(c.Param("id"), 10, 64)
-	if err != nil {
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil || id <= 0 {
 		response.BadRequest(c, "Invalid account ID")
 		return
 	}
-
-	if err := h.rateLimitService.ClearTempUnschedulable(c.Request.Context(), accountID); err != nil {
-		response.ErrorFrom(c, err)
-		return
-	}
-
-	response.Success(c, gin.H{"message": "Temp unschedulable cleared successfully"})
+	response.ErrorFrom(c, infraerrors.Conflict("RATE_LIMIT_PREVIEW_REQUIRED", "Use the account restriction preview and versioned clear endpoint"))
 }
 
 // GetTodayStats handles getting account today statistics

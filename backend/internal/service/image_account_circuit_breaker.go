@@ -146,7 +146,12 @@ func startImageCircuitProbeRenewal(ctx context.Context, renewer ImageCircuitProb
 	}
 }
 
-func IsImageAccountCircuitOpen(ctx context.Context, breaker ImageAccountCircuitBreaker, account *Account) bool {
+func IsImageAccountCircuitOpen(ctx context.Context, breaker ImageAccountCircuitBreaker, account *Account, quality ...*ImageResolutionMonitor) bool {
+	for _, monitor := range quality {
+		if monitor.cooling(ctx, account) {
+			return true
+		}
+	}
 	if !ImageAccountSupportsInput(ctx, account) {
 		return true
 	}

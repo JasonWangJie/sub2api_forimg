@@ -804,6 +804,10 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 		if lease == nil {
 			return nil, errors.New("upstream websocket lease is nil")
 		}
+		qualityTurn, qualityErr := s.imageResolutionMonitor.beginWebSocketTurn(ctx, account, payload, originalModel, "", imageSizeTier)
+		if qualityErr != nil {
+			return nil, qualityErr
+		}
 		turnStart := time.Now()
 		wroteDownstream := false
 		if err := lease.WriteJSONWithContextTimeout(ctx, json.RawMessage(payload), s.openAIWSWriteTimeout()); err != nil {
@@ -966,6 +970,7 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 				parseOpenAIWSResponseUsageFromCompletedEvent(upstreamMessage, &usage)
 			}
 			imageCounter.AddSSEData(upstreamMessage)
+			qualityTurn.websocketMessage(upstreamMessage)
 
 			if eventType == "response.failed" {
 				if hit, code, msg := detectOpenAICyberPolicy(upstreamMessage); hit {
@@ -1069,6 +1074,7 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 					result.ImageOutputSizes = imageCounter.Sizes()
 					result.BillingModel = imageBillingModel
 				}
+				qualityTurn.finishWebSocketTurn(responseID)
 				return result, nil
 			}
 		}
