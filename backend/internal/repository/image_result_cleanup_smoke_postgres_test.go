@@ -44,6 +44,7 @@ type cleanupSmokeS3 struct {
 	release           chan struct{}
 	blockOnce         sync.Once
 	active, maxActive int
+	requestDelay      time.Duration
 }
 
 func (s *cleanupSmokeS3) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -73,8 +74,18 @@ func (s *cleanupSmokeS3) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	obj, found := s.objects[key]
 	denied := s.deniedKey == key
 	block := s.blockKey == key && r.Method == http.MethodDelete
+	delay := s.requestDelay
 	s.mu.Unlock()
 	defer func() { s.mu.Lock(); s.active--; s.mu.Unlock() }()
+	if delay > 0 {
+		timer := time.NewTimer(delay)
+		defer timer.Stop()
+		select {
+		case <-timer.C:
+		case <-r.Context().Done():
+			return
+		}
+	}
 	if block {
 		s.blockOnce.Do(func() { close(s.entered); <-s.release })
 	}
@@ -117,8 +128,12 @@ type cleanupSmokeFixture struct {
 
 func newCleanupSmokeFixture(t *testing.T, count int) *cleanupSmokeFixture {
 	t.Helper()
+	return newCleanupSmokeFixtureWithDB(t, count, resultCleanupPostgresDB(t))
+}
+
+func newCleanupSmokeFixtureWithDB(t *testing.T, count int, db *sql.DB) *cleanupSmokeFixture {
+	t.Helper()
 	ctx := context.Background()
-	db := resultCleanupPostgresDB(t)
 	seedResultCleanup(t, db, count)
 	s3 := &cleanupSmokeS3{objects: map[string]cleanupSmokeObject{}, entered: make(chan struct{}), release: make(chan struct{})}
 	remote := httptest.NewServer(s3)
@@ -491,4 +506,62 @@ func TestImageResultCleanupSmokePostgresScheduledDailyRun(t *testing.T) {
 	f.s3.mu.Unlock()
 	require.Equal(t, 2, calls, "one HEAD and one DELETE for the one scheduled object")
 	t.Log("HTTP daily policy -> due scheduler -> persisted scheduled job -> real S3 HEAD/DELETE; next Beijing slot retained and duplicate tick does nothing")
+}
+
+func TestImageResultCleanupSmokePostgresConcurrentObjects(t *testing.T) {
+	f := newCleanupSmokeFixtureWithDB(t, 10, resultCleanupConcurrentPostgresDB(t))
+	_, err := f.db.Exec(`INSERT INTO image_library_items(storage_object_id)VALUES(1);
+ UPDATE async_image_tasks SET status='invoking' WHERE task_id='task-2';
+ UPDATE image_storage_objects SET storage_identity='' WHERE id=3;`)
+	require.NoError(t, err)
+	f.s3.mu.Lock()
+	f.s3.requestDelay = 150 * time.Millisecond
+	delete(f.s3.objects, f.refs[3].ObjectKey)
+	f.s3.mu.Unlock()
+	var policy service.ImageResultCleanupPolicy
+	f.request(t, http.MethodGet, "/cleanup-policy", nil, 200, &policy)
+	policy.Concurrency, policy.RequestsPerSecond, policy.BatchSize = 4, 20, 6
+	f.request(t, http.MethodPut, "/cleanup-policy", policy, 200, &policy)
+	require.Equal(t, 4, policy.Concurrency)
+	job := f.create(t)
+	job = f.run(t, job.ID)
+	require.Equal(t, "pending", job.Status)
+	require.Equal(t, int64(6), job.ScannedCount, "concurrency must share one per-slice batch budget")
+	require.Equal(t, 4, job.PolicySnapshot.Concurrency)
+	f.s3.mu.Lock()
+	firstSliceCalls := len(f.s3.calls)
+	f.s3.mu.Unlock()
+	_, err = f.db.Exec(`UPDATE image_library_cleanup_jobs SET next_attempt_at=NOW()-INTERVAL '1 second' WHERE id=$1`, job.ID)
+	require.NoError(t, err)
+	job = f.run(t, job.ID)
+	require.Equal(t, "succeeded", job.Status)
+	require.Equal(t, int64(10), job.ScannedCount)
+	require.Equal(t, int64(7), job.DeletedCount)
+	require.Equal(t, int64(700), job.DeletedBytes)
+	require.Equal(t, int64(9), job.DetachedCount)
+	require.Equal(t, int64(2), job.ProtectedCount)
+	require.Zero(t, job.FailedCount)
+	var remaining string
+	require.NoError(t, f.db.QueryRow(`SELECT string_agg(id::text,',' ORDER BY id) FROM async_image_results`).Scan(&remaining))
+	require.Equal(t, "2", remaining, "the active task keeps its result while the library keeps its object")
+	f.s3.mu.Lock()
+	calls := append([]cleanupSmokeCall(nil), f.s3.calls...)
+	maxActive := f.s3.maxActive
+	_, libraryExists := f.s3.objects[f.refs[0].ObjectKey]
+	_, activeExists := f.s3.objects[f.refs[1].ObjectKey]
+	f.s3.mu.Unlock()
+	require.True(t, libraryExists)
+	require.True(t, activeExists)
+	require.Greater(t, maxActive, 1, "real SDK HTTP calls must overlap at configured object concurrency")
+	require.LessOrEqual(t, maxActive, 4)
+	require.Len(t, calls, 15, "7 HEAD+DELETE pairs and one missing HEAD")
+	seen := map[string]int{}
+	for i, call := range calls {
+		seen[call.method+" "+call.key]++
+		require.Equal(t, 1, seen[call.method+" "+call.key], "no object may be claimed twice in the same job lease")
+		if i > 0 && i != firstSliceCalls {
+			require.GreaterOrEqual(t, call.at.Sub(calls[i-1].at), 40*time.Millisecond, "all concurrent HEAD/DELETE calls share the 20/s gate")
+		}
+	}
+	t.Logf("real HTTP/PG/S3 concurrency=%d (configured 4), aggregate 20 requests/s, 6-object batch honored; protected library+active task survived, 7 deleted and 1 missing", maxActive)
 }

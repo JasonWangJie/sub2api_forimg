@@ -4,8 +4,8 @@
       <!-- Backdrop: click anywhere outside to close -->
       <div class="fixed inset-0 z-[9998]" @click="emit('close')"></div>
       <div
-        class="action-menu-content fixed z-[9999] w-52 overflow-hidden rounded-xl bg-white shadow-lg ring-1 ring-black/5 dark:bg-dark-800"
-        :style="{ top: position.top + 'px', left: position.left + 'px' }"
+        class="action-menu-content fixed z-[9999] w-52 overflow-y-auto rounded-xl bg-white shadow-lg ring-1 ring-black/5 dark:bg-dark-800"
+        :style="{ top: position.top + 'px', left: position.left + 'px', maxHeight: `calc(100dvh - ${Math.max(8, position.top)}px - 8px)` }"
         @click.stop
       >
         <div class="py-1">
@@ -46,6 +46,10 @@
               {{ t('admin.accounts.setPrivacy') }}
             </button>
             <div v-if="hasRecoverableState" class="my-1 border-t border-gray-100 dark:border-dark-700"></div>
+            <button v-if="hasRateLimitState" @click="$emit('clear-rate-limit', account); $emit('close')" class="flex w-full items-center gap-2 px-4 py-2 text-sm text-amber-700 hover:bg-gray-100 dark:text-amber-300 dark:hover:bg-dark-700">
+              <Icon name="clock" size="sm" />
+              {{ t('admin.accounts.rateLimit.action') }}
+            </button>
             <button v-if="hasRecoverableState" @click="$emit('recover-state', account); $emit('close')" class="flex w-full items-center gap-2 px-4 py-2 text-sm text-emerald-600 hover:bg-gray-100 dark:hover:bg-dark-700">
               <Icon name="sync" size="sm" />
               {{ t('admin.accounts.recoverState') }}
@@ -66,31 +70,18 @@ import { computed, watch, onUnmounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { Icon } from '@/components/icons'
 import type { Account } from '@/types'
+import { getAccountRateLimitEntries } from './accountRateLimits'
 
 const props = defineProps<{ show: boolean; account: Account | null; position: { top: number; left: number } | null }>()
-const emit = defineEmits(['close', 'test', 'stats', 'schedule', 'duplicate', 'reauth', 'refresh-token', 'recover-state', 'reset-quota', 'set-privacy', 'create-spark-shadow'])
+const emit = defineEmits(['close', 'test', 'stats', 'schedule', 'duplicate', 'reauth', 'refresh-token', 'recover-state', 'clear-rate-limit', 'reset-quota', 'set-privacy', 'create-spark-shadow'])
 const { t } = useI18n()
 const canDuplicate = computed(() => {
   if (!props.account || props.account.parent_account_id != null) return false
   return ['apikey', 'upstream', 'bedrock', 'service_account'].includes(props.account.type)
 })
-const isRateLimited = computed(() => {
-  if (props.account?.rate_limit_reset_at && new Date(props.account.rate_limit_reset_at) > new Date()) {
-    return true
-  }
-  const modelLimits = (props.account?.extra as Record<string, unknown> | undefined)?.model_rate_limits as
-    | Record<string, { rate_limit_reset_at: string }>
-    | undefined
-  if (modelLimits) {
-    const now = new Date()
-    return Object.values(modelLimits).some(info => new Date(info.rate_limit_reset_at) > now)
-  }
-  return false
-})
-const isOverloaded = computed(() => props.account?.overload_until && new Date(props.account.overload_until) > new Date())
-const isTempUnschedulable = computed(() => props.account?.temp_unschedulable_until && new Date(props.account.temp_unschedulable_until) > new Date())
+const hasRateLimitState = computed(() => getAccountRateLimitEntries(props.account).length > 0)
 const hasRecoverableState = computed(() => {
-  return props.account?.status === 'error' || Boolean(isRateLimited.value) || Boolean(isOverloaded.value) || Boolean(isTempUnschedulable.value)
+  return props.account?.status === 'error' || hasRateLimitState.value
 })
 const isAntigravityOAuth = computed(() => props.account?.platform === 'antigravity' && props.account?.type === 'oauth')
 const isOpenAIOAuth = computed(() => props.account?.platform === 'openai' && props.account?.type === 'oauth')

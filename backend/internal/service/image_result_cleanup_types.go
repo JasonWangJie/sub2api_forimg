@@ -1,7 +1,9 @@
 package service
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"time"
 )
@@ -22,9 +24,31 @@ type ImageResultCleanupPolicy struct {
 	Timezone          string     `json:"timezone"`
 	BatchSize         int        `json:"batch_size"`
 	RequestsPerSecond int        `json:"requests_per_second"`
+	Concurrency       int        `json:"concurrency"`
 	Revision          int64      `json:"revision"`
 	NextRunAt         *time.Time `json:"next_run_at,omitempty"`
 	UpdatedBy         *int64     `json:"updated_by,omitempty"`
+}
+
+// Policies and job snapshots written before concurrency was configurable keep
+// their single worker. Explicit invalid values still reach input validation.
+func (p *ImageResultCleanupPolicy) UnmarshalJSON(data []byte) error {
+	type policy ImageResultCleanupPolicy
+	decoded := policy{Concurrency: 1}
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		return err
+	}
+	var raw struct {
+		Concurrency json.RawMessage `json:"concurrency"`
+	}
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+	if bytes.Equal(bytes.TrimSpace(raw.Concurrency), []byte("null")) {
+		return errors.New("cleanup concurrency must be an integer")
+	}
+	*p = ImageResultCleanupPolicy(decoded)
+	return nil
 }
 
 // Identity is a non-secret digest of the physical storage location, not its credentials.

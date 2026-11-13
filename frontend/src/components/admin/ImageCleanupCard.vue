@@ -23,8 +23,9 @@
           <label v-else class="cleanup-label"><span>{{ t('imageCleanup.dailyTime') }}</span><input v-model="policy.daily_time" data-testid="daily-time" type="time" required class="input w-full" /></label>
           <div class="grid grid-cols-2 gap-3">
             <label class="cleanup-label"><span>{{ t('imageCleanup.batch') }}</span><input v-model.number="policy.batch_size" data-testid="batch-size" type="number" min="1" max="100" step="1" required class="input w-full" /></label>
-            <label class="cleanup-label"><span>{{ t('imageCleanup.rate') }}</span><input v-model.number="policy.requests_per_second" data-testid="delete-rate" type="number" min="1" max="5" step="1" required class="input w-full" /></label>
+            <label class="cleanup-label"><span>{{ t('imageCleanup.rate') }}</span><input v-model.number="policy.requests_per_second" data-testid="delete-rate" type="number" min="1" max="1000" step="1" required class="input w-full" /></label>
           </div>
+          <label class="cleanup-label"><span>{{ t('imageCleanup.concurrency') }}</span><input v-model.number="policy.concurrency" data-testid="cleanup-concurrency" type="number" min="1" max="16" step="1" required class="input w-full" /></label>
           <p class="text-xs leading-relaxed text-gray-500 dark:text-gray-400">{{ t('imageCleanup.resourceHint') }}</p>
           <div class="flex flex-wrap gap-2"><button type="submit" class="btn btn-primary btn-sm" :disabled="!policyValid">{{ saving ? t('common.loading') : t('imageCleanup.savePolicy') }}</button><button type="button" class="btn btn-secondary btn-sm" @click="load">{{ t('imageCleanup.reloadPolicy') }}</button></div>
         </fieldset>
@@ -83,7 +84,7 @@ const { t, locale } = useI18n()
 const emit = defineEmits<{ configured: [value: boolean] }>()
 const appStore = useAppStore()
 const stepUp = useStepUp()
-const policy = reactive<ImageCleanupPolicy>({ enabled: false, retention_value: 90, retention_unit: 'days', schedule_mode: 'interval', interval_minutes: 15, daily_time: '03:00', timezone: 'Asia/Shanghai', batch_size: 50, requests_per_second: 2 })
+const policy = reactive<ImageCleanupPolicy>({ enabled: false, retention_value: 90, retention_unit: 'days', schedule_mode: 'interval', interval_minutes: 15, daily_time: '03:00', timezone: 'Asia/Shanghai', batch_size: 50, requests_per_second: 2, concurrency: 1 })
 const loaded = ref(false)
 const loadError = ref('')
 const saving = ref(false)
@@ -101,7 +102,7 @@ let pollCount = 0
 function integerIn(value: number, min: number, max: number): boolean { return Number.isInteger(value) && value >= min && value <= max }
 function validAge(value: number, unit: 'hours' | 'days'): boolean { return integerIn(value, 1, unit === 'days' ? 3650 : 87600) }
 const manualValid = computed(() => validAge(manual.value, manual.unit))
-const policyValid = computed(() => validAge(policy.retention_value, policy.retention_unit) && integerIn(policy.batch_size, 1, 100) && integerIn(policy.requests_per_second, 1, 5) && (policy.schedule_mode === 'interval' ? integerIn(policy.interval_minutes, 1, 10080) : /^([01]\d|2[0-3]):[0-5]\d$/.test(policy.daily_time)))
+const policyValid = computed(() => validAge(policy.retention_value, policy.retention_unit) && integerIn(policy.batch_size, 1, 100) && integerIn(policy.requests_per_second, 1, 1000) && integerIn(policy.concurrency, 1, 16) && (policy.schedule_mode === 'interval' ? integerIn(policy.interval_minutes, 1, 10080) : /^([01]\d|2[0-3]):[0-5]\d$/.test(policy.daily_time)))
 watch(() => [manual.value, manual.unit], () => { preview.value = null })
 watch(() => policy.schedule_mode, mode => {
   // Both stored schedule fields must remain valid, including the inactive one.
@@ -124,7 +125,7 @@ async function load() {
   try {
     const result = await getImageCleanupPolicy()
     if (disposed) return
-    Object.assign(policy, result)
+    Object.assign(policy, result, { concurrency: result.concurrency ?? 1 })
     savedNextRun.value = result.next_run_at ?? null
     loaded.value = true
     emit('configured', result.configured === true)
@@ -137,7 +138,7 @@ async function savePolicy() {
   saving.value = true
   try {
     const result = await stepUp.run(() => updateImageCleanupPolicy({ ...policy }))
-    Object.assign(policy, result)
+    Object.assign(policy, result, { concurrency: result.concurrency ?? 1 })
     savedNextRun.value = result.next_run_at ?? null
     emit('configured', result.configured === true)
     appStore.showSuccess(t('imageCleanup.saved'))

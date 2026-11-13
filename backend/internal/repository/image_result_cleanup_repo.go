@@ -352,10 +352,12 @@ func (r *imageLibraryRepository) ClaimImageResultCleanupObject(ctx context.Conte
 	if err != nil {
 		return nil, err
 	}
-	// An uncertain delete always resumes from the durable ticket, never the cursor.
-	ticket, err := scanResultCleanupObject(tx.QueryRowContext(ctx, `UPDATE image_result_cleanup_objects SET attempts=attempts+1,state='deleting',updated_at=$2
+	// A ticket is owned for the whole job lease, including retry backoff. Other
+	// workers in this slice must not reclaim an in-flight or just-failed request.
+	// A later lease resumes uncertain deletes from durable tickets, not the cursor.
+	ticket, err := scanResultCleanupObject(tx.QueryRowContext(ctx, `UPDATE image_result_cleanup_objects SET attempts=attempts+1,state='deleting',updated_at=$2,claim_lease_version=$3
  WHERE id=(SELECT id FROM image_result_cleanup_objects WHERE job_id=$1 AND state IN ('deleting','retry')
- AND(next_attempt_at IS NULL OR next_attempt_at<=$2) ORDER BY id LIMIT 1 FOR UPDATE) RETURNING `+resultCleanupObjectColumns, jobID, now))
+ AND claim_lease_version<$3 AND(next_attempt_at IS NULL OR next_attempt_at<=$2) ORDER BY id LIMIT 1 FOR UPDATE) RETURNING `+resultCleanupObjectColumns, jobID, now, lease))
 	if err == nil {
 		return ticket, tx.Commit()
 	}
@@ -443,8 +445,8 @@ func (r *imageLibraryRepository) ClaimImageResultCleanupObject(ctx context.Conte
 	if err != nil {
 		return nil, err
 	}
-	ticket, err = scanResultCleanupObject(tx.QueryRowContext(ctx, `INSERT INTO image_result_cleanup_objects(job_id,result_id,storage_object_id,object_ref,verified_identity,attempts)
- VALUES($1,$2,$3,$4,$5,1) RETURNING `+resultCleanupObjectColumns, jobID, resultID, *objectID, raw, ref.StorageIdentity))
+	ticket, err = scanResultCleanupObject(tx.QueryRowContext(ctx, `INSERT INTO image_result_cleanup_objects(job_id,result_id,storage_object_id,object_ref,verified_identity,attempts,claim_lease_version)
+ VALUES($1,$2,$3,$4,$5,1,$6) RETURNING `+resultCleanupObjectColumns, jobID, resultID, *objectID, raw, ref.StorageIdentity, lease))
 	if err != nil {
 		return nil, err
 	}
@@ -471,7 +473,7 @@ func (r *imageLibraryRepository) VerifyImageResultCleanupObject(ctx context.Cont
 		return service.ErrImageResultCleanupConflict
 	}
 	result, err := tx.ExecContext(ctx, `UPDATE image_result_cleanup_objects SET verified_identity=$4,updated_at=NOW()
- WHERE id=$1 AND job_id=$2 AND state='deleting' AND(verified_identity='' OR verified_identity=$4) AND $3>0`, ticketID, jobID, lease, identity)
+ WHERE id=$1 AND job_id=$2 AND state='deleting' AND claim_lease_version=$3 AND(verified_identity='' OR verified_identity=$4)`, ticketID, jobID, lease, identity)
 	if err = requireImageLibraryLease(result, err); err != nil {
 		return err
 	}
@@ -495,7 +497,7 @@ func (r *imageLibraryRepository) CompleteImageResultCleanupObject(ctx context.Co
 		return err
 	}
 	ticket, err := scanResultCleanupObject(tx.QueryRowContext(ctx, `SELECT `+resultCleanupObjectColumns+` FROM image_result_cleanup_objects
- WHERE id=$1 AND job_id=$2 AND state IN ('deleting','retry') FOR UPDATE`, ticketID, jobID))
+ WHERE id=$1 AND job_id=$2 AND state='deleting' AND claim_lease_version=$3 FOR UPDATE`, ticketID, jobID, lease))
 	if err == sql.ErrNoRows {
 		return service.ErrImageResultCleanupConflict
 	}
@@ -536,7 +538,7 @@ func (r *imageLibraryRepository) CompleteImageResultCleanupObject(ctx context.Co
 			return err
 		}
 	}
-	if _, err = tx.ExecContext(ctx, `UPDATE image_result_cleanup_objects SET state=$3,next_attempt_at=$4,last_error=$5,updated_at=NOW() WHERE id=$1 AND job_id=$2`, ticketID, jobID, outcome, retryAt, nullIfEmpty(message)); err != nil {
+	if _, err = tx.ExecContext(ctx, `UPDATE image_result_cleanup_objects SET state=$3,next_attempt_at=$4,last_error=$5,updated_at=NOW() WHERE id=$1 AND job_id=$2 AND claim_lease_version=$6`, ticketID, jobID, outcome, retryAt, nullIfEmpty(message), lease); err != nil {
 		return err
 	}
 	return tx.Commit()

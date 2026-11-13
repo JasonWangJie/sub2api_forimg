@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"os"
+	"strconv"
 	"testing"
 	"time"
 
@@ -120,6 +121,29 @@ func TestImageResultCleanupPolicyRequiresCurrentRevision(t *testing.T) {
 	require.ErrorIs(t, err, ErrImageResultCleanupConflict)
 }
 
+func TestImageResultCleanupPolicyRequestRateBounds(t *testing.T) {
+	require.Equal(t, 2, defaultImageResultCleanupPolicy(7).RequestsPerSecond)
+	for _, rate := range []int{-1, 0, 1, 5, 50, 100, 500, 1000, 1001} {
+		t.Run(strconv.Itoa(rate), func(t *testing.T) {
+			p := defaultImageResultCleanupPolicy(7)
+			p.Configured, p.Revision = true, 4
+			repo := &cleanupServiceRepoStub{policy: &p}
+			s := &ImageResultCleanupService{repo: repo, now: time.Now}
+			input := p
+			input.RequestsPerSecond = rate
+			saved, err := s.SavePolicy(context.Background(), 12, input)
+			if rate < 1 || rate > 1000 {
+				require.ErrorContains(t, err, "1～1000")
+				require.Zero(t, repo.saves)
+				return
+			}
+			require.NoError(t, err)
+			require.Equal(t, rate, saved.RequestsPerSecond)
+			require.Equal(t, 1, repo.saves)
+		})
+	}
+}
+
 func TestImageResultCleanupUpgradePreservesExistingRetention(t *testing.T) {
 	repo := &cleanupServiceRepoStub{}
 	s := &ImageResultCleanupService{repo: repo, storage: cleanupRuntimeStorageStub{}, now: time.Now}
@@ -173,6 +197,7 @@ type cleanupObjectStorageStub struct {
 	deletes, heads int
 	requests       []time.Time
 	now            func() time.Time
+	onRequest      func()
 }
 
 func (s *cleanupObjectStorageStub) Head(ctx context.Context, _ ObjectRef) (ObjectMetadata, error) {
@@ -185,6 +210,9 @@ func (s *cleanupObjectStorageStub) Head(ctx context.Context, _ ObjectRef) (Objec
 	s.heads++
 	if s.now != nil {
 		s.requests = append(s.requests, s.now())
+	}
+	if s.onRequest != nil {
+		s.onRequest()
 	}
 	return ObjectMetadata{ObjectRef: s.ref}, s.headErr
 }
@@ -201,6 +229,9 @@ func (s *cleanupObjectStorageStub) Delete(ctx context.Context, _ ObjectRef) erro
 	s.deletes++
 	if s.now != nil {
 		s.requests = append(s.requests, s.now())
+	}
+	if s.onRequest != nil {
+		s.onRequest()
 	}
 	return s.deleteErr
 }
@@ -334,4 +365,58 @@ func TestImageResultCleanupWorkerBoundsAndRequestRate(t *testing.T) {
 		require.GreaterOrEqual(t, storage.requests[i].Sub(storage.requests[i-1]), time.Second)
 	}
 	require.LessOrEqual(t, repo.claimed, 50)
+}
+
+func TestImageResultCleanupWorkerHighRateBounds(t *testing.T) {
+	for _, tc := range []struct {
+		name           string
+		batchSize      int
+		requestLatency time.Duration
+		wantCompleted  int
+	}{
+		{"default_batch", 50, 0, 50},
+		{"maximum_batch", 100, 0, 100},
+		{"time_slice", 100, 5 * time.Second, 3},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			start := time.Now()
+			clock := start
+			repo := &cleanupServiceRepoStub{}
+			ref := ObjectRef{Provider: "custom_s3", Bucket: "b", StorageIdentity: "identity", ObjectKey: "images/results/1"}
+			for i := 0; i < 150; i++ {
+				repo.objects = append(repo.objects, &ImageResultCleanupObject{ID: int64(i + 1), Object: ref, Action: "delete"})
+			}
+			load := &imageResultCleanupLoadGuard{sample: func(context.Context) (*opsCollectedSystemStats, error) {
+				cpu, mem := 10.0, 20.0
+				return &opsCollectedSystemStats{cpuUsagePercent: &cpu, memoryUsagePercent: &mem}, nil
+			}}
+			s := &ImageResultCleanupService{repo: repo, storage: cleanupRuntimeStorageStub{cfg: ImageResultReferenceConfig{Provider: ref.Provider, Bucket: ref.Bucket, StorageIdentity: "identity"}}, load: load, now: func() time.Time { return clock }, wait: func(ctx context.Context, d time.Duration) error {
+				if err := ctx.Err(); err != nil {
+					return err
+				}
+				if d > 0 {
+					clock = clock.Add(d)
+				}
+				return nil
+			}}
+			storage := &cleanupObjectStorageStub{now: s.now, onRequest: func() { clock = clock.Add(tc.requestLatency) }}
+			p := defaultImageResultCleanupPolicy(90)
+			p.BatchSize, p.RequestsPerSecond = tc.batchSize, 1000
+			err := s.execute(context.Background(), &ImageResultCleanupJob{Target: ImageResultCleanupTarget{Provider: ref.Provider, Bucket: ref.Bucket, Identity: "identity"}}, p, storage)
+			require.NoError(t, err)
+			require.Equal(t, tc.wantCompleted, repo.claimed)
+			require.Equal(t, tc.wantCompleted, repo.completed)
+			require.Equal(t, tc.wantCompleted, storage.heads)
+			require.Equal(t, tc.wantCompleted, storage.deletes)
+			require.Equal(t, "pending", repo.released)
+			require.LessOrEqual(t, clock.Sub(start), 30*time.Second)
+			for i := 1; i < len(storage.requests); i++ {
+				gap := storage.requests[i].Sub(storage.requests[i-1])
+				require.GreaterOrEqual(t, gap, time.Millisecond, "HEAD and DELETE share the nonzero request interval")
+				if tc.requestLatency == 0 {
+					require.Equal(t, time.Millisecond, gap, "1000/s must not remain capped at the former 5/s limit")
+				}
+			}
+		})
+	}
 }

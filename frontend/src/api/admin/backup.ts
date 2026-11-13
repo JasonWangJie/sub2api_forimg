@@ -193,6 +193,7 @@ export interface ImageCleanupPolicy {
   timezone: 'Asia/Shanghai'
   batch_size: number
   requests_per_second: number
+  concurrency: number
   next_run_at?: string | null
   configured?: boolean
   revision?: number
@@ -200,7 +201,7 @@ export interface ImageCleanupPolicy {
 
 export async function getImageCleanupPolicy(): Promise<ImageCleanupPolicy> {
   const { data } = await apiClient.get<ImageCleanupPolicy>('/admin/backups/image-storage/cleanup-policy')
-  return data
+  return { ...data, concurrency: data.concurrency ?? 1 }
 }
 
 export async function updateImageCleanupPolicy(policy: ImageCleanupPolicy): Promise<ImageCleanupPolicy> {
@@ -208,10 +209,11 @@ export async function updateImageCleanupPolicy(policy: ImageCleanupPolicy): Prom
     enabled: policy.enabled, retention_value: policy.retention_value, retention_unit: policy.retention_unit,
     schedule_mode: policy.schedule_mode, interval_minutes: policy.interval_minutes, daily_time: policy.daily_time,
     timezone: policy.timezone, batch_size: policy.batch_size, requests_per_second: policy.requests_per_second,
+    concurrency: policy.concurrency,
     revision: policy.revision,
   }
   const { data } = await apiClient.put<ImageCleanupPolicy>('/admin/backups/image-storage/cleanup-policy', payload)
-  return data
+  return { ...data, concurrency: data.concurrency ?? 1 }
 }
 
 export async function getImageStorageConfig(): Promise<ImageStorageConfigResponse> {

@@ -13,7 +13,7 @@ func defaultImageResultCleanupPolicy(days int) ImageResultCleanupPolicy {
 	if days <= 0 {
 		days = 90
 	}
-	return ImageResultCleanupPolicy{Enabled: true, RetentionValue: days, RetentionUnit: "days", ScheduleMode: "interval", IntervalMinutes: 15, DailyTime: "03:00", Timezone: imageResultCleanupTimezone, BatchSize: 50, RequestsPerSecond: 2}
+	return ImageResultCleanupPolicy{Enabled: true, RetentionValue: days, RetentionUnit: "days", ScheduleMode: "interval", IntervalMinutes: 15, DailyTime: "03:00", Timezone: imageResultCleanupTimezone, BatchSize: 50, RequestsPerSecond: 2, Concurrency: 1}
 }
 
 func imageResultCleanupAge(value int, unit string) (time.Duration, error) {
@@ -48,8 +48,11 @@ func validateImageResultCleanupPolicy(p *ImageResultCleanupPolicy) error {
 	if p.BatchSize < 1 || p.BatchSize > 100 {
 		return fmt.Errorf("单批数量必须为 1～100")
 	}
-	if p.RequestsPerSecond < 1 || p.RequestsPerSecond > 5 {
-		return fmt.Errorf("存储请求速度必须为每秒 1～5 次")
+	if p.RequestsPerSecond < 1 || p.RequestsPerSecond > 1000 {
+		return fmt.Errorf("存储请求速度必须为每秒 1～1000 次")
+	}
+	if p.Concurrency < 1 || p.Concurrency > 16 {
+		return fmt.Errorf("清理并发数必须为 1～16")
 	}
 	return nil
 }

@@ -7,7 +7,6 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"math"
 	"os"
 	"time"
@@ -285,73 +284,7 @@ func cleanupStorageError(err error) (missing, denied bool) {
 }
 
 func (s *ImageResultCleanupService) execute(ctx context.Context, job *ImageResultCleanupJob, p ImageResultCleanupPolicy, storage DurableImageStorage) error {
-	end := s.now().Add(30 * time.Second)
-	sliceCtx, sliceCancel := context.WithDeadline(ctx, end)
-	defer sliceCancel()
-	ctx = sliceCtx
-	requestAt := s.now()
-	gate := func(callCtx context.Context) error {
-		if err := s.wait(callCtx, requestAt.Sub(s.now())); err != nil {
-			return err
-		}
-		requestAt = s.now().Add(time.Second / time.Duration(p.RequestsPerSecond))
-		return nil
-	}
-	status, message, delay := "pending", "", time.Second
-	for count := 0; count < p.BatchSize && s.now().Before(end) && ctx.Err() == nil; count++ {
-		alive, err := s.repo.HeartbeatImageResultCleanupJob(ctx, job.ID, job.LeaseVersion, s.now().Add(2*time.Minute))
-		if err != nil {
-			return err
-		}
-		if !alive {
-			status = "cancelled"
-			break
-		}
-		current, _, err := s.target(ctx)
-		if err != nil || current != job.Target {
-			status, message, delay = "paused", "存储位置已变化，请核对后恢复", 0
-			break
-		}
-		allowed, reason := s.load.allow(ctx, s.now())
-		if !allowed {
-			message, delay = reason, 60*time.Second
-			break
-		}
-		queryCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
-		object, err := s.repo.ClaimImageResultCleanupObject(queryCtx, job.ID, job.LeaseVersion, s.now().UTC())
-		cancel()
-		if err != nil {
-			return err
-		}
-		if object == nil {
-			status, delay = "succeeded", 0
-			break
-		}
-		if object.Action != "delete" {
-			continue
-		}
-		outcome, retry, reason, stop := s.deleteObject(ctx, job, object, storage, gate)
-		// Complete in a bounded independent context even after shutdown/cancel:
-		// a request already sent to storage may have committed its deletion.
-		finishCtx, finishCancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
-		err = s.repo.CompleteImageResultCleanupObject(finishCtx, job.ID, job.LeaseVersion, object.ID, outcome, retry, reason)
-		finishCancel()
-		if err != nil {
-			return fmt.Errorf("confirm result cleanup: %w", err)
-		}
-		if stop {
-			status, message, delay = "paused", reason, 0
-			break
-		}
-	}
-	var next *time.Time
-	if delay > 0 {
-		v := s.now().UTC().Add(delay)
-		next = &v
-	}
-	finishCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
-	defer cancel()
-	return s.repo.ReleaseImageResultCleanupJob(finishCtx, job.ID, job.LeaseVersion, status, next, message)
+	return s.executeConcurrent(ctx, job, p, storage)
 }
 
 func (s *ImageResultCleanupService) deleteObject(ctx context.Context, job *ImageResultCleanupJob, item *ImageResultCleanupObject, storage DurableImageStorage, gate func(context.Context) error) (string, *time.Time, string, bool) {
@@ -363,9 +296,14 @@ func (s *ImageResultCleanupService) deleteObject(ctx context.Context, job *Image
 		return "skipped", nil, "对象存储身份不匹配", false
 	}
 	call := func(fn func(context.Context) error) error {
+		// Queueing for the shared rate gate uses the slice budget. The 10-second
+		// timeout applies to the admitted storage request, not other workers' wait.
+		if err := gate(ctx); err != nil {
+			return err
+		}
 		c, cancel := context.WithTimeout(ctx, 10*time.Second)
 		defer cancel()
-		return fn(WithImageCleanupRequest(c, gate))
+		return fn(WithImageCleanupRequest(c, func(context.Context) error { return nil }))
 	}
 	// DeleteObject can succeed for an already absent key. Check existence first
 	// so missing objects are reconciled without inflating deleted bytes/counts.

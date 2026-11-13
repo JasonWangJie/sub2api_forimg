@@ -11,7 +11,7 @@ vi.mock('@/composables/useStepUp', () => ({ useStepUp: () => ({ run: (fn: () => 
 vi.mock('vue-i18n', async () => ({ ...await vi.importActual<typeof import('vue-i18n')>('vue-i18n'), useI18n: () => ({ locale: { value: 'zh' }, t: (key: string, params?: Record<string, unknown>) => params ? `${key}:${JSON.stringify(params)}` : key }) }))
 import ImageCleanupCard from '../ImageCleanupCard.vue'
 
-const policy = { enabled: true, retention_value: 90, retention_unit: 'days', schedule_mode: 'interval', interval_minutes: 15, daily_time: '03:00', timezone: 'Asia/Shanghai', batch_size: 50, requests_per_second: 2, configured: false, revision: 3 }
+const policy = { enabled: true, retention_value: 90, retention_unit: 'days', schedule_mode: 'interval', interval_minutes: 15, daily_time: '03:00', timezone: 'Asia/Shanghai', batch_size: 50, requests_per_second: 2, concurrency: 1, configured: false, revision: 3 }
 const fixedPreview = { before: '2026-11-11T12:00:00Z', preview_token: 'fixed-token', matched_items: 8, matched_bytes: 2048, protected_count: 2, scanned_count: 10, truncated: false }
 let wrapper: VueWrapper
 async function render() {
@@ -43,7 +43,7 @@ describe('ImageCleanupCard', () => {
     await wrapper.get('[data-testid="retention-unit"]').setValue('hours')
     await wrapper.get('[data-testid="cleanup-policy"]').trigger('submit')
     await flushPromises()
-    expect(mocks.savePolicy).toHaveBeenCalledWith(expect.objectContaining({ schedule_mode: 'daily', daily_time: '04:30', timezone: 'Asia/Shanghai', retention_value: 12, retention_unit: 'hours', revision: 3, batch_size: 50, requests_per_second: 2 }))
+    expect(mocks.savePolicy).toHaveBeenCalledWith(expect.objectContaining({ schedule_mode: 'daily', daily_time: '04:30', timezone: 'Asia/Shanghai', retention_value: 12, retention_unit: 'hours', revision: 3, batch_size: 50, requests_per_second: 2, concurrency: 1 }))
     expect(wrapper.text()).not.toContain('imageCleanup.legacyHint')
   })
 
@@ -81,7 +81,7 @@ describe('ImageCleanupCard', () => {
 
   it('does not submit malformed limits or zero retention', async () => {
     await render()
-    for (const [selector, value] of [['batch-size', '101'], ['delete-rate', '6'], ['retention-value', '0']]) {
+    for (const [selector, value] of [['batch-size', '101'], ['retention-value', '0']]) {
       await wrapper.get(`[data-testid="${selector}"]`).setValue(value)
       await wrapper.get('[data-testid="cleanup-policy"]').trigger('submit')
     }
@@ -89,6 +89,66 @@ describe('ImageCleanupCard', () => {
     await wrapper.get('[data-testid="manual-value"]').setValue('0')
     await wrapper.get('[data-testid="cleanup-manual"]').trigger('submit')
     expect(mocks.preview).not.toHaveBeenCalled()
+  })
+
+  it.each([1, 50, 100, 500, 1000])('saves a storage request limit of %i with the existing policy revision', async rate => {
+    await render()
+    const input = wrapper.get<HTMLInputElement>('[data-testid="delete-rate"]')
+    await input.setValue(String(rate))
+    expect(input.element.checkValidity()).toBe(true)
+    expect(wrapper.get('[data-testid="cleanup-policy"] button[type="submit"]').attributes('disabled')).toBeUndefined()
+    await wrapper.get('[data-testid="cleanup-policy"]').trigger('submit')
+    await flushPromises()
+    expect(mocks.savePolicy).toHaveBeenCalledOnce()
+    expect(mocks.savePolicy).toHaveBeenCalledWith(expect.objectContaining({ requests_per_second: rate, revision: 3 }))
+  })
+
+  it.each([0, 1.5, 1001])('rejects an invalid storage request limit of %s before saving', async rate => {
+    await render()
+    const input = wrapper.get<HTMLInputElement>('[data-testid="delete-rate"]')
+    await input.setValue(String(rate))
+    expect(input.element.checkValidity()).toBe(false)
+    expect(wrapper.get('[data-testid="cleanup-policy"] button[type="submit"]').attributes('disabled')).toBeDefined()
+    await wrapper.get('[data-testid="cleanup-policy"]').trigger('submit')
+    await flushPromises()
+    expect(mocks.savePolicy).not.toHaveBeenCalled()
+  })
+
+  it.each([4, 16])('saves cleanup concurrency %i with the shared rate and revision', async concurrency => {
+    await render()
+    const input = wrapper.get<HTMLInputElement>('[data-testid="cleanup-concurrency"]')
+    await input.setValue(String(concurrency))
+    expect(input.element.checkValidity()).toBe(true)
+    expect(wrapper.get('[data-testid="cleanup-policy"] button[type="submit"]').attributes('disabled')).toBeUndefined()
+    await wrapper.get('[data-testid="cleanup-policy"]').trigger('submit')
+    await flushPromises()
+    expect(mocks.savePolicy).toHaveBeenCalledOnce()
+    expect(mocks.savePolicy).toHaveBeenCalledWith(expect.objectContaining({ concurrency, requests_per_second: 2, revision: 3 }))
+  })
+
+  it.each([0, 1.5, 17])('rejects invalid cleanup concurrency %s before saving', async concurrency => {
+    await render()
+    const input = wrapper.get<HTMLInputElement>('[data-testid="cleanup-concurrency"]')
+    await input.setValue(String(concurrency))
+    expect(input.element.checkValidity()).toBe(false)
+    expect(wrapper.get('[data-testid="cleanup-policy"] button[type="submit"]').attributes('disabled')).toBeDefined()
+    await wrapper.get('[data-testid="cleanup-policy"]').trigger('submit')
+    await flushPromises()
+    expect(mocks.savePolicy).not.toHaveBeenCalled()
+  })
+
+  it('restores concurrency one when loading a legacy response without the field', async () => {
+    mocks.getPolicy.mockResolvedValue({ ...policy, concurrency: undefined })
+    await render()
+    const input = wrapper.get<HTMLInputElement>('[data-testid="cleanup-concurrency"]')
+    expect(input.element.value).toBe('1')
+    await input.setValue('4')
+    await wrapper.get('[data-testid="cleanup-policy"] button[type="button"]').trigger('click')
+    await flushPromises()
+    expect(input.element.value).toBe('1')
+    await wrapper.get('[data-testid="cleanup-policy"]').trigger('submit')
+    await flushPromises()
+    expect(mocks.savePolicy).toHaveBeenCalledWith(expect.objectContaining({ concurrency: 1, revision: 3 }))
   })
 
   it('prevents execution without a preview token and explains truncated counts', async () => {

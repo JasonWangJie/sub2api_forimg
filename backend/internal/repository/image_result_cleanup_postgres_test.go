@@ -7,19 +7,55 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"net/url"
+	"os"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/Wei-Shaw/sub2api/migrations"
+	"github.com/lib/pq"
 	"github.com/stretchr/testify/require"
 )
 
 func resultCleanupPostgresDB(t *testing.T) *sql.DB {
 	t.Helper()
 	db := openAsyncImagePostgresTestDB(t)
-	_, err := db.Exec(`CREATE TEMP TABLE users(id BIGINT PRIMARY KEY);
+	setupResultCleanupPostgresDB(t, db, true)
+	return db
+}
+
+// Separate connections need visible tables. Use a fresh schema only after the
+// common helper has validated an explicit loopback DSN, and drop it on cleanup.
+func resultCleanupConcurrentPostgresDB(t *testing.T) *sql.DB {
+	t.Helper()
+	control := openAsyncImagePostgresTestDB(t)
+	schema := fmt.Sprintf("cleanup_concurrency_%d", time.Now().UnixNano())
+	_, err := control.Exec(`CREATE SCHEMA ` + pq.QuoteIdentifier(schema))
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		_, err := control.Exec(`DROP SCHEMA ` + pq.QuoteIdentifier(schema) + ` CASCADE`)
+		require.NoError(t, err)
+	})
+	u, err := url.Parse(os.Getenv("SUB2API_TEST_POSTGRES_DSN"))
+	require.NoError(t, err)
+	query := u.Query()
+	query.Set("search_path", schema)
+	u.RawQuery = query.Encode()
+	db, err := sql.Open("postgres", u.String())
+	require.NoError(t, err)
+	db.SetMaxOpenConns(4)
+	db.SetMaxIdleConns(4)
+	t.Cleanup(func() { require.NoError(t, db.Close()) })
+	setupResultCleanupPostgresDB(t, db, false)
+	return db
+}
+
+func setupResultCleanupPostgresDB(t *testing.T, db *sql.DB, temporary bool) {
+	t.Helper()
+	statement := `CREATE TEMP TABLE users(id BIGINT PRIMARY KEY);
  INSERT INTO users VALUES(1);
  CREATE TEMP TABLE async_image_tasks(id BIGSERIAL PRIMARY KEY,task_id VARCHAR(64) UNIQUE NOT NULL,status TEXT NOT NULL,cleanup_claimed_at TIMESTAMPTZ,
  reference_image_urls JSONB NOT NULL DEFAULT '[]');
@@ -38,12 +74,19 @@ func resultCleanupPostgresDB(t *testing.T) *sql.DB {
  CREATE TEMP TABLE image_library_cleanup_jobs(id BIGSERIAL PRIMARY KEY,requested_by BIGINT REFERENCES users(id),scope VARCHAR(32) NOT NULL,
  filters JSONB NOT NULL DEFAULT '{}',status VARCHAR(20) NOT NULL DEFAULT 'pending',lease_version BIGINT NOT NULL DEFAULT 0,
  scanned_count BIGINT NOT NULL DEFAULT 0,deleted_count BIGINT NOT NULL DEFAULT 0,deleted_bytes BIGINT NOT NULL DEFAULT 0,
- last_error TEXT,started_at TIMESTAMPTZ,finished_at TIMESTAMPTZ,created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW());`)
+ last_error TEXT,started_at TIMESTAMPTZ,finished_at TIMESTAMPTZ,created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW());`
+	if !temporary {
+		statement = strings.ReplaceAll(statement, "CREATE TEMP TABLE", "CREATE TABLE")
+	}
+	_, err := db.Exec(statement)
 	require.NoError(t, err)
 	migration, err := migrations.FS.ReadFile("228_ZJ_image_result_cleanup.sql")
 	require.NoError(t, err)
 	// Run the real migration twice; only table creation becomes connection-local.
-	statement := strings.ReplaceAll(string(migration), "CREATE TABLE IF NOT EXISTS", "CREATE TEMP TABLE IF NOT EXISTS")
+	statement = string(migration)
+	if temporary {
+		statement = strings.ReplaceAll(statement, "CREATE TABLE IF NOT EXISTS", "CREATE TEMP TABLE IF NOT EXISTS")
+	}
 	_, err = db.Exec(statement)
 	require.NoError(t, err)
 	_, err = db.Exec(statement)
@@ -58,7 +101,12 @@ func resultCleanupPostgresDB(t *testing.T) *sql.DB {
 			}
 		}
 	}
-	return db
+	ownerMigration, err := migrations.FS.ReadFile("230_ZJ_image_result_cleanup_claim_owner.sql")
+	require.NoError(t, err)
+	for i := 0; i < 2; i++ {
+		_, err = db.Exec(string(ownerMigration))
+		require.NoError(t, err)
+	}
 }
 
 func seedResultCleanup(t *testing.T, db *sql.DB, count int) {
@@ -196,12 +244,22 @@ func TestImageResultCleanupPostgresPolicyScheduleAndPreview(t *testing.T) {
 	p, err = repo.SaveImageResultCleanupPolicy(ctx, service.ImageResultCleanupPolicy{Enabled: true, NextRunAt: &now}, 0)
 	require.NoError(t, err)
 	require.Equal(t, int64(1), p.Revision)
+	_, err = db.Exec(`UPDATE image_result_cleanup_policy SET config=config-'concurrency'`)
+	require.NoError(t, err)
+	p, err = repo.GetImageResultCleanupPolicy(ctx)
+	require.NoError(t, err)
+	require.Equal(t, 1, p.Concurrency, "policies saved before concurrency was introduced stay serial")
 	_, err = repo.SaveImageResultCleanupPolicy(ctx, *p, 0)
 	require.ErrorIs(t, err, service.ErrImageResultCleanupConflict)
 	request := service.ImageResultCleanupRequest{Before: now.Add(-time.Hour), Target: service.ImageResultCleanupTarget{Provider: "custom_s3", Bucket: "results", Identity: "target"}, Source: "scheduled", PolicyRevision: p.Revision}
 	job, err := repo.EnqueueScheduledImageResultCleanup(ctx, request, now.Add(time.Second), now.Add(time.Hour))
 	require.NoError(t, err)
 	require.NotNil(t, job)
+	_, err = db.Exec(`UPDATE image_library_cleanup_jobs SET result_request=result_request#-'{policy_snapshot,concurrency}' WHERE id=$1`, job.ID)
+	require.NoError(t, err)
+	job, err = repo.GetImageResultCleanupJob(ctx, job.ID)
+	require.NoError(t, err)
+	require.Equal(t, 1, job.PolicySnapshot.Concurrency, "old job snapshots retain serial behavior")
 	duplicate, err := repo.EnqueueScheduledImageResultCleanup(ctx, request, now.Add(time.Second), now.Add(time.Hour))
 	require.NoError(t, err)
 	require.Nil(t, duplicate)
@@ -224,6 +282,102 @@ func TestImageResultCleanupPostgresPolicyScheduleAndPreview(t *testing.T) {
 	done, err = repo.PrepareLegacyImageResultCleanup(ctx, parentID, 3, request)
 	require.NoError(t, err)
 	require.True(t, done)
+}
+
+func TestImageResultCleanupPostgresConcurrentTicketOwnership(t *testing.T) {
+	db := resultCleanupConcurrentPostgresDB(t)
+	seedResultCleanup(t, db, 6)
+	repo := &imageLibraryRepository{db: db}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	job, now := newResultCleanupTestJob(t, repo)
+	claimTogether := func(lease int64) []*service.ImageResultCleanupObject {
+		t.Helper()
+		type result struct {
+			ticket *service.ImageResultCleanupObject
+			err    error
+		}
+		start := make(chan struct{})
+		results := make(chan result, 6)
+		var ready sync.WaitGroup
+		ready.Add(6)
+		for i := 0; i < 6; i++ {
+			go func() {
+				ready.Done()
+				<-start
+				ticket, err := repo.ClaimImageResultCleanupObject(ctx, job.ID, lease, now)
+				results <- result{ticket, err}
+			}()
+		}
+		ready.Wait()
+		close(start)
+		var tickets []*service.ImageResultCleanupObject
+		seen := map[int64]bool{}
+		for i := 0; i < 6; i++ {
+			result := <-results
+			require.NoError(t, result.err)
+			require.NotNil(t, result.ticket)
+			require.Equal(t, "delete", result.ticket.Action)
+			require.False(t, seen[result.ticket.ID], "concurrent claims must never share a ticket")
+			seen[result.ticket.ID] = true
+			tickets = append(tickets, result.ticket)
+		}
+		require.Greater(t, db.Stats().OpenConnections, 1, "exercise SQL locking across real connections")
+		return tickets
+	}
+	tickets := claimTogether(job.LeaseVersion)
+	for i := 0; i < 3; i++ {
+		next, err := repo.ClaimImageResultCleanupObject(ctx, job.ID, job.LeaseVersion, now)
+		require.NoError(t, err)
+		require.Nil(t, next, "all remaining tickets are already in flight in this lease")
+	}
+	retryAt := now.Add(-time.Second)
+	require.NoError(t, repo.CompleteImageResultCleanupObject(ctx, job.ID, job.LeaseVersion, tickets[0].ID, "retry", &retryAt, "synthetic timeout"))
+	require.ErrorIs(t, repo.CompleteImageResultCleanupObject(ctx, job.ID, job.LeaseVersion, tickets[0].ID, "retry", &retryAt, "duplicate timeout"), service.ErrImageResultCleanupConflict)
+	next, err := repo.ClaimImageResultCleanupObject(ctx, job.ID, job.LeaseVersion, now)
+	require.NoError(t, err)
+	require.Nil(t, next, "even an immediately due retry belongs to the current slice until released")
+	oldLease := job.LeaseVersion
+	// Simulate a crashed process, including one pre-migration ticket whose owner
+	// defaulted to zero. The next lease must recover both deleting and retry.
+	_, err = db.Exec(`UPDATE image_library_cleanup_jobs SET result_lease_until=NOW()-INTERVAL '1 second' WHERE id=$1`, job.ID)
+	require.NoError(t, err)
+	_, err = db.Exec(`UPDATE image_result_cleanup_objects SET claim_lease_version=0 WHERE id=$1`, tickets[1].ID)
+	require.NoError(t, err)
+	job, err = repo.ClaimImageResultCleanupJob(ctx, time.Now().UTC(), time.Now().UTC().Add(time.Minute))
+	require.NoError(t, err)
+	require.NotNil(t, job)
+	require.Greater(t, job.LeaseVersion, oldLease)
+	require.ErrorIs(t, repo.VerifyImageResultCleanupObject(ctx, job.ID, oldLease, tickets[1].ID, "target"), service.ErrImageLibraryLeaseLost)
+	require.ErrorIs(t, repo.CompleteImageResultCleanupObject(ctx, job.ID, oldLease, tickets[1].ID, "deleted", nil, ""), service.ErrImageLibraryLeaseLost)
+	// Owning the job alone does not own a ticket left by the previous slice.
+	require.ErrorIs(t, repo.VerifyImageResultCleanupObject(ctx, job.ID, job.LeaseVersion, tickets[1].ID, "target"), service.ErrImageLibraryLeaseLost)
+	require.ErrorIs(t, repo.CompleteImageResultCleanupObject(ctx, job.ID, job.LeaseVersion, tickets[1].ID, "deleted", nil, ""), service.ErrImageResultCleanupConflict)
+	recovered := claimTogether(job.LeaseVersion)
+	for i, ticket := range recovered {
+		require.Equal(t, 2, ticket.Attempts)
+		require.NoError(t, repo.VerifyImageResultCleanupObject(ctx, job.ID, job.LeaseVersion, ticket.ID, "target"))
+		outcome := "deleted"
+		if i == 0 {
+			outcome = "missing"
+		}
+		require.NoError(t, repo.CompleteImageResultCleanupObject(ctx, job.ID, job.LeaseVersion, ticket.ID, outcome, nil, ""))
+		require.ErrorIs(t, repo.CompleteImageResultCleanupObject(ctx, job.ID, job.LeaseVersion, ticket.ID, outcome, nil, ""), service.ErrImageResultCleanupConflict)
+	}
+	require.NoError(t, repo.ReleaseImageResultCleanupJob(ctx, job.ID, job.LeaseVersion, "succeeded", nil, ""))
+	job, err = repo.GetImageResultCleanupJob(ctx, job.ID)
+	require.NoError(t, err)
+	require.Equal(t, "succeeded", job.Status)
+	require.Equal(t, int64(5), job.DeletedCount)
+	require.Equal(t, int64(500), job.DeletedBytes)
+	require.Equal(t, int64(6), job.DetachedCount)
+	require.Equal(t, int64(1), job.FailedCount)
+	var remaining, owned int
+	require.NoError(t, db.QueryRow(`SELECT COUNT(*) FROM async_image_results`).Scan(&remaining))
+	require.Zero(t, remaining)
+	require.NoError(t, db.QueryRow(`SELECT COUNT(*) FROM image_result_cleanup_objects WHERE claim_lease_version=$1 AND attempts=2`, job.LeaseVersion).Scan(&owned))
+	require.Equal(t, 6, owned)
+	t.Log("6 concurrent claims on 4 real connections: unique tickets; same-slice retry withheld; new lease recovered all; stale/unowned/duplicate completion rejected")
 }
 
 func TestImageResultCleanupPostgresHundredThousandBounded(t *testing.T) {
