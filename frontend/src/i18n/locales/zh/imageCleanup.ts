@@ -40,6 +40,7 @@ export default {
     saved: '清理策略已保存',
     queued: '清理任务已加入后台队列',
     history: '最近清理任务',
+    historyHint: '最多显示最近5条；已结束记录保留24小时，未结束或待对账任务继续保留。',
     progress: '扫描 {scanned} · 已删对象 {deleted}（{bytes}）· 解除引用 {detached} · 保护 {protected} · 跳过 {skipped} · 失败 {errors}',
     cancel: '取消后续清理',
     cancelling: '正在取消…',

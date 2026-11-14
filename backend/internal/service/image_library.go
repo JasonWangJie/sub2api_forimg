@@ -1149,7 +1149,7 @@ func (s *ImageLibraryService) AdminPreviewCleanup(ctx context.Context, scope str
 }
 
 func (s *ImageLibraryService) AdminListCleanupJobs(ctx context.Context, limit int) ([]ImageLibraryCleanupJob, error) {
-	return s.repo.ListCleanupJobs(ctx, limit)
+	return s.repo.ListCleanupJobs(ctx, normalizeImageCleanupHistoryLimit(limit))
 }
 
 func imageLibraryRequestHash(checksum string, in ImageLibraryImportInput) string {

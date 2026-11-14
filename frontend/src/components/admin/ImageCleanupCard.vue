@@ -50,8 +50,9 @@
         </div>
       </form>
     </div>
-    <div class="mt-6 border-t border-gray-200 pt-4 dark:border-gray-700">
+    <div class="mt-6 border-t border-gray-200 pt-4 dark:border-gray-700" data-testid="cleanup-history">
       <div class="flex items-center justify-between gap-3"><h4 class="text-sm font-semibold text-gray-900 dark:text-white">{{ t('imageCleanup.history') }}</h4><button type="button" class="btn btn-secondary btn-sm" :disabled="refreshing" @click="refreshJobs()">{{ t('common.refresh') }}</button></div>
+      <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">{{ t('imageCleanup.historyHint') }}</p>
       <p v-if="!jobs.length" class="py-4 text-sm text-gray-500">{{ t('common.noData') }}</p>
       <ol v-else class="mt-2 divide-y divide-gray-100 dark:divide-gray-800">
         <li v-for="job in jobs" :key="job.id" class="py-3" :data-testid="`cleanup-job-${job.id}`">
@@ -173,8 +174,8 @@ async function refreshJobs(silent = false) {
   if (refreshing.value || disposed) return
   refreshing.value = true
   try {
-    const result = await listCleanupJobs({ limit: 30, scope: 'async_results' })
-    if (!disposed) jobs.value = result.items.filter(job => job.scope === 'async_results')
+    const result = await listCleanupJobs({ limit: 5, scope: 'async_results' })
+    if (!disposed) jobs.value = result.items.filter(job => job.scope === 'async_results').slice(0, 5)
   } catch (error) { if (!silent) reportError(error) } finally { refreshing.value = false }
 }
 

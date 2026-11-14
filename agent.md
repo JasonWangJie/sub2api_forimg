@@ -1,5 +1,13 @@
 # AI 交接文档
 
+## 2026-11-14 当前交接：清理任务历史24小时与最近5条
+
+- 用户要求最近清理任务不再过长。本地已完成数据备份ImageCleanupCard与图片管理ImageModerationView两个入口：请求/渲染最多5条，Service/Repository也封顶5；中英提示说明已结束记录保留24小时、活动或待对账继续保留。[规则与接口](wiki-new/对象存储与保留策略.md#生成结果定时与手动清理)。
+- `service/image_library_cleanup_history.go` 接入既有维护循环，每分钟一次、2秒数据库预算，自动清理关闭或存储异常也执行；24小时从finished_at计算，旧数据fallback updated_at/created_at。`repository/image_cleanup_history_repo.go` 每轮最多500个历史任务、500个过期preview、5000个完成ticket，ticket删净后才删job；大任务跨轮回收。
+- 勿直接CASCADE清空历史：pending/running/paused、有效租约、deleting/retry对象恢复事实、preview及父子任务链都受保护。只删已结束历史元数据，不删除生成结果/存储对象。过期但仍需对账任务继续保留并可列表操作，仍遵守最多5条；已安全回收任务不再提供恢复入口。
+- 真实HEAD=`3b42e1a0f6b6dafffe7ff583d50988d5d3e10750`，`main...origin/main`；开始干净/describe=`v0.1.173.73`，完成describe=`v0.1.173.73-dirty`，源码VERSION=`0.1.173.71`。期间另一个工作流修改发行手册的tag示例为.74及本功能说明，已保留、未认领。仅本地实现/测试/文档，未连接生产、部署、重启、提交、升版或发布；后续需用户明确上线要求。
+- 相关Go unit、完整Repository unit、普通全仓/PG标签编译、前端32用例/类型/六文件ESLint通过。隔离PG16.4/SCRAM/loopback58075的4个真实SQL函数通过0.995s，覆盖24h/FK引用/并发锁/6001条ticket分批，已核对本轮PGDATA和PID23696并fast stop，PID退出、监听关闭。前端构建、浏览器实机、CI及生产验收未执行；详细命令、早期测试环境失败与运行边界见[开发台账](开发台账.md)。
+
 ## 2026-11-13 当前交接：通用超时与404文件引用
 
 - 用户指定 `asyncimg_6531004e4ddb5936136220b550cbfe80`，追加旧454任务及包含“超时/time out”等报错换渠道。生产只读SQL核对新任务：Gemini图生图、`gemini-3-pro-image-preview`，账号17在北京时间18:52:37—18:53:38仅一次调用；HTTP404 / provider code `404` /「文件引用不存在: HTTPS参考图URL」，hybrid、三类重试均0，failed/upstream_failed、账务pending、请求载荷已清空。不能由此断言原文件全局不存在或供应商未收费。

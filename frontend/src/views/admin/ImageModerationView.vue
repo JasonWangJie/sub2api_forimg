@@ -295,6 +295,7 @@
           </form>
           <div class="cleanup-jobs">
             <h2>{{ t('imageWorkflow.admin.cleanupJobs') }}</h2>
+            <p class="text-xs text-gray-500 dark:text-gray-400">{{ t('imageCleanup.historyHint') }}</p>
             <article v-for="job in cleanupJobs" :key="job.id">
               <div><strong>#{{ job.id }}</strong><span class="admin-status">{{ job.status }}</span></div>
               <p>{{ cleanupScopeLabel(job.scope) }} · {{ formatCleanupFilters(job) }} · {{ formatDate(job.created_at) }}</p>
@@ -547,7 +548,7 @@ function resetLibraryFilters() {
 
 async function loadCleanup() {
   loading.value = true
-  try { const [jobs, migration] = await Promise.all([listCleanupJobs({ limit: 30 }), getImageLibraryMigrationState()]); cleanupJobs.value = jobs.items; migrationState.value = migration }
+  try { const [jobs, migration] = await Promise.all([listCleanupJobs({ limit: 5 }), getImageLibraryMigrationState()]); cleanupJobs.value = jobs.items.slice(0, 5); migrationState.value = migration }
   catch (cause: any) { appStore.showError(cause?.message || t('imageWorkflow.admin.loadFailed')) } finally { loading.value = false }
 }
 async function previewCleanupJob() {

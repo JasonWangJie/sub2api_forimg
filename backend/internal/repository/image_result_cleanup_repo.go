@@ -216,10 +216,8 @@ func (r *imageLibraryRepository) EnqueueScheduledImageResultCleanup(ctx context.
 }
 
 func (r *imageLibraryRepository) ListImageResultCleanupJobs(ctx context.Context, limit int) ([]service.ImageResultCleanupJob, error) {
-	if limit < 1 || limit > 100 {
-		limit = 20
-	}
-	rows, err := r.db.QueryContext(ctx, `SELECT `+resultCleanupJobColumns+` FROM image_library_cleanup_jobs WHERE result_request IS NOT NULL ORDER BY id DESC LIMIT $1`, limit)
+	limit = normalizeImageCleanupHistoryLimit(limit)
+	rows, err := r.db.QueryContext(ctx, `SELECT `+resultCleanupJobColumns+` FROM image_library_cleanup_jobs j WHERE result_request IS NOT NULL AND (`+imageCleanupHistoryVisibleSQL+`) ORDER BY j.id DESC LIMIT $1`, limit)
 	if err != nil {
 		return nil, err
 	}

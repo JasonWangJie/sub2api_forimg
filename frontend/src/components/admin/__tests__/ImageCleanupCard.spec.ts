@@ -200,6 +200,31 @@ describe('ImageCleanupCard', () => {
     expect(mocks.resume).toHaveBeenCalledWith(8)
   })
 
+  it('requests five recent jobs and keeps the history compact when a response exceeds the limit', async () => {
+    const resultJobs = Array.from({ length: 7 }, (_, index) => ({
+      id: 20 - index,
+      scope: 'async_results',
+      status: index === 0 ? 'running' : 'succeeded',
+      created_at: '2020-01-01T00:00:00Z',
+    }))
+    mocks.list.mockResolvedValue({ items: [
+      { id: 99, scope: 'expired', status: 'succeeded', created_at: fixedPreview.before },
+      ...resultJobs,
+    ] })
+    await render()
+
+    expect(mocks.list).toHaveBeenCalledWith({ limit: 5, scope: 'async_results' })
+    expect(wrapper.get('[data-testid="cleanup-history"]').text()).toContain('imageCleanup.historyHint')
+    expect(wrapper.findAll('[data-testid="cleanup-history"] li')).toHaveLength(5)
+    expect(wrapper.find('[data-testid="cleanup-job-99"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="cleanup-job-15"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="cleanup-job-14"]').exists()).toBe(false)
+    await wrapper.get('[data-testid="cleanup-job-20"] button').trigger('click')
+    await flushPromises()
+    expect(mocks.cancel).toHaveBeenCalledWith(20)
+    expect(wrapper.findAll('[data-testid="cleanup-history"] li')).toHaveLength(5)
+  })
+
   it('stops polling after unmount', async () => {
     vi.useFakeTimers()
     await render()

@@ -1299,10 +1299,10 @@ deleted_count,deleted_bytes,last_error,created_at`, adminUserID, scope, filters)
 }
 
 func (r *imageLibraryRepository) ListCleanupJobs(ctx context.Context, limit int) ([]service.ImageLibraryCleanupJob, error) {
-	limit = normalizeLibraryLimit(limit)
+	limit = normalizeImageCleanupHistoryLimit(limit)
 	rows, err := r.db.QueryContext(ctx, `SELECT id,requested_by,scope,filters,status,scanned_count,deleted_count,deleted_bytes,last_error,created_at,
  result_request,detached_count,protected_count,skipped_count,failed_count,cancel_requested,next_attempt_at,finished_at
- FROM image_library_cleanup_jobs ORDER BY id DESC LIMIT $1`, limit)
+ FROM image_library_cleanup_jobs j WHERE (`+imageCleanupHistoryVisibleSQL+`) ORDER BY j.id DESC LIMIT $1`, limit)
 	if err != nil {
 		return nil, err
 	}

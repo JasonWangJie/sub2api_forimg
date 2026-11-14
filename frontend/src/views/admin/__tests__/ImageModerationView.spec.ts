@@ -184,4 +184,23 @@ describe('ImageModerationView', () => {
     expect(mocks.createCleanupJob).toHaveBeenCalledWith({ scope: 'async_results', before, preview_token: 'protected-preview' })
     wrapper.unmount()
   })
+
+  it('limits the cleanup history to the five most recent returned records', async () => {
+    mocks.listCleanupJobs.mockResolvedValue({ items: Array.from({ length: 7 }, (_, index) => ({
+      id: 20 - index,
+      scope: 'expired',
+      status: 'succeeded',
+      created_at: '2026-11-14T00:00:00Z',
+    })) })
+    const wrapper = mountView()
+    await flushPromises()
+    await wrapper.findAll('.moderation-tabs button')[4].trigger('click')
+    await flushPromises()
+
+    expect(mocks.listCleanupJobs).toHaveBeenCalledWith({ limit: 5 })
+    expect(wrapper.findAll('.cleanup-jobs article')).toHaveLength(5)
+    expect(wrapper.get('.cleanup-jobs').text()).toContain('imageCleanup.historyHint')
+    expect(wrapper.findAll('.cleanup-jobs article strong').map(node => node.text())).toEqual(['#20', '#19', '#18', '#17', '#16'])
+    wrapper.unmount()
+  })
 })

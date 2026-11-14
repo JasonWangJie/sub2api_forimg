@@ -37,6 +37,8 @@ type ImageLibraryMaintenanceService struct {
 	stop      context.CancelFunc
 	done      chan struct{}
 	stopped   bool
+
+	nextCleanupHistoryAt time.Time // Owned by the maintenance loop.
 }
 
 func NewImageLibraryMaintenanceService(library *ImageLibraryService, cfg *config.Config) *ImageLibraryMaintenanceService {
@@ -122,6 +124,9 @@ func (s *ImageLibraryMaintenanceService) loop(ctx context.Context) {
 func (s *ImageLibraryMaintenanceService) runOnce(ctx context.Context) {
 	if ctx.Err() != nil {
 		return
+	}
+	if err := s.processCleanupHistory(ctx, time.Now().UTC()); err != nil && !errors.Is(err, context.Canceled) {
+		logger.L().Warn("image_library.cleanup_history_failed", zap.Error(err))
 	}
 	if err := s.processOutbox(ctx); err != nil && !errors.Is(err, context.Canceled) {
 		logger.L().Warn("image_library.outbox_failed", zap.Error(err))

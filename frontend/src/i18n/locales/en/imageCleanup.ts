@@ -40,6 +40,7 @@ export default {
     saved: 'Cleanup policy saved',
     queued: 'Cleanup task queued',
     history: 'Recent cleanup tasks',
+    historyHint: 'Shows up to 5 recent tasks. Finished records are kept for 24 hours; active tasks and pending reconciliation are retained.',
     progress: 'Scanned {scanned} · Objects deleted {deleted} ({bytes}) · References removed {detached} · Protected {protected} · Skipped {skipped} · Failed {errors}',
     cancel: 'Cancel remaining work',
     cancelling: 'Cancelling…',

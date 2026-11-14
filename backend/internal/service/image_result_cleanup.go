@@ -173,10 +173,7 @@ func (s *ImageResultCleanupService) Control(ctx context.Context, adminID, jobID 
 }
 
 func (s *ImageResultCleanupService) List(ctx context.Context, limit int) ([]ImageResultCleanupJob, error) {
-	if limit < 1 || limit > 100 {
-		limit = 30
-	}
-	return s.repo.ListImageResultCleanupJobs(ctx, limit)
+	return s.repo.ListImageResultCleanupJobs(ctx, normalizeImageCleanupHistoryLimit(limit))
 }
 
 func waitImageResultCleanup(ctx context.Context, d time.Duration) error {
