@@ -124,15 +124,18 @@ func TestAsyncImageTaskRepositoryCountsStatusesWithTheTaskFilter(t *testing.T) {
 	require.NoError(t, mock.ExpectationsWereMet())
 }
 
-func TestAsyncImageTaskRepositoryAveragesCompletedTaskDuration(t *testing.T) {
+func TestAsyncImageTaskRepositoryAveragesSucceededTaskDuration(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	require.NoError(t, err)
 	defer func() { _ = db.Close() }()
 
 	createdAfter := time.Date(2026, 8, 22, 0, 0, 0, 0, time.UTC)
-	mock.ExpectQuery(`(?s)SELECT AVG\(EXTRACT\(EPOCH FROM \(finished_at - submitted_at\)\) \* 1000\).*FROM async_image_tasks WHERE user_id = \$1 AND created_at >= \$2 AND status = 'succeeded' AND finished_at IS NOT NULL`).
+	mock.ExpectQuery(`(?s)SELECT AVG\(EXTRACT\(EPOCH FROM \(finished_at - submitted_at\)\) \* 1000\).*FROM async_image_tasks WHERE user_id = \$1 AND created_at >= \$2 AND status = 'succeeded' AND finished_at >= submitted_at`).
 		WithArgs(int64(42), createdAfter).
 		WillReturnRows(sqlmock.NewRows([]string{"avg"}).AddRow(2450.5))
+	mock.ExpectQuery(`FROM async_image_tasks WHERE status = \$1 AND status = 'succeeded' AND finished_at >= submitted_at`).
+		WithArgs(service.AsyncImageTaskStatusFailed).
+		WillReturnRows(sqlmock.NewRows([]string{"avg"}).AddRow(nil))
 
 	repo := NewAsyncImageTaskRepository(db)
 	durationRepo, ok := repo.(service.AsyncImageTaskDurationStatsRepository)
@@ -143,6 +146,12 @@ func TestAsyncImageTaskRepositoryAveragesCompletedTaskDuration(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, average)
 	require.InDelta(t, 2450.5, *average, 0.0001)
+
+	average, err = durationRepo.AverageCompletedAsyncImageTaskDuration(context.Background(), service.AsyncImageTaskFilter{
+		Status: service.AsyncImageTaskStatusFailed,
+	})
+	require.NoError(t, err)
+	require.Nil(t, average)
 	require.NoError(t, mock.ExpectationsWereMet())
 }
 

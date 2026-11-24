@@ -213,7 +213,7 @@ func (r *asyncImageTaskRepository) AverageCompletedAsyncImageTaskDuration(ctx co
 	if where == "" {
 		where = " WHERE TRUE"
 	}
-	where += " AND status = 'succeeded' AND finished_at IS NOT NULL"
+	where += " AND status = 'succeeded' AND finished_at >= submitted_at"
 	var average sql.NullFloat64
 	if err := r.sql.QueryRowContext(ctx, `
 SELECT AVG(EXTRACT(EPOCH FROM (finished_at - submitted_at)) * 1000)

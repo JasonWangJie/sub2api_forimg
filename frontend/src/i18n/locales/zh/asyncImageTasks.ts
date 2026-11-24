@@ -38,7 +38,7 @@ export default {
       completed: '已完成 {count}',
       attention: '失败数 {count}',
       successRate: '成功率 {rate}',
-      averageDuration: '平均耗时 {duration}',
+      averageDuration: '成功任务平均耗时 {duration}',
     },
     filters: {
       search: '任务、模型、提示词或最终账号',

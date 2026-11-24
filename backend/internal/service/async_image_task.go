@@ -169,7 +169,7 @@ type AsyncImageTaskStatsRepository interface {
 	CountAsyncImageTaskStatuses(ctx context.Context, filter AsyncImageTaskFilter) (map[string]int64, error)
 }
 
-// AsyncImageTaskDurationStatsRepository optionally supplies the completed-task
+// AsyncImageTaskDurationStatsRepository optionally supplies the successful-task
 // duration aggregate used by the task-center summary.
 type AsyncImageTaskDurationStatsRepository interface {
 	AverageCompletedAsyncImageTaskDuration(ctx context.Context, filter AsyncImageTaskFilter) (*float64, error)

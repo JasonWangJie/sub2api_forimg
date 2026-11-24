@@ -38,7 +38,7 @@ export default {
       completed: '{count} completed',
       attention: '{count} failed',
       successRate: '{rate} success rate',
-      averageDuration: '{duration} average duration',
+      averageDuration: '{duration} average for successful tasks',
     },
     filters: {
       search: 'Task, model, prompt, or final account',
