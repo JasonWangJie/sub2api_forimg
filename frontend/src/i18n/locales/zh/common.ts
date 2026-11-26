@@ -220,6 +220,7 @@ export default {
     promptAudit: '提示词审计',
     auditLogs: '操作日志',
     adminAsyncImageTasks: '生图任务中心',
+    adminAsyncImageRetryRules: '生图错误与重试',
     adminImageModeration: '图片内容管理',
   },
 

@@ -1755,6 +1755,9 @@ func (s *OpenAIGatewayService) forwardOpenAIImagesOAuth(
 			Kind:               "request_error",
 			Message:            safeErr,
 		})
+		if handleAsyncImageRetryTransportError(ctx, account) {
+			return nil, ErrAsyncImageRetryHandled
+		}
 		return nil, fmt.Errorf("upstream request failed: %s", safeErr)
 	}
 	if resp.StatusCode >= 400 {
@@ -1762,6 +1765,10 @@ func (s *OpenAIGatewayService) forwardOpenAIImagesOAuth(
 		respBody := s.readUpstreamErrorBody(resp)
 		_ = resp.Body.Close()
 		respBody = s.redactAgentIdentitySensitiveBody(upstreamCtx, account, respBody)
+		if handleAsyncImageRetryHTTPError(ctx, account, resp.StatusCode, respBody) {
+			s.handleOpenAIAccountUpstreamError(upstreamCtx, account, resp.StatusCode, resp.Header, respBody, requestModel)
+			return nil, ErrAsyncImageRetryHandled
+		}
 		if !agentIdentityTaskRecoveryWasTried(ctx) && s.isAgentIdentityAccount(ctx, account) && isAgentIdentityTaskInvalidHTTPResponse(resp.StatusCode, respBody) {
 			expectedTaskID := account.GetCredential("task_id")
 			if err := s.recoverAgentIdentityTask(ctx, account, expectedTaskID); err != nil {
@@ -1936,6 +1943,19 @@ func (s *OpenAIGatewayService) handleOpenAIImagesOAuthResponseError(
 ) error {
 	var upstreamErr *OpenAIImagesUpstreamError
 	if !errors.As(err, &upstreamErr) {
+		if asyncImageRetryHooks(ctx).OnFailure != nil {
+			var failoverErr *UpstreamFailoverError
+			if errors.As(err, &failoverErr) {
+				if observeAsyncImageRetryFailure(ctx, account, AsyncImageRetryFact{
+					HTTPStatus: resp.StatusCode, Category: "upstream_invalid_output",
+					ErrorCode: "upstream_invalid_output", Message: "provider completed the response without an image",
+				}) {
+					return ErrAsyncImageRetryHandled
+				}
+			} else if handleAsyncImageRetryTransportError(ctx, account) {
+				return ErrAsyncImageRetryHandled
+			}
+		}
 		return err
 	}
 
@@ -1968,11 +1988,29 @@ func (s *OpenAIGatewayService) handleOpenAIImagesOAuthResponseError(
 		Message:            upstreamErr.clientMessage(),
 	})
 
+	responseBody := openAIImagesUpstreamErrorResponseBody(upstreamErr)
+	if asyncImageRetryHooks(ctx).OnFailure != nil {
+		unknown := asyncImageTimeoutHasUnknownOutcome(string(responseBody))
+		terminal := isAsyncImageTerminalRejection(upstreamErr.Code, upstreamErr.clientMessage())
+		category := "upstream_rejection"
+		if unknown {
+			category = "execution_unknown"
+		} else if terminal {
+			category = "terminal_rejection"
+		} else if retryable {
+			category = "upstream_transient"
+		}
+		if observeAsyncImageRetryFailure(ctx, account, AsyncImageRetryFact{
+			HTTPStatus: resp.StatusCode, Category: category, ErrorCode: upstreamErr.Code, Message: upstreamErr.clientMessage(),
+			SafeToRetry: !unknown && !terminal && !responseWritten, Unknown: unknown,
+		}) {
+			s.handleOpenAIAccountUpstreamError(ctx, account, upstreamErr.StatusCode, headers, responseBody, requestedModel)
+			return ErrAsyncImageRetryHandled
+		}
+	}
 	if !retryable || responseWritten {
 		return err
 	}
-
-	responseBody := openAIImagesUpstreamErrorResponseBody(upstreamErr)
 	shouldDisable := s.handleOpenAIAccountUpstreamError(ctx, account, upstreamErr.StatusCode, headers, responseBody, requestedModel)
 	return &UpstreamFailoverError{
 		StatusCode:             upstreamErr.StatusCode,

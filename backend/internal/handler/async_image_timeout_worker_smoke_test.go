@@ -47,15 +47,20 @@ func TestAsyncImageNewRetryFullWorkerHTTP(t *testing.T) {
 		status, accounts     int
 		rejectAll            bool
 		readFault            string
+		policyAction         string
 	}{
-		{"Gemini missing file hybrid rebuild", service.PlatformGemini, service.AsyncImageReferenceTransportPassthroughFallbackLocal, 404, 2, false, ""},
-		{"Gemini missing file passthrough", service.PlatformGemini, service.AsyncImageReferenceTransportPassthrough, 404, 2, false, ""},
-		{"OpenAI gateway timed-out switches", service.PlatformOpenAI, service.AsyncImageReferenceTransportPassthrough, 504, 2, false, ""},
-		{"Gemini processing timeout switches", service.PlatformGemini, service.AsyncImageReferenceTransportPassthrough, 408, 2, false, ""},
-		{"Gemini single channel budget stops", service.PlatformGemini, service.AsyncImageReferenceTransportPassthrough, 504, 1, true, ""},
-		{"OpenAI single channel budget stops", service.PlatformOpenAI, service.AsyncImageReferenceTransportPassthrough, 408, 1, true, ""},
-		{"OpenAI interrupted 503 becomes unknown without failover", service.PlatformOpenAI, service.AsyncImageReferenceTransportPassthrough, 503, 2, false, "read error"},
-		{"Gemini truncated 503 becomes unknown without failover", service.PlatformGemini, service.AsyncImageReferenceTransportPassthrough, 503, 2, false, "limit"},
+		{"Gemini missing file hybrid rebuild", service.PlatformGemini, service.AsyncImageReferenceTransportPassthroughFallbackLocal, 404, 2, false, "", ""},
+		{"Gemini missing file passthrough", service.PlatformGemini, service.AsyncImageReferenceTransportPassthrough, 404, 2, false, "", ""},
+		{"OpenAI gateway timed-out switches", service.PlatformOpenAI, service.AsyncImageReferenceTransportPassthrough, 504, 2, false, "", ""},
+		{"Gemini processing timeout switches", service.PlatformGemini, service.AsyncImageReferenceTransportPassthrough, 408, 2, false, "", ""},
+		{"Gemini single channel budget stops", service.PlatformGemini, service.AsyncImageReferenceTransportPassthrough, 504, 1, true, "", ""},
+		{"OpenAI single channel budget stops", service.PlatformOpenAI, service.AsyncImageReferenceTransportPassthrough, 408, 1, true, "", ""},
+		{"OpenAI interrupted 503 becomes unknown without failover", service.PlatformOpenAI, service.AsyncImageReferenceTransportPassthrough, 503, 2, false, "read error", ""},
+		{"Gemini truncated 503 becomes unknown without failover", service.PlatformGemini, service.AsyncImageReferenceTransportPassthrough, 503, 2, false, "limit", ""},
+		{"OpenAI rule stops before gateway-native failover", service.PlatformOpenAI, service.AsyncImageReferenceTransportPassthrough, 503, 2, false, "", "stop"},
+		{"Gemini rule switches through a durable retry step", service.PlatformGemini, service.AsyncImageReferenceTransportPassthrough, 503, 2, false, "", "other_account"},
+		{"OpenAI unavailable rule target sends nothing", service.PlatformOpenAI, service.AsyncImageReferenceTransportPassthrough, 503, 2, false, "", "no_target"},
+		{"OpenAI builtin failover is audited with empty policy", service.PlatformOpenAI, service.AsyncImageReferenceTransportPassthrough, 504, 2, false, "", "builtin"},
 	} {
 		t.Run(scenario.name, func(t *testing.T) {
 			const referenceURL = "https://8.8.8.8/reference.png?sig=synthetic"
@@ -140,6 +145,19 @@ func TestAsyncImageNewRetryFullWorkerHTTP(t *testing.T) {
 			task := &service.AsyncImageTask{TaskID: "asyncimg_new_retry_" + scenario.platform, Version: 1, UserID: 9, APIKeyID: 7, GroupID: groupID, Platform: scenario.platform, Model: model, Protocol: service.AsyncImageProtocolBB, RequestType: service.AsyncImageRequestTypeImageToImage, Status: service.AsyncImageTaskStatusQueued, BillingStatus: service.AsyncImageBillingStatusPending, SubmittedAt: time.Now().UTC(), RequestedImageSize: &size, AspectRatio: &ratio, ReferenceTransport: &mode, RequestHash: "synthetic-new-retry", RequestPayload: []byte(encrypted)}
 			base := &generatedWorkerResultRepo{task: task}
 			repo := &referenceTimeout454SmokeRepo{openAIReferenceURLTimeoutRepo: &openAIReferenceURLTimeoutRepo{&referenceLocalFallbackRepo{base}}}
+			var tasks service.AsyncImageTaskRepository = repo
+			var policyRepo *asyncImageRetryWorkerTestRepo
+			if scenario.policyAction != "" {
+				policy := workerTestRetryPolicy(scenario.policyAction)
+				if scenario.policyAction == "no_target" {
+					policy = workerTestRetryPolicy("other_account")
+					policy.Rules[0].AllowedAccountIDs = []int64{999}
+				} else if scenario.policyAction == "builtin" {
+					policy.Rules = nil
+				}
+				policyRepo = &asyncImageRetryWorkerTestRepo{referenceTimeout454SmokeRepo: repo, policy: policy}
+				tasks = policyRepo
+			}
 			root := t.TempDir()
 			local, err := service.NewLocalImageStorageWithURLOptions(root, "https://images.example.test", "", "", nil)
 			require.NoError(t, err)
@@ -147,7 +165,7 @@ func TestAsyncImageNewRetryFullWorkerHTTP(t *testing.T) {
 			groupRepo := &generatedWorkerGroupRepo{group: group}
 			billing := &generatedWorkerBillingRepo{}
 			newWorker := func() *DurableAsyncImageHandler {
-				worker := &DurableAsyncImageHandler{tasks: service.NewAsyncImageTaskService(repo), storage: settings, encryptor: cipher}
+				worker := &DurableAsyncImageHandler{tasks: service.NewAsyncImageTaskService(tasks), storage: settings, encryptor: cipher}
 				worker.apiKeys = service.NewAPIKeyService(&openAIReferenceURLTimeoutKeyRepo{generatedWorkerKeyRepo{key: key}}, nil, groupRepo, nil, nil, nil, nil)
 				var accounts []service.Account
 				for index := 0; index < scenario.accounts; index++ {
@@ -176,6 +194,25 @@ func TestAsyncImageNewRetryFullWorkerHTTP(t *testing.T) {
 			}
 			worker := newWorker()
 			disposition := worker.processAsyncImageTask(context.Background(), task.TaskID)
+			if policyRepo != nil && scenario.policyAction != "builtin" {
+				mu.Lock()
+				first := append([]int64(nil), sentAccounts...)
+				mu.Unlock()
+				require.Equal(t, []int64{17}, first)
+				require.Len(t, policyRepo.events, 1)
+				require.Equal(t, "custom", policyRepo.events[0].Decision.Source)
+				require.Equal(t, "upstream_error", policyRepo.events[0].Fact.ErrorCode)
+				if scenario.policyAction == "stop" {
+					require.False(t, disposition.requeue)
+					require.Equal(t, service.AsyncImageTaskStatusFailed, repo.task.Status)
+					require.Nil(t, policyRepo.events[0].StartedAt)
+					require.Zero(t, billing.charges)
+					return
+				}
+				require.True(t, disposition.requeue)
+				require.Equal(t, service.AsyncImageTaskStatusQueued, repo.task.Status)
+				worker = newWorker()
+			}
 			if scenario.mode == service.AsyncImageReferenceTransportPassthroughFallbackLocal {
 				require.True(t, disposition.requeue)
 				require.Equal(t, service.AsyncImageReferenceTransportLocal, *repo.task.ReferenceTransport)
@@ -191,6 +228,17 @@ func TestAsyncImageNewRetryFullWorkerHTTP(t *testing.T) {
 			accounts := append([]int64(nil), sentAccounts...)
 			bodies := append([][]byte(nil), sentBodies...)
 			mu.Unlock()
+			if scenario.policyAction == "no_target" {
+				require.Equal(t, []int64{17}, accounts)
+				require.NotNil(t, policyRepo.state.Pending)
+				event := policyRepo.state.Pending.Event
+				require.Equal(t, "upstream-timeout", event.Decision.RuleID)
+				require.Equal(t, "no_eligible_account", event.Decision.BlockReason)
+				require.Nil(t, event.GenerationStartedAt)
+				require.Len(t, policyRepo.starts, 1)
+				require.True(t, policyRepo.starts[0].FirstGeneration)
+				return
+			}
 			wantAccounts := []int64{17, 18}
 			if scenario.rejectAll {
 				wantAccounts = []int64{17, 17, 17}
@@ -199,6 +247,15 @@ func TestAsyncImageNewRetryFullWorkerHTTP(t *testing.T) {
 				wantAccounts = []int64{17}
 			}
 			require.Equal(t, wantAccounts, accounts)
+			if policyRepo != nil {
+				if scenario.policyAction == "builtin" {
+					require.Len(t, policyRepo.events, 1)
+					require.Equal(t, "builtin", policyRepo.events[0].Decision.Source)
+					require.Empty(t, policyRepo.events[0].Decision.RuleID)
+				}
+				require.NotNil(t, policyRepo.events[0].GenerationStartedAt)
+				require.EqualValues(t, 18, *policyRepo.events[0].TargetAccountID)
+			}
 			require.Contains(t, string(repo.task.AccountAttempts), fmt.Sprintf(`"status_code":%d`, scenario.status))
 			if scenario.readFault != "" {
 				require.Equal(t, service.AsyncImageTaskStatusExecutionUnknown, repo.task.Status)

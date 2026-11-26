@@ -47,8 +47,22 @@ func BeginAsyncImageUpstreamAttempt(ctx context.Context, accountID int64) error 
 	if b == nil {
 		return nil
 	}
+	if isAsyncImageRetryStopped(ctx) {
+		return ErrAsyncImageRetryHandled
+	}
 	if err := ctx.Err(); err != nil {
 		return err
+	}
+	if filter, ok := asyncImageRetryFilter(ctx); ok && !AsyncImageRetryAccountAllowed(filter.decision, filter.fact, accountID) {
+		return ErrAsyncImageRetryDispatchBlocked
+	}
+	if hook := asyncImageRetryHooks(ctx).BeforeDispatch; hook != nil {
+		if b.used.Load() >= b.limit {
+			return ErrAsyncImageAttemptBudgetExhausted
+		}
+		if err := hook(ctx, accountID); err != nil {
+			return err
+		}
 	}
 	for {
 		n := b.used.Load()

@@ -2144,6 +2144,16 @@ func (s *OpenAIGatewayService) selectOpenAIImagesAccount(
 		if err != nil {
 			return nil, OpenAIAccountScheduleDecision{}, err
 		}
+		if _, restricted := asyncImageRetryFilter(ctx); restricted {
+			if !configured {
+				poolAccounts, err = s.accountRepo.ListSchedulableByGroupIDAndPlatform(ctx, *groupID, PlatformOpenAI)
+				if err != nil {
+					return nil, OpenAIAccountScheduleDecision{}, err
+				}
+			}
+			poolAccounts = filterAsyncImageRetryAccounts(ctx, filterImageAccountPoolGroupRequirements(ctx, *groupID, poolAccounts))
+			configured = true
+		}
 		if configured {
 			if len(poolAccounts) == 0 {
 				return nil, OpenAIAccountScheduleDecision{}, ErrNoAvailableAccounts

@@ -310,6 +310,10 @@ func (h *OpenAIGatewayHandler) Images(c *gin.Context) {
 		}()
 		attemptTimedOut := errors.Is(accountForwardCtx.Err(), context.DeadlineExceeded)
 		accountAttemptCancel()
+		if errors.Is(err, service.ErrAsyncImageRetryHandled) || errors.Is(err, service.ErrAsyncImageRetryDispatchBlocked) {
+			c.Status(http.StatusBadGateway)
+			return
+		}
 		if asyncImageGeneration && attemptTimedOut && requestCtx.Err() == nil && result == nil && err != nil {
 			err = &service.UpstreamFailoverError{StatusCode: http.StatusGatewayTimeout, ResponseBody: []byte("upstream account attempt timed out"), ResponseHeaders: c.Writer.Header().Clone()}
 		}

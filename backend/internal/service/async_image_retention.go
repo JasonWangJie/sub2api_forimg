@@ -13,6 +13,7 @@ import (
 
 const (
 	defaultAsyncImageCleanupBatch      = 100
+	asyncImageRetryEventCleanupBatch   = 1000
 	defaultAsyncImageCleanupClaimLease = 30 * time.Minute
 )
 
@@ -126,6 +127,8 @@ type AsyncImageRetentionStorage interface {
 
 type AsyncImageRetentionStats struct {
 	StagingDeleted             int64
+	RetryEventsDeleted         int64
+	HeldDownloadsDeleted       int64
 	UploadStateDeleted         int64
 	UploadIntentsDeleted       int
 	ResultUploadIntentsDeleted int
@@ -291,6 +294,23 @@ func (s *AsyncImageRetentionService) RunOnce(ctx context.Context, now time.Time)
 		firstErr = fmt.Errorf("delete expired async image staging objects: %w", err)
 	} else {
 		stats.StagingDeleted = deleted
+	}
+	if retryRepo, ok := s.repo.(interface {
+		CleanupAsyncImageRetryEvents(context.Context, time.Time, int) (int64, error)
+		CleanupExpiredAsyncImageHeldDownloads(context.Context, time.Time, int) (int64, error)
+	}); ok {
+		deleted, err = retryRepo.CleanupExpiredAsyncImageHeldDownloads(ctx, now, asyncImageRetryEventCleanupBatch)
+		if err != nil {
+			firstErr = joinAsyncImageRetentionError(firstErr, fmt.Errorf("delete expired held image downloads: %w", err))
+		} else {
+			stats.HeldDownloadsDeleted = deleted
+		}
+		deleted, err = retryRepo.CleanupAsyncImageRetryEvents(ctx, now.Add(-7*24*time.Hour), asyncImageRetryEventCleanupBatch)
+		if err != nil {
+			firstErr = joinAsyncImageRetentionError(firstErr, fmt.Errorf("delete expired async image retry events: %w", err))
+		} else {
+			stats.RetryEventsDeleted = deleted
+		}
 	}
 	intentRepo, hasIntentRepo := s.repo.(AsyncImageUploadIntentRetentionRepository)
 	if hasIntentRepo {

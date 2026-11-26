@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { flushPromises, mount } from '@vue/test-utils'
+import { flushPromises, mount, RouterLinkStub } from '@vue/test-utils'
 
 import AsyncImageTasksView from '../AsyncImageTasksView.vue'
 import AsyncImageReliabilitySummary from '../AsyncImageReliabilitySummary.vue'
@@ -90,6 +90,7 @@ function mountView(admin = true) {
     global: {
       stubs: {
         AppLayout: AppLayoutStub,
+        RouterLink: RouterLinkStub,
         TablePageLayout: TablePageLayoutStub,
         AutoRefreshButton: true,
         BaseDialog: BaseDialogStub,
@@ -182,6 +183,46 @@ describe('AsyncImageTasksView current-page termination', () => {
     await wrapper.findAll('[data-test="view-task"]')[0].trigger('click')
     await flushPromises()
     expect(wrapper.find('[data-testid="capacity-diagnostics"]').exists()).toBe(isAdmin)
+    wrapper.unmount()
+  })
+
+  it.each([true, false])('guards rule decisions at the task detail boundary (admin=%s)', async (isAdmin) => {
+    mocks.get.mockResolvedValue({
+      id: 'asyncimg_queued', platform: 'openai', request_type: 'image_to_image', model: 'gpt-image-2', status: 'queued',
+      retry_policy_state: { status: 'manual', stage: 'submit', event_id: 127, action: 'manual_review', block_reason: 'execution_unknown' },
+    })
+    const wrapper = mountView(isAdmin)
+    await flushPromises()
+    await wrapper.findAll('[data-test="view-task"]')[0].trigger('click')
+    await flushPromises()
+    const state = wrapper.find('[data-test="retry-policy-state"]')
+    expect(state.exists()).toBe(isAdmin)
+    if (isAdmin) {
+      expect(state.text()).toContain('retryRules.taskStates.manual')
+      expect(state.getComponent(RouterLinkStub).props('to')).toEqual({ path: '/admin/async-image-retry-rules', query: { event_id: 127 } })
+    }
+    wrapper.unmount()
+  })
+
+  it.each([true, false])('only shows manual download recovery if available (resumable=%s)', async (resumable) => {
+    mocks.get.mockResolvedValue({
+      id: 'asyncimg_queued', platform: 'openai', request_type: 'image_to_image', model: 'gpt-image-2', status: 'upstream_succeeded',
+      retry_policy_state: { status: 'manual', stage: 'download', event_id: 127, action: 'manual_review', can_resume: resumable },
+    })
+    mocks.resume.mockRejectedValue({ message: 'The recovery data has expired' })
+    const wrapper = mountView()
+    await flushPromises()
+    await wrapper.findAll('[data-test="view-task"]')[0].trigger('click')
+    await flushPromises()
+    const resume = wrapper.find('[data-test="resume-detail"]')
+    expect(resume.exists()).toBe(resumable)
+    if (resumable) {
+      await resume.trigger('click')
+      await wrapper.get('[data-test="confirm-action"]').trigger('click')
+      await flushPromises()
+      expect(mocks.resume).toHaveBeenCalledWith('asyncimg_queued')
+      expect(mocks.showError).toHaveBeenCalledWith('The recovery data has expired')
+    }
     wrapper.unmount()
   })
 

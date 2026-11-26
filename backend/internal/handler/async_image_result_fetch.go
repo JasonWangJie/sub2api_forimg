@@ -445,6 +445,20 @@ func (h *DurableAsyncImageHandler) resumeAsyncImageResultFetch(parent context.Co
 			if parent.Err() != nil {
 				return asyncImageWorkerDisposition{requeue: true, delay: 5 * time.Second}, true
 			}
+			canResume := asyncImageResultFetchRetryable(err) && attempt > 0 && attempt < asyncImageResultFetchMaxAttempts
+			builtin := ""
+			if canResume {
+				builtin = "resume_download"
+			}
+			fact := service.AsyncImageRetryFact{Stage: "download", Category: "result_fetch", ErrorCode: "result_fetch_failed",
+				AttemptID: fmt.Sprintf("result:%d:%d", index, attempt), Message: message,
+				HasOutput: true, Dispatched: true, SafeToRetry: canResume}
+			if disposition, handled := h.tryAsyncImageRetryPolicy(parent, task, cfg, fact, nil, builtin, asyncImageResultFetchDelay(err), canResume); handled {
+				if canResume && disposition.requeue {
+					h.resultFetchEvent(parent, task.TaskID, "result_fetch_retry", index, attempt, message)
+				}
+				return disposition, true
+			}
 			if asyncImageResultFetchRetryable(err) && attempt < asyncImageResultFetchMaxAttempts {
 				h.resultFetchEvent(parent, task.TaskID, "result_fetch_retry", index, attempt, message)
 				return asyncImageWorkerDisposition{requeue: true, delay: asyncImageResultFetchDelay(err)}, true

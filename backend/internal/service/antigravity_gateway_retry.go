@@ -214,6 +214,9 @@ func (s *AntigravityGatewayService) handleSmartRetry(p antigravityRetryLoopParam
 			}
 
 			retryResp, retryErr := p.imageResolutionMonitor.Do(p.httpUpstream, retryReq, p.proxyURL, p.account)
+			if isAsyncImageRetryInterruption(retryErr) {
+				return &smartRetryResult{action: smartRetryActionBreakWithResp, err: retryErr}
+			}
 			if isImageResolutionCooling(retryErr) {
 				return &smartRetryResult{err: retryErr}
 			}
@@ -392,6 +395,9 @@ func (s *AntigravityGatewayService) handleSingleAccountRetryInPlace(
 		}
 
 		retryResp, retryErr := p.imageResolutionMonitor.Do(p.httpUpstream, retryReq, p.proxyURL, p.account)
+		if isAsyncImageRetryInterruption(retryErr) {
+			return &smartRetryResult{action: smartRetryActionBreakWithResp, err: retryErr}
+		}
 		if isImageResolutionCooling(retryErr) {
 			return &smartRetryResult{err: retryErr}
 		}
@@ -533,7 +539,7 @@ urlFallbackLoop:
 			}
 
 			resp, err = p.imageResolutionMonitor.Do(p.httpUpstream, upstreamReq, p.proxyURL, p.account)
-			if isImageResolutionCooling(err) {
+			if isImageResolutionCooling(err) || isAsyncImageRetryInterruption(err) {
 				return nil, err
 			}
 			if err == nil && resp == nil {

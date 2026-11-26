@@ -313,6 +313,18 @@ func (r *asyncImageTaskRepository) ListRecoverableAsyncImageTasks(
 	updatedBefore time.Time,
 	storageRetryLimit, billingRetryLimit, limit int,
 ) ([]*service.AsyncImageTask, error) {
+	return r.listRecoverableAsyncImageTasks(ctx, statuses, updatedBefore, storageRetryLimit, billingRetryLimit, limit, false)
+}
+
+func (r *asyncImageTaskRepository) ListRecoverableAsyncImageRetryAwareTasks(
+	ctx context.Context, statuses []string, updatedBefore time.Time, storageRetryLimit, billingRetryLimit, limit int,
+) ([]*service.AsyncImageTask, error) {
+	return r.listRecoverableAsyncImageTasks(ctx, statuses, updatedBefore, storageRetryLimit, billingRetryLimit, limit, true)
+}
+
+func (r *asyncImageTaskRepository) listRecoverableAsyncImageTasks(
+	ctx context.Context, statuses []string, updatedBefore time.Time, storageRetryLimit, billingRetryLimit, limit int, retryAware bool,
+) ([]*service.AsyncImageTask, error) {
 	if len(statuses) == 0 {
 		return []*service.AsyncImageTask{}, nil
 	}
@@ -328,11 +340,19 @@ func (r *asyncImageTaskRepository) ListRecoverableAsyncImageTasks(
 	if billingRetryLimit < 0 {
 		billingRetryLimit = 0
 	}
+	retryGuard := ""
+	if retryAware {
+		retryGuard = `
+	AND NOT EXISTS (
+		SELECT 1 FROM async_image_retry_state retry WHERE retry.task_id = async_image_tasks.task_id
+		  AND (retry.status = 'manual' OR (retry.status = 'pending' AND retry.due_at > NOW()))
+	)`
+	}
 	rows, err := r.sql.QueryContext(ctx, `SELECT `+asyncImageTaskSummaryColumns+`
 FROM async_image_tasks
 WHERE status = ANY($1) AND updated_at <= $2
 	AND (status <> 'storage_failed' OR $3::bigint <= 0 OR storage_retry_count < $3::bigint)
-	AND (status <> 'billing_failed' OR $4::bigint <= 0 OR billing_retry_count < $4::bigint)
+	AND (status <> 'billing_failed' OR $4::bigint <= 0 OR billing_retry_count < $4::bigint)`+retryGuard+`
 ORDER BY updated_at, id
 LIMIT $5`, pq.Array(statuses), updatedBefore, storageRetryLimit, billingRetryLimit, limit)
 	if err != nil {
@@ -415,6 +435,17 @@ func (r *asyncImageTaskRepository) TransitionAsyncImageTask(ctx context.Context,
 	if err := tx.QueryRowContext(ctx, `SELECT status, version FROM async_image_tasks WHERE task_id = $1 FOR UPDATE`, transition.TaskID).Scan(&currentStatus, &currentVersion); err != nil {
 		return nil, translatePersistenceError(err, service.ErrAsyncImageTaskNotFound, nil)
 	}
+	task, err := transitionAsyncImageTaskLocked(ctx, tx, currentStatus, currentVersion, transition)
+	if err != nil {
+		return nil, err
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+	return task, nil
+}
+
+func transitionAsyncImageTaskLocked(ctx context.Context, tx *sql.Tx, currentStatus string, currentVersion int64, transition service.AsyncImageTaskTransition) (*service.AsyncImageTask, error) {
 	if transition.ExpectedVersion > 0 && transition.ExpectedVersion != currentVersion {
 		return nil, service.ErrAsyncImageInvalidTransition
 	}
@@ -456,9 +487,6 @@ VALUES($1,'library_archive',$2,'{}'::jsonb)
 ON CONFLICT(dedup_key) DO NOTHING`, transition.TaskID, transition.TaskID+":library_archive"); err != nil {
 			return nil, err
 		}
-	}
-	if err := tx.Commit(); err != nil {
-		return nil, err
 	}
 	return task, nil
 }

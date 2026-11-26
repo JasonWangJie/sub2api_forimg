@@ -184,7 +184,7 @@ export default {
     resume: {
       action: '续跑后处理',
       title: '恢复任务后处理',
-      message: '确定恢复任务 {id} 的存储或计费阶段吗？不会再次调用上游生图。',
+      message: '确定恢复任务 {id} 的下载、存储或计费阶段吗？不会再次调用上游生图。',
       success: '任务后处理已恢复',
     },
     terminate: {

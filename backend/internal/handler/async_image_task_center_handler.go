@@ -374,57 +374,58 @@ func (h *AsyncImageTaskCenterHandler) BatchTerminateAsFailed(c *gin.Context) {
 }
 
 type asyncImageTaskCenterView struct {
-	ID                   string                         `json:"id"`
-	TaskID               string                         `json:"task_id"`
-	UserID               *int64                         `json:"user_id,omitempty"`
-	UserEmail            string                         `json:"user_email,omitempty"`
-	APIKeyID             int64                          `json:"api_key_id"`
-	APIKeyName           string                         `json:"api_key_name,omitempty"`
-	GroupID              int64                          `json:"group_id"`
-	GroupName            string                         `json:"group_name,omitempty"`
-	AccountID            *int64                         `json:"account_id,omitempty"`
-	AccountName          string                         `json:"account_name,omitempty"`
-	Protocol             string                         `json:"protocol"`
-	Platform             string                         `json:"platform"`
-	RequestType          string                         `json:"request_type"`
-	Model                string                         `json:"model"`
-	Status               string                         `json:"status"`
-	BillingStatus        string                         `json:"billing_status"`
-	Progress             int                            `json:"progress"`
-	RequestedSize        *string                        `json:"requested_size,omitempty"`
-	RequestedImageSize   *string                        `json:"requested_image_size,omitempty"`
-	ActualSize           *string                        `json:"actual_size,omitempty"`
-	ActualImageSize      *string                        `json:"actual_image_size,omitempty"`
-	AspectRatio          *string                        `json:"aspect_ratio,omitempty"`
-	ImageCount           int                            `json:"image_count"`
-	ResultCount          int                            `json:"result_count"`
-	StorageProvider      string                         `json:"storage_provider,omitempty"`
-	PreviewURL           string                         `json:"preview_url,omitempty"`
-	ViewURL              string                         `json:"view_url,omitempty"`
-	ActualCost           *float64                       `json:"actual_cost,omitempty"`
-	Currency             string                         `json:"currency"`
-	PromptSummary        *string                        `json:"prompt_summary,omitempty"`
-	PromptPreview        *string                        `json:"prompt_preview,omitempty"`
-	ReferenceImageURLs   []string                       `json:"reference_image_urls,omitempty"`
-	UpstreamRequestID    *string                        `json:"upstream_request_id,omitempty"`
-	AccountAttemptCount  *int                           `json:"account_attempt_count,omitempty"`
-	AttemptedAccountIDs  []int64                        `json:"attempted_account_ids,omitempty"`
-	AccountAttempts      []asyncImageAccountAttemptView `json:"account_attempts,omitempty"`
-	LastFailureReason    *string                        `json:"last_failure_reason,omitempty"`
-	ReconciliationStatus string                         `json:"reconciliation_status,omitempty"`
-	RetryCount           int                            `json:"retry_count"`
-	ErrorCode            *string                        `json:"error_code,omitempty"`
-	ErrorMessage         *string                        `json:"error_message,omitempty"`
-	CanResume            bool                           `json:"can_resume"`
-	CanTerminate         bool                           `json:"can_terminate"`
-	DurationMS           *int64                         `json:"duration_ms,omitempty"`
-	SubmittedAt          time.Time                      `json:"submitted_at"`
-	StartedAt            *time.Time                     `json:"started_at,omitempty"`
-	UpstreamSucceededAt  *time.Time                     `json:"upstream_succeeded_at,omitempty"`
-	FinishedAt           *time.Time                     `json:"finished_at,omitempty"`
-	ExpiresAt            *time.Time                     `json:"expires_at,omitempty"`
-	CreatedAt            time.Time                      `json:"created_at"`
-	UpdatedAt            time.Time                      `json:"updated_at"`
+	ID                   string                          `json:"id"`
+	TaskID               string                          `json:"task_id"`
+	UserID               *int64                          `json:"user_id,omitempty"`
+	UserEmail            string                          `json:"user_email,omitempty"`
+	APIKeyID             int64                           `json:"api_key_id"`
+	APIKeyName           string                          `json:"api_key_name,omitempty"`
+	GroupID              int64                           `json:"group_id"`
+	GroupName            string                          `json:"group_name,omitempty"`
+	AccountID            *int64                          `json:"account_id,omitempty"`
+	AccountName          string                          `json:"account_name,omitempty"`
+	Protocol             string                          `json:"protocol"`
+	Platform             string                          `json:"platform"`
+	RequestType          string                          `json:"request_type"`
+	Model                string                          `json:"model"`
+	Status               string                          `json:"status"`
+	BillingStatus        string                          `json:"billing_status"`
+	Progress             int                             `json:"progress"`
+	RequestedSize        *string                         `json:"requested_size,omitempty"`
+	RequestedImageSize   *string                         `json:"requested_image_size,omitempty"`
+	ActualSize           *string                         `json:"actual_size,omitempty"`
+	ActualImageSize      *string                         `json:"actual_image_size,omitempty"`
+	AspectRatio          *string                         `json:"aspect_ratio,omitempty"`
+	ImageCount           int                             `json:"image_count"`
+	ResultCount          int                             `json:"result_count"`
+	StorageProvider      string                          `json:"storage_provider,omitempty"`
+	PreviewURL           string                          `json:"preview_url,omitempty"`
+	ViewURL              string                          `json:"view_url,omitempty"`
+	ActualCost           *float64                        `json:"actual_cost,omitempty"`
+	Currency             string                          `json:"currency"`
+	PromptSummary        *string                         `json:"prompt_summary,omitempty"`
+	PromptPreview        *string                         `json:"prompt_preview,omitempty"`
+	ReferenceImageURLs   []string                        `json:"reference_image_urls,omitempty"`
+	UpstreamRequestID    *string                         `json:"upstream_request_id,omitempty"`
+	AccountAttemptCount  *int                            `json:"account_attempt_count,omitempty"`
+	AttemptedAccountIDs  []int64                         `json:"attempted_account_ids,omitempty"`
+	AccountAttempts      []asyncImageAccountAttemptView  `json:"account_attempts,omitempty"`
+	LastFailureReason    *string                         `json:"last_failure_reason,omitempty"`
+	ReconciliationStatus string                          `json:"reconciliation_status,omitempty"`
+	RetryPolicyState     *asyncImageRetryPolicyStateView `json:"retry_policy_state,omitempty"`
+	RetryCount           int                             `json:"retry_count"`
+	ErrorCode            *string                         `json:"error_code,omitempty"`
+	ErrorMessage         *string                         `json:"error_message,omitempty"`
+	CanResume            bool                            `json:"can_resume"`
+	CanTerminate         bool                            `json:"can_terminate"`
+	DurationMS           *int64                          `json:"duration_ms,omitempty"`
+	SubmittedAt          time.Time                       `json:"submitted_at"`
+	StartedAt            *time.Time                      `json:"started_at,omitempty"`
+	UpstreamSucceededAt  *time.Time                      `json:"upstream_succeeded_at,omitempty"`
+	FinishedAt           *time.Time                      `json:"finished_at,omitempty"`
+	ExpiresAt            *time.Time                      `json:"expires_at,omitempty"`
+	CreatedAt            time.Time                       `json:"created_at"`
+	UpdatedAt            time.Time                       `json:"updated_at"`
 }
 
 type asyncImageAccountAttemptView struct {
@@ -474,6 +475,17 @@ type asyncImageTaskDetailsView struct {
 	Task    asyncImageTaskCenterView   `json:"task"`
 	Results []asyncImageTaskResultView `json:"results"`
 	Events  []asyncImageTaskEventView  `json:"events"`
+}
+
+type asyncImageRetryPolicyStateView struct {
+	Status      string     `json:"status"`
+	Stage       string     `json:"stage"`
+	EventID     int64      `json:"event_id"`
+	RuleID      string     `json:"rule_id,omitempty"`
+	Action      string     `json:"action,omitempty"`
+	BlockReason string     `json:"block_reason,omitempty"`
+	DueAt       *time.Time `json:"due_at,omitempty"`
+	CanResume   bool       `json:"can_resume,omitempty"`
 }
 
 func (h *AsyncImageTaskCenterHandler) listViews(ctx context.Context, tasks []*service.AsyncImageTask, admin bool) ([]asyncImageTaskCenterView, error) {
@@ -561,12 +573,45 @@ func (h *AsyncImageTaskCenterHandler) detailView(ctx context.Context, details *s
 	if admin {
 		taskView.ReferenceImageURLs = service.NormalizeAsyncImageReferenceURLs(details.Task.ReferenceImageURLs)
 		h.attachAsyncImageRoutingNames(ctx, &taskView, details.Task, h.newRoutingNameCache())
+		taskView.RetryPolicyState = h.retryPolicyStateView(ctx, details.Task)
+		if taskView.RetryPolicyState != nil && taskView.RetryPolicyState.CanResume {
+			taskView.CanResume = true
+		}
 	}
 	return &asyncImageTaskDetailsView{
 		Task:    taskView,
 		Results: results,
 		Events:  events,
 	}, nil
+}
+
+func (h *AsyncImageTaskCenterHandler) retryPolicyStateView(ctx context.Context, task *service.AsyncImageTask) *asyncImageRetryPolicyStateView {
+	tasks, ok := h.tasks.(interface {
+		Repository() service.AsyncImageTaskRepository
+	})
+	if !ok {
+		return nil
+	}
+	taskRepo := tasks.Repository()
+	repo, ok := taskRepo.(interface {
+		GetAsyncImageRetryState(context.Context, string) (service.AsyncImageRetryState, error)
+	})
+	if !ok {
+		return nil
+	}
+	state, err := repo.GetAsyncImageRetryState(ctx, task.TaskID)
+	if err != nil || state.Pending == nil || (state.Pending.Status != service.AsyncImageRetryStatePending && state.Pending.Status != service.AsyncImageRetryStateManual) {
+		return nil
+	}
+	pending := state.Pending
+	view := &asyncImageRetryPolicyStateView{Status: pending.Status, Stage: pending.Event.Fact.Stage, EventID: pending.Event.ID,
+		RuleID: pending.Event.Decision.RuleID, Action: pending.Event.Decision.Action, BlockReason: pending.Event.Decision.BlockReason}
+	if pending.Status == service.AsyncImageRetryStatePending {
+		view.DueAt = &pending.DueAt
+	} else if view.Stage == "download" && task.Status == service.AsyncImageTaskStatusUpstreamSucceeded {
+		view.CanResume, _ = service.CanResumeAsyncImageHeldDownload(ctx, taskRepo, task.TaskID)
+	}
+	return view
 }
 
 func newAsyncImageTaskCenterView(task *service.AsyncImageTask, results []service.AsyncImageResult, admin bool) asyncImageTaskCenterView {

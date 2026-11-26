@@ -220,6 +220,7 @@ export default {
     promptAudit: 'Prompt Audit',
     auditLogs: 'Audit Logs',
     adminAsyncImageTasks: 'Image Task Center',
+    adminAsyncImageRetryRules: 'Image Errors & Retries',
     adminImageModeration: 'Image Content',
   },
 

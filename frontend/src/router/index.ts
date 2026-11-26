@@ -617,6 +617,19 @@ const routes: RouteRecordRaw[] = [
     }
   },
   {
+    path: '/admin/async-image-retry-rules',
+    name: 'AdminAsyncImageRetryRules',
+    component: () => import('@/features/async-image-retry-rules/AsyncImageRetryRulesView.vue'),
+    props: route => ({ initialEventId: Number(route.query.event_id) }),
+    meta: {
+      requiresAuth: true,
+      requiresAdmin: true,
+      title: 'Async Image Error and Retry Rules',
+      titleKey: 'retryRules.title',
+      descriptionKey: 'retryRules.description'
+    }
+  },
+  {
     path: '/admin/channels',
     redirect: '/admin/channels/pricing'
   },

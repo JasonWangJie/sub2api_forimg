@@ -273,7 +273,13 @@ func (h *DurableAsyncImageHandler) recoverAsyncImageTasks(ctx context.Context, c
 		service.AsyncImageTaskStatusBillingPending,
 		service.AsyncImageTaskStatusBillingFailed,
 	}
-	tasks, err := repo.ListRecoverableAsyncImageTasks(
+	listRecoverable := repo.ListRecoverableAsyncImageTasks
+	if retryRepo, ok := repo.(interface {
+		ListRecoverableAsyncImageRetryAwareTasks(context.Context, []string, time.Time, int, int, int) ([]*service.AsyncImageTask, error)
+	}); ok {
+		listRecoverable = retryRepo.ListRecoverableAsyncImageRetryAwareTasks
+	}
+	tasks, err := listRecoverable(
 		ctx, recoverable, staleBefore,
 		cfg.StorageRetryAttempts, cfg.BillingRetryAttempts, 200,
 	)
@@ -474,6 +480,18 @@ func (h *DurableAsyncImageHandler) processAsyncImageTask(parent context.Context,
 	if err != nil {
 		return asyncImageWorkerDisposition{requeue: true, delay: 10 * time.Second}
 	}
+	if store := h.asyncImageRetryStore(); store != nil && (task.Status == service.AsyncImageTaskStatusQueued ||
+		task.Status == service.AsyncImageTaskStatusUpstreamSucceeded || task.Status == service.AsyncImageTaskStatusUploading ||
+		task.Status == service.AsyncImageTaskStatusStorageFailed || task.Status == service.AsyncImageTaskStatusBillingPending ||
+		task.Status == service.AsyncImageTaskStatusBillingFailed) {
+		pending, disposition, handled := h.prepareAsyncImagePendingRetry(parent, task, cfg, store)
+		if handled {
+			return disposition
+		}
+		if pending != nil && task.Status == service.AsyncImageTaskStatusQueued {
+			parent = context.WithValue(parent, asyncImageWorkerRetryKey{}, &asyncImageWorkerRetry{handler: h, store: store, task: task, config: cfg, pending: pending})
+		}
+	}
 	switch task.Status {
 	case service.AsyncImageTaskStatusQueued:
 		if !time.Now().Before(asyncImageTaskDeadline(task)) || asyncImageRemainingUpstreamAttempts(task) <= 0 {
@@ -557,10 +575,30 @@ func (h *DurableAsyncImageHandler) invokeAsyncImageTask(parent context.Context, 
 		}
 	}
 	parent = service.WithAsyncImageAccountAttemptCapture(parent, attemptCapture)
+	retry := asyncImageWorkerRetryFromContext(parent)
+	if retry == nil {
+		if store := h.asyncImageRetryStore(); store != nil {
+			retry = &asyncImageWorkerRetry{handler: h, store: store, config: cfg}
+		}
+	}
+	customRetry := retry != nil && retry.pending != nil && retry.pending.Event.Decision.Source == "custom"
+	if retry != nil {
+		if customRetry && strings.HasPrefix(retry.pending.Event.Decision.Action, "local_") {
+			local := service.AsyncImageReferenceTransportLocal
+			task.ReferenceTransport = &local
+		}
+		retry.task = task
+		parent = retry.context(parent)
+	}
 	remainingAttempts := asyncImageRemainingUpstreamAttempts(task)
+	if customRetry {
+		// A custom step authorizes one physical send. New failures go back
+		// through matching before another account attempt may be started.
+		remainingAttempts = min(remainingAttempts, 1)
+	}
 	var openAIReferenceRetry asyncImageOpenAIReferenceRetry
 	mode := asyncImageReferenceTransport(task, cfg)
-	if task.Platform == service.PlatformOpenAI && (mode == service.AsyncImageReferenceTransportLocal || mode == service.AsyncImageReferenceTransportPassthrough) {
+	if !customRetry && task.Platform == service.PlatformOpenAI && (mode == service.AsyncImageReferenceTransportLocal || mode == service.AsyncImageReferenceTransportPassthrough) {
 		openAIReferenceRetry = asyncImageOpenAIReferenceRetryState(task.AccountAttempts)
 		if openAIReferenceRetry.alternateSent {
 			h.failAsyncImageTask(parent, task, "upstream_failed", "reference image alternate account retry was already sent", false)
@@ -645,8 +683,23 @@ func (h *DurableAsyncImageHandler) invokeAsyncImageTask(parent context.Context, 
 	parent = service.WithAsyncImageAccountAttemptTimeout(parent, asyncImageAccountAttemptTimeout(cfg))
 	executionCtx, cancel := context.WithTimeout(parent, executionTimeout)
 	defer cancel()
+	if customRetry && retry.pending.Event.StartedAt == nil {
+		action := retry.pending.Event.Decision.Action
+		if strings.HasPrefix(action, "local_") || action == "retry_prepare" {
+			if err := retry.start(executionCtx, retry.pending.Event, 0, false); err != nil {
+				retry.blocked = "dispatch_state_changed"
+				disposition, _ := retry.finish(parent)
+				return disposition
+			}
+		}
+	}
 	body, path, contentType, err := h.buildAsyncImageUpstreamRequest(executionCtx, task, payload, cfg, storage)
 	if err != nil {
+		fact := service.AsyncImageRetryFact{Stage: "prepare", Category: "reference_fetch", ErrorCode: "invalid_reference_image",
+			Message: asyncImageSafeError(err), SafeToRetry: isRetryableAsyncImageReferenceFetchError(err)}
+		if disposition, handled := h.tryAsyncImageRetryPolicy(parent, task, cfg, fact, nil, "", 0, false); handled {
+			return disposition
+		}
 		if originalReferenceAccountID > 0 && !openAIReferenceRetry.originalSent && mode == service.AsyncImageReferenceTransportLocal &&
 			isAsyncImageOpenAIReferenceTransientDownload(err) && canRetryAsyncImageOpenAIReference(parent, task, cfg) {
 			return h.scheduleAsyncImageReferenceRetry(parent, task, cfg, asyncImageSafeError(err), asyncImageReferenceRetryAfter(err), service.AsyncImageReferenceTransportPassthrough, true)
@@ -717,6 +770,19 @@ func (h *DurableAsyncImageHandler) invokeAsyncImageTask(parent context.Context, 
 		}
 		h.failAsyncImageTask(parent, task, "gateway_unavailable", message, false)
 		return asyncImageWorkerDisposition{}
+	}
+	if retry != nil {
+		if disposition, handled := retry.finish(ginContext.Request.Context()); handled {
+			return disposition
+		}
+		if customRetry && retry.sends == 0 {
+			h.persistAsyncImageCapacityDiagnostics(parent, ginContext.Request.Context(), task)
+			reason := "generation_admission_failed"
+			if isOpsRoutingCapacityLimited(ginContext) || recorder.Code == http.StatusServiceUnavailable || recorder.Code == http.StatusTooManyRequests || recorder.Body.Len() == 0 {
+				reason = "no_eligible_account"
+			}
+			return h.blockAsyncImagePendingRetry(parent, retry.store, task, cfg, retry.pending, reason)
+		}
 	}
 	if isOpsRoutingCapacityLimited(ginContext) && (originalReferenceAccountID == 0 || service.AsyncImageUpstreamAttemptCount(parent) == 0) {
 		return h.deferAsyncImageForLocalCapacity(parent, task, cfg, ginContext.Request.Context())
@@ -826,6 +892,11 @@ func (h *DurableAsyncImageHandler) deferAsyncImageForLocalCapacity(
 		h.persistAsyncImageCapacityDiagnostics(ctx, invocationContexts[0], task)
 	}
 	if !canRetryAsyncImage(task, task.CapacityRetryCount, cfg.CapacityMaxRetries, cfg.TotalMaxRetries) {
+		fact := service.AsyncImageRetryFact{Stage: "prepare", Category: "local_capacity", ErrorCode: "local_capacity_exhausted",
+			Message: "image generation could not be scheduled because no account capacity was available"}
+		if disposition, handled := h.tryAsyncImageRetryPolicy(ctx, task, cfg, fact, nil, "", 0, false); handled {
+			return disposition
+		}
 		h.failAsyncImageTask(
 			ctx,
 			task,
@@ -1089,14 +1160,23 @@ func (h *DurableAsyncImageHandler) scheduleAsyncImageReferenceRetry(ctx context.
 		transition.ReferenceTransport = &mode
 	}
 	transition.EventPayload, _ = json.Marshal(map[string]any{"retry": attempt, "max": maxRetries, "fallback_local": mode == service.AsyncImageReferenceTransportLocal, "account_switch": accountSwitchRetry})
-	if _, err := h.tasks.Transition(ctx, transition); err != nil {
-		logger.L().Warn("async_image.reference_retry_transition_failed", zap.String("task_id", task.TaskID), zap.Error(err))
-		return asyncImageWorkerDisposition{}
-	}
 	delay := asyncImageRetryDelay(
 		attempt, cfg.ReferenceFetchRetryBaseSeconds, cfg.ReferenceFetchRetryMaxSeconds,
 		cfg.RetryJitterPercent, cfg.RetryAfterMaxSeconds, retryAfter,
 	)
+	stage := "prepare"
+	if service.AsyncImageUpstreamAttemptCount(ctx) > 0 {
+		stage = "submit"
+	}
+	fact := asyncImageBuiltinRetryFact(ctx, service.AsyncImageRetryFact{Stage: stage, Category: "reference_fetch", ErrorCode: code,
+		Message: detail, Dispatched: stage == "submit", SafeToRetry: true})
+	if disposition, handled := h.tryAsyncImageRetryPolicy(ctx, task, cfg, fact, &transition, "retry_prepare", delay, true); handled {
+		return disposition
+	}
+	if _, err := h.tasks.Transition(ctx, transition); err != nil {
+		logger.L().Warn("async_image.reference_retry_transition_failed", zap.String("task_id", task.TaskID), zap.Error(err))
+		return asyncImageWorkerDisposition{}
+	}
 	return asyncImageWorkerDisposition{requeue: true, delay: delay}
 }
 
@@ -1112,14 +1192,23 @@ func (h *DurableAsyncImageHandler) retryAsyncImageCapacity(ctx context.Context, 
 		Progress: &progress, ErrorCode: &code, ErrorMessage: &message,
 		IncrementCapacityRetry: true, ClearAccountID: true, EventType: "capacity_retry", EventPayload: eventPayload,
 	}
-	if _, err := h.tasks.Transition(ctx, enrichAsyncImageAttemptTransition(ctx, task, transition)); err != nil {
-		logger.L().Warn("async_image.capacity_retry_transition_failed", zap.String("task_id", task.TaskID), zap.Error(err))
-		return asyncImageWorkerDisposition{}
-	}
 	delay := asyncImageRetryDelay(
 		attempt, cfg.CapacityRetryBaseSeconds, cfg.CapacityRetryMaxSeconds,
 		cfg.RetryJitterPercent, cfg.RetryAfterMaxSeconds, retryAfter,
 	)
+	stage := "prepare"
+	if reason != "local_capacity" {
+		stage = "submit"
+	}
+	fact := asyncImageBuiltinRetryFact(ctx, service.AsyncImageRetryFact{Stage: stage, Category: reason, ErrorCode: code,
+		Message: detail, Dispatched: stage == "submit", SafeToRetry: true})
+	if disposition, handled := h.tryAsyncImageRetryPolicy(ctx, task, cfg, fact, &transition, "retry_prepare", delay, true); handled {
+		return disposition
+	}
+	if _, err := h.tasks.Transition(ctx, enrichAsyncImageAttemptTransition(ctx, task, transition)); err != nil {
+		logger.L().Warn("async_image.capacity_retry_transition_failed", zap.String("task_id", task.TaskID), zap.Error(err))
+		return asyncImageWorkerDisposition{}
+	}
 	return asyncImageWorkerDisposition{requeue: true, delay: delay}
 }
 
@@ -1135,14 +1224,19 @@ func (h *DurableAsyncImageHandler) retryAsyncImageUpstreamTransient(ctx context.
 		Progress: &progress, ErrorCode: &code, ErrorMessage: &message,
 		IncrementUpstreamRetry: true, ClearAccountID: true, EventType: "upstream_transient_retry", EventPayload: eventPayload,
 	}
-	if _, err := h.tasks.Transition(ctx, enrichAsyncImageAttemptTransition(ctx, task, transition)); err != nil {
-		logger.L().Warn("async_image.upstream_retry_transition_failed", zap.String("task_id", task.TaskID), zap.Error(err))
-		return asyncImageWorkerDisposition{}
-	}
 	delay := asyncImageRetryDelay(
 		attempt, cfg.UpstreamTransientRetryBaseSeconds, cfg.UpstreamTransientRetryMaxSeconds,
 		cfg.RetryJitterPercent, cfg.RetryAfterMaxSeconds, retryAfter,
 	)
+	fact := asyncImageBuiltinRetryFact(ctx, service.AsyncImageRetryFact{Stage: "submit", Category: "upstream_transient", ErrorCode: code,
+		Message: detail, Dispatched: true, SafeToRetry: true})
+	if disposition, handled := h.tryAsyncImageRetryPolicy(ctx, task, cfg, fact, &transition, "retry_prepare", delay, true); handled {
+		return disposition
+	}
+	if _, err := h.tasks.Transition(ctx, enrichAsyncImageAttemptTransition(ctx, task, transition)); err != nil {
+		logger.L().Warn("async_image.upstream_retry_transition_failed", zap.String("task_id", task.TaskID), zap.Error(err))
+		return asyncImageWorkerDisposition{}
+	}
 	return asyncImageWorkerDisposition{requeue: true, delay: delay}
 }
 
@@ -1856,13 +1950,24 @@ func (h *DurableAsyncImageHandler) postProcessAsyncImageTask(ctx context.Context
 	if task.Status == service.AsyncImageTaskStatusUploading {
 		if err := h.uploadAsyncImageStaging(ctx, task); err != nil {
 			code, message := "storage_failed", asyncImageSafeError(err)
-			failed, transitionErr := h.tasks.Transition(ctx, service.AsyncImageTaskTransition{
+			transition := service.AsyncImageTaskTransition{
 				TaskID: task.TaskID, ExpectedVersion: task.Version,
 				FromStatuses: []string{service.AsyncImageTaskStatusUploading},
 				ToStatus:     service.AsyncImageTaskStatusStorageFailed,
 				ErrorCode:    &code, ErrorMessage: &message,
 				IncrementStorageRetry: true, EventType: "storage_failed",
-			})
+			}
+			canResume := task.StorageRetryCount+1 < cfg.StorageRetryAttempts
+			builtin := ""
+			if canResume {
+				builtin = "resume_storage"
+			}
+			fact := service.AsyncImageRetryFact{Stage: "storage", Category: "storage", ErrorCode: code, Message: message,
+				SafeToRetry: canResume, HasOutput: true, Dispatched: true}
+			if disposition, handled := h.tryAsyncImageRetryPolicy(ctx, task, cfg, fact, &transition, builtin, time.Duration(cfg.RetryBackoffSeconds)*time.Second, canResume); handled {
+				return disposition
+			}
+			failed, transitionErr := h.tasks.Transition(ctx, transition)
 			if transitionErr != nil {
 				return asyncImageWorkerDisposition{requeue: true, delay: 5 * time.Second}
 			}
@@ -2106,13 +2211,24 @@ func (h *DurableAsyncImageHandler) applyAsyncImageBilling(ctx context.Context, t
 
 func (h *DurableAsyncImageHandler) recordAsyncImageBillingFailure(ctx context.Context, task *service.AsyncImageTask, cfg service.AsyncImageRuntimeConfig, billingErr error) asyncImageWorkerDisposition {
 	code, message, billingStatus := "billing_failed", asyncImageSafeError(billingErr), service.AsyncImageBillingStatusFailed
-	failed, err := h.tasks.Transition(ctx, service.AsyncImageTaskTransition{
+	transition := service.AsyncImageTaskTransition{
 		TaskID: task.TaskID, ExpectedVersion: task.Version,
 		FromStatuses:  []string{service.AsyncImageTaskStatusBillingPending},
 		ToStatus:      service.AsyncImageTaskStatusBillingFailed,
 		BillingStatus: &billingStatus, ErrorCode: &code, ErrorMessage: &message,
 		IncrementBillingRetry: true, EventType: "billing_failed",
-	})
+	}
+	canResume := task.BillingRetryCount+1 < cfg.BillingRetryAttempts
+	builtin := ""
+	if canResume {
+		builtin = "resume_billing"
+	}
+	fact := service.AsyncImageRetryFact{Stage: "billing", Category: "billing", ErrorCode: code, Message: message,
+		SafeToRetry: canResume, HasOutput: true, Dispatched: true}
+	if disposition, handled := h.tryAsyncImageRetryPolicy(ctx, task, cfg, fact, &transition, builtin, time.Duration(cfg.RetryBackoffSeconds)*time.Second, canResume); handled {
+		return disposition
+	}
+	failed, err := h.tasks.Transition(ctx, transition)
 	if err != nil {
 		return asyncImageWorkerDisposition{requeue: true, delay: 5 * time.Second}
 	}
@@ -2195,6 +2311,9 @@ func (h *DurableAsyncImageHandler) failAsyncImageTask(ctx context.Context, task 
 	}
 	terminalCtx, cancel := asyncImageTerminalTransitionContext(ctx)
 	defer cancel()
+	if retry := asyncImageWorkerRetryFromContext(terminalCtx); retry != nil && retry.fact.FailureID != "" && code == "upstream_failed" {
+		h.recordAsyncImageUnmatchedFailure(terminalCtx, task, retry.fact)
+	}
 	_, err := h.tasks.Transition(terminalCtx, enrichAsyncImageAttemptTransition(terminalCtx, task, transition))
 	if err != nil {
 		logger.L().Warn("async_image.fail_transition_failed", zap.String("task_id", task.TaskID), zap.Error(err))
@@ -2218,6 +2337,10 @@ func (h *DurableAsyncImageHandler) markAsyncImageExecutionUnknown(ctx context.Co
 	}
 	terminalCtx, cancel := asyncImageTerminalTransitionContext(ctx)
 	defer cancel()
+	fact := asyncImageBuiltinRetryFact(terminalCtx, service.AsyncImageRetryFact{Stage: "submit", Category: "execution_unknown", ErrorCode: code,
+		Message: message, Dispatched: true, Unknown: true})
+	fact.Unknown, fact.SafeToRetry = true, false
+	h.recordAsyncImageUnmatchedFailure(terminalCtx, task, fact)
 	_, err := h.tasks.Transition(terminalCtx, enrichAsyncImageAttemptTransition(terminalCtx, task, transition))
 	if err != nil {
 		logger.L().Warn("async_image.execution_unknown_transition_failed", zap.String("task_id", task.TaskID), zap.Error(err))

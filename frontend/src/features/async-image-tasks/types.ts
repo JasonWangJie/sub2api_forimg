@@ -111,6 +111,16 @@ export interface AsyncImageTask {
   retry_count?: number | null
   upstream_request_id?: string | null
   account_attempt_count?: number | null
+  retry_policy_state?: {
+    status: 'pending' | 'manual'
+    stage: string
+    event_id: number
+    rule_id?: string
+    action?: string
+    block_reason?: string
+    due_at?: string
+    can_resume?: boolean
+  }
   attempted_account_ids?: number[]
   account_attempts?: AsyncImageAccountAttempt[]
   last_failure_reason?: string | null

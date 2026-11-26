@@ -928,6 +928,7 @@ const adminNavItems = computed((): NavItem[] => {
     { path: '/admin/users', label: t('nav.users'), icon: UsersIcon, hideInSimpleMode: true },
     { path: '/admin/groups', label: t('nav.groups'), icon: FolderIcon, hideInSimpleMode: true },
     { path: '/admin/async-image-tasks', label: t('nav.adminAsyncImageTasks'), icon: BatchImageIcon, hideInSimpleMode: true },
+    { path: '/admin/async-image-retry-rules', label: t('nav.adminAsyncImageRetryRules'), icon: SignalIcon, hideInSimpleMode: true },
     { path: '/admin/image-moderation', label: t('nav.adminImageModeration'), icon: ImagePlazaIcon, hideInSimpleMode: true },
     {
       path: '/admin/channels',

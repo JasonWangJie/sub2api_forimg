@@ -183,7 +183,7 @@ func (s *AntigravityGatewayService) forwardAntigravityCompat(
 		action:          "streamGenerateContent",
 		body:            call.geminiBody,
 		c:               c,
-		httpUpstream:    s.httpUpstream,
+		httpUpstream:    withAsyncImageRetryUpstream(ctx, account, s.httpUpstream),
 		settingService:  s.settingService,
 		accountRepo:     s.accountRepo,
 		handleError:     s.handleUpstreamError,
@@ -288,6 +288,9 @@ func antigravityCompatProxyURL(account *Account) string {
 }
 
 func (s *AntigravityGatewayService) handleAntigravityCompatTransportError(c *gin.Context, err error) error {
+	if isAsyncImageRetryInterruption(err) {
+		return err
+	}
 	if switchErr, ok := IsAntigravityAccountSwitchError(err); ok {
 		return &UpstreamFailoverError{
 			StatusCode:        http.StatusServiceUnavailable,

@@ -388,6 +388,13 @@ func (h *GatewayHandler) ChatCompletions(c *gin.Context) {
 		if accountAttemptCancel != nil {
 			accountAttemptCancel()
 		}
+		if errors.Is(err, service.ErrAsyncImageRetryHandled) || errors.Is(err, service.ErrAsyncImageRetryDispatchBlocked) {
+			if accountReleaseFunc != nil {
+				accountReleaseFunc()
+			}
+			c.Status(http.StatusBadGateway)
+			return
+		}
 		if asyncImageGeneration && attemptTimedOut && c.Request.Context().Err() == nil && result == nil && err != nil {
 			err = &service.UpstreamFailoverError{StatusCode: http.StatusGatewayTimeout, ResponseBody: []byte("upstream account attempt timed out"), ResponseHeaders: c.Writer.Header().Clone()}
 		}

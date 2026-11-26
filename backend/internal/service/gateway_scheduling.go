@@ -106,6 +106,16 @@ func (s *GatewayService) SelectAccountWithLoadAwareness(ctx context.Context, gro
 		if err != nil {
 			return nil, err
 		}
+		if _, restricted := asyncImageRetryFilter(ctx); restricted {
+			if !configured {
+				poolAccounts, err = s.accountRepo.ListSchedulableByGroupIDAndPlatforms(ctx, *groupID, []string{PlatformGemini, PlatformAntigravity})
+				if err != nil {
+					return nil, err
+				}
+			}
+			poolAccounts = filterAsyncImageRetryAccounts(ctx, filterImageAccountPoolGroupRequirements(ctx, *groupID, poolAccounts))
+			configured = true
+		}
 		if configured {
 			if len(poolAccounts) == 0 {
 				return nil, ErrNoAvailableAccounts

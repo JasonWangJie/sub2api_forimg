@@ -886,6 +886,9 @@ func (s *OpenAIGatewayService) forwardOpenAIImagesAPIKey(
 			Kind:               "request_error",
 			Message:            safeErr,
 		})
+		if handleAsyncImageRetryTransportError(ctx, account) {
+			return nil, ErrAsyncImageRetryHandled
+		}
 		return nil, fmt.Errorf("upstream request failed: %s", safeErr)
 	}
 	if resp.StatusCode >= 400 {
@@ -893,6 +896,10 @@ func (s *OpenAIGatewayService) forwardOpenAIImagesAPIKey(
 		respBody := s.readUpstreamErrorBody(resp)
 		_ = resp.Body.Close()
 		respBody = s.redactAgentIdentitySensitiveBody(upstreamCtx, account, respBody)
+		if handleAsyncImageRetryHTTPError(ctx, account, resp.StatusCode, respBody) {
+			s.handleOpenAIAccountUpstreamError(upstreamCtx, account, resp.StatusCode, resp.Header, respBody, upstreamModel)
+			return nil, ErrAsyncImageRetryHandled
+		}
 		resp.Body = io.NopCloser(bytes.NewReader(respBody))
 		upstreamMsg := strings.TrimSpace(extractUpstreamErrorMessage(respBody))
 		upstreamMsg = sanitizeUpstreamErrorMessage(upstreamMsg)

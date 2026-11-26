@@ -26,6 +26,9 @@
             </span>
           </div>
           <div class="flex flex-wrap items-center justify-end gap-2">
+            <RouterLink v-if="admin" to="/admin/async-image-retry-rules" class="btn btn-secondary btn-sm">
+              {{ t('nav.adminAsyncImageRetryRules') }}
+            </RouterLink>
             <button
               v-if="admin"
               type="button"
@@ -371,6 +374,7 @@
               v-if="admin && canResume(detail)"
               type="button"
               class="btn btn-secondary btn-sm inline-flex items-center gap-1.5"
+              data-test="resume-detail"
               @click="askResume(detail)"
             >
               <Icon name="play" size="sm" />
@@ -438,6 +442,19 @@
           </dl>
 
           <AsyncImageAttemptHistory :attempts="detail.account_attempts || []" />
+        </section>
+
+        <section v-if="admin && detail.retry_policy_state" class="rounded-lg border border-amber-200 bg-amber-50 p-4 dark:border-amber-900/60 dark:bg-amber-950/30" data-test="retry-policy-state">
+          <div class="flex flex-wrap items-center justify-between gap-2">
+            <h4 class="section-title">{{ t(`retryRules.taskStates.${detail.retry_policy_state.status}`) }}</h4>
+            <RouterLink :to="{ path: '/admin/async-image-retry-rules', query: { event_id: detail.retry_policy_state.event_id } }" class="btn btn-secondary btn-sm">{{ t('retryRules.viewDecision') }}</RouterLink>
+          </div>
+          <dl class="mt-3 grid grid-cols-1 gap-x-8 gap-y-3 sm:grid-cols-2 lg:grid-cols-4">
+            <DetailRow :label="t('retryRules.stage')" :value="t(`retryRules.stages.${detail.retry_policy_state.stage}`, detail.retry_policy_state.stage)" />
+            <DetailRow v-if="detail.retry_policy_state.action" :label="t('retryRules.action')" :value="t(`retryRules.actions.${detail.retry_policy_state.action}`, detail.retry_policy_state.action)" />
+            <DetailRow v-if="detail.retry_policy_state.block_reason" :label="t('retryRules.blockReason')" :value="t(`retryRules.blockReasons.${detail.retry_policy_state.block_reason}`, detail.retry_policy_state.block_reason)" />
+            <DetailRow v-if="detail.retry_policy_state.due_at" :label="t('retryRules.queuedUntil')" :value="formatDateTime(detail.retry_policy_state.due_at)" />
+          </dl>
         </section>
 
         <AsyncImageCapacityDiagnostics v-if="admin" :admin="admin" :events="detail.events || []" />
@@ -892,7 +909,7 @@ function idFallback(value?: number | null): string {
 }
 
 function canResume(task: AsyncImageTask): boolean {
-  return task.can_resume === true || ['storage_failed', 'billing_failed'].includes(task.status)
+  return task.can_resume === true || task.retry_policy_state?.can_resume === true || ['storage_failed', 'billing_failed'].includes(task.status)
 }
 
 function canTerminate(task: AsyncImageTask): boolean {

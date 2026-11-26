@@ -178,6 +178,9 @@ func (s *GeminiMessagesCompatService) forwardClaudeBodyAsChatCompletions(
 				Kind:               "request_error",
 				Message:            safeErr,
 			})
+			if handleAsyncImageRetryTransportError(ctx, account) {
+				return nil, ErrAsyncImageRetryHandled
+			}
 			if attempt < maxAttempts {
 				logger.LegacyPrintf("service.gemini_chat_completions", "Gemini account %d: upstream request failed, retry %d/%d: %v", account.ID, attempt, maxAttempts, err)
 				sleepGeminiBackoff(attempt)
@@ -272,6 +275,9 @@ func (s *GeminiMessagesCompatService) forwardClaudeBodyAsChatCompletions(
 		// Skipped（池模式、或自定义错误码未命中）与 TempUnscheduled 已由策略层裁决完毕。
 		if policy == ErrorPolicyNone || policy == ErrorPolicyMatched {
 			s.handleGeminiUpstreamError(ctx, account, resp.StatusCode, resp.Header, respBody)
+		}
+		if handleAsyncImageRetryHTTPError(ctx, account, resp.StatusCode, evBody) {
+			return nil, ErrAsyncImageRetryHandled
 		}
 		if rejection := newAsyncImageRetryableRejectionForContext(ctx, resp.StatusCode, evBody, resp.Header); rejection != nil {
 			if status, errType, errMsg, matched := applyErrorPassthroughRule(c, account.Platform, resp.StatusCode, evBody,

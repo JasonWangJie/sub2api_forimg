@@ -16,8 +16,20 @@ const AsyncImageOutboxEventPostProcessingResume = "post_processing_resume"
 var ErrAsyncImagePostProcessingResumeNotAllowed = infraerrors.New(
 	http.StatusConflict,
 	"ASYNC_IMAGE_POST_PROCESSING_RESUME_NOT_ALLOWED",
-	"only failed storage or billing post-processing can be resumed",
+	"post-processing can resume from a recoverable held download, storage failure, or billing failure",
 )
+
+// CanResumeAsyncImageHeldDownload describes the current admin action. The
+// repository rechecks the hold and artifact expiry when it schedules recovery.
+func CanResumeAsyncImageHeldDownload(ctx context.Context, repo AsyncImageTaskRepository, taskID string) (bool, error) {
+	lookup, ok := repo.(interface {
+		CanResumeAsyncImageHeldDownload(context.Context, string) (bool, error)
+	})
+	if !ok {
+		return false, nil
+	}
+	return lookup.CanResumeAsyncImageHeldDownload(ctx, taskID)
+}
 
 // ListResults exposes result metadata to trusted application handlers without
 // exposing the repository itself. Callers must establish task ownership first.
@@ -29,8 +41,6 @@ func (s *AsyncImageTaskService) ListResults(ctx context.Context, taskID string) 
 }
 
 // ResumePostProcessing durably schedules the post-processing half of a task.
-// The outbox row is written before the state transition so a transient process
-// failure cannot leave a task looking active without a durable delivery record.
 // Workers must honor the payload mode and must never invoke the upstream again.
 func (s *AsyncImageTaskService) ResumePostProcessing(ctx context.Context, taskID string) (*AsyncImageTaskDetails, error) {
 	if s == nil || s.repo == nil {
@@ -49,6 +59,20 @@ func (s *AsyncImageTaskService) ResumePostProcessing(ctx context.Context, taskID
 	var targetStatus string
 	var progress int
 	switch task.Status {
+	case AsyncImageTaskStatusUpstreamSucceeded:
+		if _, ok := s.repo.(asyncImageRetryPostProcessingRepository); !ok {
+			return nil, ErrAsyncImagePostProcessingResumeNotAllowed
+		}
+		canResume, err := CanResumeAsyncImageHeldDownload(ctx, s.repo, task.TaskID)
+		if err != nil {
+			return nil, err
+		}
+		if !canResume {
+			return nil, ErrAsyncImagePostProcessingResumeNotAllowed
+		}
+		// Keep the download phase until the persisted result has been retrieved.
+		targetStatus = task.Status
+		progress = task.Progress
 	case AsyncImageTaskStatusStorageFailed:
 		targetStatus = AsyncImageTaskStatusUploading
 		progress = 70
@@ -67,14 +91,12 @@ func (s *AsyncImageTaskService) ResumePostProcessing(ctx context.Context, taskID
 	if err != nil {
 		return nil, err
 	}
-	if err := s.repo.EnqueueAsyncImageOutbox(ctx, AsyncImageOutboxEntry{
+	outbox := AsyncImageOutboxEntry{
 		TaskID:      task.TaskID,
 		EventType:   AsyncImageOutboxEventPostProcessingResume,
 		DedupKey:    fmt.Sprintf("%s:post-processing-resume:%d", task.TaskID, task.Version),
 		Payload:     payload,
 		AvailableAt: time.Now().UTC(),
-	}); err != nil {
-		return nil, err
 	}
 
 	transition := AsyncImageTaskTransition{
@@ -92,12 +114,18 @@ func (s *AsyncImageTaskService) ResumePostProcessing(ctx context.Context, taskID
 		billingStatus := AsyncImageBillingStatusPrepared
 		transition.BillingStatus = &billingStatus
 	}
-	if _, err := s.Transition(ctx, transition); err != nil {
-		// The outbox is already durable. A racing worker may have advanced the
-		// task before this request updates it, so return the current state when
-		// it has entered the expected post-processing phase.
+	if repo, ok := s.repo.(asyncImageRetryPostProcessingRepository); ok {
+		_, err = repo.ResumeAsyncImageRetryPostProcessing(ctx, transition, outbox)
+	} else {
+		if err := s.repo.EnqueueAsyncImageOutbox(ctx, outbox); err != nil {
+			return nil, err
+		}
+		_, err = s.Transition(ctx, transition)
+	}
+	if err != nil {
+		// A racing worker or administrator may have already resumed the task.
 		current, getErr := s.GetForAdmin(ctx, task.TaskID)
-		if getErr == nil && current != nil && current.Task != nil && current.Task.Status == targetStatus {
+		if getErr == nil && current != nil && current.Task != nil && current.Task.Status == targetStatus && current.Task.Version > task.Version {
 			return current, nil
 		}
 		return nil, err

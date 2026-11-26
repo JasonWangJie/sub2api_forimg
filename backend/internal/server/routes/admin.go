@@ -77,6 +77,7 @@ func RegisterAdminRoutes(
 		registerBackupRoutes(admin, h, stepUpAuth)
 
 		registerAsyncImageTaskCenterRoutes(admin, h)
+		registerAsyncImageRetryRoutes(admin, h)
 		registerImageLibraryRoutes(admin, h)
 
 		// 运维监控（Ops）
@@ -169,6 +170,23 @@ func registerAsyncImageTaskCenterRoutes(admin *gin.RouterGroup, h *handler.Handl
 		tasks.POST("/:task_id/resume", h.Admin.AsyncImageTasks.ResumePostProcessing)
 		tasks.POST("/:task_id/terminate", h.Admin.AsyncImageTasks.TerminateAsFailed)
 	}
+}
+
+func registerAsyncImageRetryRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
+	center := h.Admin.AsyncImageTasks
+	if center == nil {
+		return
+	}
+	rules := admin.Group("/async-image-retry-rules")
+	rules.GET("", center.GetRetryPolicy)
+	rules.PUT("", center.SaveRetryPolicy)
+	rules.POST("/preview", func(c *gin.Context) { center.PreviewRetryPolicy(c, h.DurableAsyncImage) })
+	rules.GET("/samples", center.ListRetrySamples)
+	rules.GET("/samples/:fingerprint/events", center.ListRetrySampleEvents)
+	rules.GET("/events/:id", center.GetRetryEvent)
+	rules.GET("/versions", center.ListRetryVersions)
+	rules.GET("/versions/:revision", center.GetRetryVersion)
+	rules.POST("/rollback", center.RollbackRetryPolicy)
 }
 
 func registerPromptAuditRoutes(admin *gin.RouterGroup, h *handler.Handlers) {

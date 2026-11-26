@@ -184,7 +184,7 @@ export default {
     resume: {
       action: 'Resume post-processing',
       title: 'Resume task post-processing',
-      message: 'Resume storage or billing for task {id}? The upstream image request will not be sent again.',
+      message: 'Resume download, storage, or billing for task {id}? The upstream image request will not be sent again.',
       success: 'Task post-processing resumed',
     },
     terminate: {

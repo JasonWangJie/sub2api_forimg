@@ -122,7 +122,7 @@ func asyncImageRemainingUpstreamAttempts(task *service.AsyncImageTask) int {
 
 func asyncImageTaskDeadline(task *service.AsyncImageTask) time.Time {
 	if task == nil || task.SubmittedAt.IsZero() {
-		return time.Now().Add(30 * time.Minute)
+		return time.Now().Add(service.AsyncImageGenerationTimeBudget)
 	}
-	return task.SubmittedAt.Add(30 * time.Minute)
+	return task.SubmittedAt.Add(service.AsyncImageGenerationTimeBudget)
 }
